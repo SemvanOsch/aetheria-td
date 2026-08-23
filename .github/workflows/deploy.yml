@@ -34,6 +34,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Enables Pages via the API if it isn't on yet, avoiding the
+      # "Ensure GitHub Pages has been enabled" 404 on the first deploy.
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
       - name: Build
         run: npm run build
 
