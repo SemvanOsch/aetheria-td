@@ -3254,16 +3254,599 @@ export function drawIronWarden(
   ctx.restore();
 }
 
+/**
+ * Small glowing spell-orb crowning a staff — a soft outer halo, a mid ring and a
+ * bright core, ringed by a gold ferrule. Drawn in local space centred on
+ * (`x`,`y`); shared by the Royal Mage's three views so the orb reads the same
+ * from every heading.
+ */
+function drawStaffOrb(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  const orb = '#9fe8ff';
+  ctx.save();
+  ctx.globalAlpha = 0.35; // soft halo
+  ctx.fillStyle = orb;
+  ctx.beginPath();
+  ctx.arc(x, y, 4.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#3aa6d8'; // mid body
+  ctx.beginPath();
+  ctx.arc(x, y, 2.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e9fbff'; // bright core
+  ctx.beginPath();
+  ctx.arc(x - 0.6, y - 0.6, 1.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#e8c15a'; // gold ferrule claws holding the orb
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(x, y, 3.1, Math.PI * 0.15, Math.PI * 0.85);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Procedural Royal Wizard silhouette — a robed court mage gliding along the path
+ * in a bell-shaped robe, pointed hat and white beard, a glowing spell-staff in
+ * hand. Painted in the caller's local space (feet near y=+12, head near y=-16).
+ * Same three authored views as the footmen ('side' mirrored on `faceLeft`,
+ * 'front', 'back'); the robe hides most of the stride, so the legs read as two
+ * boots peeking under a swaying hem while the upper body bobs. `phase` (radians)
+ * is the walk-cycle position advanced from distance travelled. Replaces the
+ * emoji token for the Castle mage (`cas_mage`).
+ */
+export function drawRoyalMage(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  view: 'side' | 'front' | 'back',
+  faceLeft: boolean,
+  phase: number,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (view === 'side' && faceLeft) ctx.scale(-1, 1);
+
+  const robe = color;
+  const robeLit = shade(color, 0.22);
+  const robeDark = shade(color, -0.32);
+  const gold = '#e8c15a';
+  const skin = '#e8c39c';
+  const beard = '#eef0f2';
+  const boot = '#2f2620';
+  const wood = '#6e4a26';
+
+  const swing = Math.sin(phase); // -1..1 step
+  const bob = Math.abs(Math.sin(phase)); // 0..1 vertical bob
+  const sway = swing * 1.1; // hem drift
+
+  if (view === 'side') {
+    // --- Profile (walking along the row) ---
+    // Two boots peek under the robe, one stepping ahead of the other.
+    const s = swing * 2.4;
+    ctx.strokeStyle = boot;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(1.2, 9);
+    ctx.lineTo(1.2 + s, 12.5);
+    ctx.moveTo(-1.2, 9);
+    ctx.lineTo(-1.2 - s, 12.5);
+    ctx.stroke();
+
+    ctx.save();
+    ctx.translate(0, -bob * 0.9); // upper body bobs with the stride
+
+    // Robe: a bell from the shoulders flaring to a swaying hem.
+    ctx.fillStyle = robe;
+    ctx.beginPath();
+    ctx.moveTo(-4, -8);
+    ctx.quadraticCurveTo(-8, 2, -7 + sway, 10.5);
+    ctx.quadraticCurveTo(0, 12.5, 7 + sway, 10.5);
+    ctx.quadraticCurveTo(8, 2, 4, -8);
+    ctx.quadraticCurveTo(0, -10, -4, -8);
+    ctx.closePath();
+    ctx.fill();
+    // Lit front panel for volume.
+    ctx.fillStyle = robeLit;
+    ctx.beginPath();
+    ctx.moveTo(1, -8);
+    ctx.quadraticCurveTo(6, 1, 6 + sway, 10);
+    ctx.quadraticCurveTo(2.5, 11.4, 2, 10);
+    ctx.quadraticCurveTo(2.4, 1, 1, -8);
+    ctx.closePath();
+    ctx.fill();
+    // Gold hem trim + a sash across the waist.
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(-7 + sway, 10.2);
+    ctx.quadraticCurveTo(0, 12.1, 7 + sway, 10.2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-5, -1);
+    ctx.quadraticCurveTo(0, 1, 6, -1.5);
+    ctx.stroke();
+
+    // Staff planted in the front hand, tilted forward, orb aloft.
+    ctx.strokeStyle = wood;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(4.5, 12);
+    ctx.lineTo(7.5, -18);
+    ctx.stroke();
+    drawStaffOrb(ctx, 7.9, -20);
+
+    // Head + skin, white beard hanging down, pointed hat swept back.
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.arc(1.6, -11.5, 3.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = beard; // beard tapering to a point over the chest
+    ctx.beginPath();
+    ctx.moveTo(-1.4, -10.5);
+    ctx.quadraticCurveTo(-0.5, -3, 1.2, -2);
+    ctx.quadraticCurveTo(3.2, -4, 4, -9.5);
+    ctx.closePath();
+    ctx.fill();
+    // Pointed hat: a wide brim and a long cone tipping back with a gold band.
+    ctx.fillStyle = robeDark;
+    ctx.beginPath();
+    ctx.ellipse(1.4, -13.6, 5.6, 1.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = robe;
+    ctx.beginPath();
+    ctx.moveTo(-2.6, -13.8);
+    ctx.lineTo(-9, -25); // cone tips backward
+    ctx.quadraticCurveTo(-3, -19, 4.6, -13.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-2.4, -14.3);
+    ctx.quadraticCurveTo(1.2, -15.6, 4.2, -14.3);
+    ctx.stroke();
+
+    ctx.restore();
+    ctx.restore();
+    return;
+  }
+
+  // --- Front / back (marching toward or away from the viewer) ---
+  const back = view === 'back';
+  // Boots step in place, each lifting on its half of the cycle, peeking out.
+  const liftL = Math.max(0, swing) * 2;
+  const liftR = Math.max(0, -swing) * 2;
+  ctx.strokeStyle = boot;
+  ctx.lineWidth = 3.2;
+  ctx.beginPath();
+  ctx.moveTo(-2.4, 9.5);
+  ctx.lineTo(-2.4, 12.5 - liftL);
+  ctx.moveTo(2.4, 9.5);
+  ctx.lineTo(2.4, 12.5 - liftR);
+  ctx.stroke();
+
+  ctx.save();
+  ctx.translate(0, -bob * 0.8);
+
+  // Robe bell, symmetric, hem swaying as one.
+  ctx.fillStyle = back ? robeDark : robe;
+  ctx.beginPath();
+  ctx.moveTo(-4.5, -8);
+  ctx.quadraticCurveTo(-8.5, 2, -7.5 + sway, 11);
+  ctx.quadraticCurveTo(0, 12.8, 7.5 + sway, 11);
+  ctx.quadraticCurveTo(8.5, 2, 4.5, -8);
+  ctx.quadraticCurveTo(0, -10, -4.5, -8);
+  ctx.closePath();
+  ctx.fill();
+
+  if (back) {
+    // Spine seam and a couple of folds so the back reads with depth.
+    ctx.strokeStyle = shade(color, -0.48);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, -7.5);
+    ctx.lineTo(sway, 11);
+    ctx.moveTo(-3.8, -4);
+    ctx.quadraticCurveTo(-3, 4, -3.6 + sway, 10.5);
+    ctx.moveTo(3.8, -4);
+    ctx.quadraticCurveTo(3, 4, 3.6 + sway, 10.5);
+    ctx.stroke();
+  } else {
+    // Centre highlight + gold hem and sash from the front.
+    ctx.fillStyle = robeLit;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 2.2, 7.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(-7.5 + sway, 10.6);
+    ctx.quadraticCurveTo(0, 12.4, 7.5 + sway, 10.6);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-5, -1);
+    ctx.quadraticCurveTo(0, 1.2, 5, -1);
+    ctx.stroke();
+  }
+
+  // Staff upright on the near side (a slim shaft from behind), orb on top.
+  ctx.strokeStyle = wood;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(back ? 6.5 : -6, 11);
+  ctx.lineTo(back ? 6.5 : -6, -17);
+  ctx.stroke();
+  drawStaffOrb(ctx, back ? 6.5 : -6, -19);
+
+  // Head — face, white beard and hat toward us; hat cone + brim from behind.
+  if (back) {
+    // Back of the head: a skin nape with white hair spilling under the brim, so
+    // the figure isn't a floating hat over bare shoulders.
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.arc(0, -11.5, 3.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = beard; // hair fanning onto the shoulders
+    ctx.beginPath();
+    ctx.moveTo(-3.4, -12);
+    ctx.quadraticCurveTo(-4, -8, -2.6, -7);
+    ctx.quadraticCurveTo(0, -8.5, 2.6, -7);
+    ctx.quadraticCurveTo(4, -8, 3.4, -12);
+    ctx.quadraticCurveTo(0, -10, -3.4, -12);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = robeDark; // brim
+    ctx.beginPath();
+    ctx.ellipse(0, -13.4, 5.8, 1.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = robe; // cone
+    ctx.beginPath();
+    ctx.moveTo(-4, -13.6);
+    ctx.lineTo(0, -25.5);
+    ctx.lineTo(4, -13.6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-3.4, -14.4);
+    ctx.quadraticCurveTo(0, -15.6, 3.4, -14.4);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.arc(0, -11.5, 3.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2a2230'; // eyes
+    ctx.beginPath();
+    ctx.arc(-1.3, -11.8, 0.7, 0, Math.PI * 2);
+    ctx.arc(1.3, -11.8, 0.7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = beard; // full beard fanning over the chest
+    ctx.beginPath();
+    ctx.moveTo(-3, -10);
+    ctx.quadraticCurveTo(-2.4, -2.5, 0, -1.5);
+    ctx.quadraticCurveTo(2.4, -2.5, 3, -10);
+    ctx.quadraticCurveTo(0, -8, -3, -10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = robeDark; // brim
+    ctx.beginPath();
+    ctx.ellipse(0, -13.6, 5.8, 1.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = robe; // cone
+    ctx.beginPath();
+    ctx.moveTo(-4, -13.8);
+    ctx.lineTo(0.6, -26);
+    ctx.lineTo(4, -13.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = gold; // band
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-3.4, -14.6);
+    ctx.quadraticCurveTo(0.2, -15.8, 3.6, -14.6);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+  ctx.restore();
+}
+
+/**
+ * The Night Falcons' gold sigil — a stylised spread-winged falcon — stamped on
+ * Gowzer's chest and hood. Drawn in local space centred on (`x`,`y`), scaled by
+ * `s`, in `color`; shared across his three views so the mark reads the same.
+ */
+function drawFalconSigil(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  s: number,
+  color: string,
+): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(s, s);
+  ctx.fillStyle = color;
+  // Swept wings spreading from a central body.
+  ctx.beginPath();
+  ctx.moveTo(0, -0.4);
+  ctx.quadraticCurveTo(-3, -1.9, -4.2, 0.2);
+  ctx.quadraticCurveTo(-2.2, -0.4, 0, 0.9);
+  ctx.quadraticCurveTo(2.2, -0.4, 4.2, 0.2);
+  ctx.quadraticCurveTo(3, -1.9, 0, -0.4);
+  ctx.closePath();
+  ctx.fill();
+  // Head/body node.
+  ctx.beginPath();
+  ctx.arc(0, -0.5, 0.8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/**
+ * Procedural Gowzer silhouette — a low-ranking Night Falcon: a hooded rogue in
+ * dark robes edged with gold, a shadowed face lit only by gold eyes, the order's
+ * falcon sigil on his chest and a curved dagger in hand. Painted in the caller's
+ * local space at a modest `1.15×` (a shade bigger than the grunts, small fry as
+ * bosses go). Same three authored views as the footmen ('side' mirrored on
+ * `faceLeft`, 'front', 'back'); `phase` (radians) is the walk-cycle position
+ * advanced from distance travelled. Boss `boss4`.
+ */
+export function drawGowzer(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  view: 'side' | 'front' | 'back',
+  faceLeft: boolean,
+  phase: number,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (view === 'side' && faceLeft) ctx.scale(-1, 1);
+  ctx.scale(1.15, 1.15); // small fry — only a little bigger than the grunts
+
+  const robe = color;
+  const robeLit = shade(color, 0.28);
+  const robeDark = shade(color, -0.4);
+  const gold = '#d9b24a';
+  const goldLit = '#f2d67e';
+  const steel = '#c9d2dc';
+  const boot = '#1a1016';
+  const eye = '#ffcf4d'; // gold glare from the hood's shadow
+  const faceShadow = '#0a0308';
+
+  const swing = Math.sin(phase);
+  const bob = Math.abs(Math.sin(phase));
+
+  if (view === 'side') {
+    // --- Profile (walking along the row) ---
+    const s = swing * 3.4;
+    ctx.strokeStyle = boot;
+    ctx.lineWidth = 3.4;
+    ctx.beginPath();
+    ctx.moveTo(1, 4);
+    ctx.lineTo(1 + s, 12);
+    ctx.moveTo(-1, 4);
+    ctx.lineTo(-1 - s, 12);
+    ctx.stroke();
+
+    ctx.save();
+    ctx.translate(0, -bob * 1.1); // stealthy bob
+
+    // Short cape streaming off the rear shoulder.
+    ctx.fillStyle = robeDark;
+    ctx.beginPath();
+    ctx.moveTo(-1.5, -6);
+    ctx.quadraticCurveTo(-9 - bob * 2, -2, -7 - bob * 2, 8);
+    ctx.quadraticCurveTo(-4, 5, -1.5, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = gold; // trailing gold hem
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-9 - bob * 2, -2);
+    ctx.quadraticCurveTo(-8.5 - bob * 2, 3, -7 - bob * 2, 8);
+    ctx.stroke();
+
+    // Robe torso, flaring slightly to a gold-hemmed skirt.
+    ctx.fillStyle = robe;
+    ctx.beginPath();
+    ctx.moveTo(0, -8);
+    ctx.quadraticCurveTo(6.5, -5, 6, 6);
+    ctx.quadraticCurveTo(0, 8.5, -6, 6);
+    ctx.quadraticCurveTo(-6.5, -5, 0, -8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = robeLit; // lit front edge
+    ctx.beginPath();
+    ctx.moveTo(0.5, -8);
+    ctx.quadraticCurveTo(5.5, -4, 5, 6);
+    ctx.quadraticCurveTo(2.6, 7, 2.2, 6);
+    ctx.quadraticCurveTo(2.8, -4, 0.5, -8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = gold; // sash at the waist
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.moveTo(-5, 2.4);
+    ctx.quadraticCurveTo(0, 4.2, 5.6, 2.4);
+    ctx.stroke();
+    drawFalconSigil(ctx, 3.4, -2.5, 0.62, gold); // sigil on the chest
+
+    // Hood: a dark cowl peaking back over the head, its opening a shadowed face
+    // with a single gold eye glinting out.
+    ctx.fillStyle = robeDark;
+    ctx.beginPath();
+    ctx.moveTo(-3, -6.5);
+    ctx.quadraticCurveTo(-5.5, -15, -1, -17.5);
+    ctx.quadraticCurveTo(5.5, -18, 5.5, -11);
+    ctx.quadraticCurveTo(5.5, -8.5, 3.5, -7);
+    ctx.quadraticCurveTo(0, -8.5, -3, -6.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = faceShadow; // shadowed face opening
+    ctx.beginPath();
+    ctx.ellipse(3, -11.4, 2.4, 2.9, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = eye; // gold eye
+    ctx.beginPath();
+    ctx.ellipse(3.4, -11.6, 0.9, 0.7, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = gold; // gold rim tracing the hood edge
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-1, -17.4);
+    ctx.quadraticCurveTo(5.4, -17.8, 5.4, -11.2);
+    ctx.stroke();
+
+    ctx.restore();
+    ctx.restore();
+    return;
+  }
+
+  // --- Front / back (marching toward or away from the viewer) ---
+  const back = view === 'back';
+  const liftL = Math.max(0, swing) * 2.4;
+  const liftR = Math.max(0, -swing) * 2.4;
+  ctx.strokeStyle = boot;
+  ctx.lineWidth = 3.4;
+  ctx.beginPath();
+  ctx.moveTo(-2.4, 4);
+  ctx.lineTo(-2.4, 12 - liftL);
+  ctx.moveTo(2.4, 4);
+  ctx.lineTo(2.4, 12 - liftR);
+  ctx.stroke();
+
+  ctx.save();
+  ctx.translate(0, -bob * 0.9);
+
+  // Robe body, symmetric, flaring to a gold-hemmed skirt.
+  ctx.fillStyle = back ? robeDark : robe;
+  ctx.beginPath();
+  ctx.moveTo(-4.5, -7.5);
+  ctx.quadraticCurveTo(-7.5, 0, -7, 9);
+  ctx.quadraticCurveTo(0, 11, 7, 9);
+  ctx.quadraticCurveTo(7.5, 0, 4.5, -7.5);
+  ctx.quadraticCurveTo(0, -9.5, -4.5, -7.5);
+  ctx.closePath();
+  ctx.fill();
+
+  if (back) {
+    // Cape down the back, gold spine seam.
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(0, -7);
+    ctx.lineTo(0, 9);
+    ctx.stroke();
+    ctx.strokeStyle = shade(color, -0.55);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-3.4, -4);
+    ctx.quadraticCurveTo(-3, 3, -3.4, 8.5);
+    ctx.moveTo(3.4, -4);
+    ctx.quadraticCurveTo(3, 3, 3.4, 8.5);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = robeLit; // centre highlight
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 2, 6.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = gold; // hem + sash
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(-6.6, 8.6);
+    ctx.quadraticCurveTo(0, 10.4, 6.6, 8.6);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-4.6, 2);
+    ctx.quadraticCurveTo(0, 3.6, 4.6, 2);
+    ctx.stroke();
+    drawFalconSigil(ctx, 0, -2.5, 0.7, gold); // sigil on the chest
+    // Curved dagger held out to one side.
+    ctx.strokeStyle = steel;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(-6, 3);
+    ctx.quadraticCurveTo(-9.5, 1, -10, -3);
+    ctx.stroke();
+  }
+
+  // Hood — a dark peaked cowl. From the front, a shadowed face with two gold
+  // eyes; from behind, the back of the cowl over a shadowed nape (never a bare
+  // hood: the head must read under it).
+  if (back) {
+    ctx.fillStyle = faceShadow; // nape in the hood's shadow
+    ctx.beginPath();
+    ctx.arc(0, -11, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = robeDark; // cowl
+    ctx.beginPath();
+    ctx.moveTo(-5, -8.5);
+    ctx.quadraticCurveTo(-5, -18.5, 0, -19.5);
+    ctx.quadraticCurveTo(5, -18.5, 5, -8.5);
+    ctx.quadraticCurveTo(0, -10.5, -5, -8.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = gold; // gold rim
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-4.6, -9);
+    ctx.quadraticCurveTo(0, -11, 4.6, -9);
+    ctx.stroke();
+    drawFalconSigil(ctx, 0, -14.5, 0.55, gold); // sigil on the hood crown
+  } else {
+    ctx.fillStyle = robeDark; // cowl framing the face
+    ctx.beginPath();
+    ctx.moveTo(-5, -8);
+    ctx.quadraticCurveTo(-5.4, -18.5, 0, -19.5);
+    ctx.quadraticCurveTo(5.4, -18.5, 5, -8);
+    ctx.quadraticCurveTo(3.4, -9.5, 3.2, -12);
+    ctx.quadraticCurveTo(0, -13, -3.2, -12);
+    ctx.quadraticCurveTo(-3.4, -9.5, -5, -8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = faceShadow; // shadowed face opening
+    ctx.beginPath();
+    ctx.ellipse(0, -12, 2.9, 3.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = eye; // two gold eyes
+    ctx.beginPath();
+    ctx.ellipse(-1.3, -12.3, 0.85, 0.7, 0, 0, Math.PI * 2);
+    ctx.ellipse(1.3, -12.3, 0.85, 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = gold; // gold rim tracing the hood opening
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-4.4, -9);
+    ctx.quadraticCurveTo(-5, -17.5, 0, -18.5);
+    ctx.quadraticCurveTo(5, -17.5, 4.4, -9);
+    ctx.stroke();
+    ctx.fillStyle = goldLit; // a small gold clasp at the throat
+    ctx.beginPath();
+    ctx.arc(0, -7.5, 1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+  ctx.restore();
+}
+
 /** Enemy ids that have a procedural walk sprite (else the emoji token is used). */
 export function hasEnemySprite(id: string): boolean {
   return (
     id === 'cas_grunt' ||
     id === 'cas_grunt2' ||
     id === 'cas_runner' ||
+    id === 'cas_mage' ||
     id === 'cas_brute' ||
     id === 'boss1' ||
     id === 'boss2' ||
     id === 'boss3' ||
+    id === 'boss4' ||
     id === 'boss5'
   );
 }
@@ -3287,9 +3870,11 @@ export function drawEnemySprite(
   if (id === 'boss1') drawCaptain(ctx, color, view, faceLeft, dist * 0.2);
   else if (id === 'boss2') drawMercenary(ctx, color, view, faceLeft, dist * 0.19);
   else if (id === 'boss3') drawIronWarden(ctx, color, view, faceLeft, dist * 0.16);
+  else if (id === 'boss4') drawGowzer(ctx, color, view, faceLeft, dist * 0.22);
   else if (id === 'cas_grunt') drawGrunt(ctx, color, view, faceLeft, dist * 0.22);
   else if (id === 'cas_grunt2') drawGrunt2(ctx, color, view, faceLeft, dist * 0.2);
   else if (id === 'cas_runner') drawOutrider(ctx, color, view, faceLeft, dist * 0.28);
+  else if (id === 'cas_mage') drawRoyalMage(ctx, color, view, faceLeft, dist * 0.2);
   else if (id === 'cas_brute') drawSiegeRam(ctx, color, view, faceLeft, dist * 0.2);
   else if (id === 'boss5') drawKing(ctx, color, view, faceLeft, dist * 0.16, sit);
 }

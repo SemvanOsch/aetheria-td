@@ -186,7 +186,7 @@ function EnemyDetail({ def, onClose }: { def: EnemyDef; onClose: () => void }) {
 
         <div className="enemy-section">Lore</div>
         <p className="enemy-lore">
-          {def.lore ?? 'The archivists have yet to record this creature’s tale…'}
+          {def.lore ?? 'The archivists have yet to record this tale…'}
         </p>
       </div>
     </div>,

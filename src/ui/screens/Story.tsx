@@ -1,6 +1,10 @@
 import type { CSSProperties } from 'react';
 import { useGame } from '../../application/gameContext';
-import { completedCount, isLevelUnlocked } from '../../application/gameState';
+import {
+  completedCount,
+  isLevelUnlocked,
+  REPLAY_GEM_REWARD,
+} from '../../application/gameState';
 import {
   SECTIONS,
   getSection,
@@ -37,30 +41,37 @@ function SectionList({ onSelectSection }: { onSelectSection: (id: SectionId) => 
       <div className="level-list">
         {SECTIONS.map((sec) => {
           const levels = levelsForSection(sec.id);
-          const unlocked = isLevelUnlocked(state, levels[0].id);
+          // A WIP chapter is shown locked ("coming soon") no matter the player's
+          // progress; otherwise it unlocks by clearing the previous chapter.
+          const enterable = !sec.wip && isLevelUnlocked(state, levels[0].id);
           const done = completedCount(state, levels.map((l) => l.id));
           const style = { '--accent': sec.color } as CSSProperties;
           return (
             <button
               key={sec.id}
-              className={`panel level-card section-card ${unlocked ? '' : 'locked'}`}
+              className={`panel level-card section-card ${enterable ? '' : 'locked'}`}
               style={style}
-              disabled={!unlocked}
-              onClick={() => unlocked && onSelectSection(sec.id)}
+              disabled={!enterable}
+              onClick={() => enterable && onSelectSection(sec.id)}
             >
-              <div className="num">{unlocked ? sec.icon : '🔒'}</div>
+              <div className="num">{enterable ? sec.icon : '🔒'}</div>
               <div className="meta">
                 <h3>{sec.name}</h3>
                 <p>{sec.subtitle}</p>
                 <div className="badges">
                   <span className="chip">{levels.length} levels</span>
-                  <span className={`chip ${done === levels.length ? 'done' : ''}`}>
-                    {done} / {levels.length} cleared
-                  </span>
-                  {!unlocked && <span className="chip">Clear the previous chapter to unlock</span>}
+                  {!sec.wip && (
+                    <span className={`chip ${done === levels.length ? 'done' : ''}`}>
+                      {done} / {levels.length} cleared
+                    </span>
+                  )}
+                  {sec.wip && <span className="chip">🚧 Coming soon</span>}
+                  {!sec.wip && !enterable && (
+                    <span className="chip">Clear the previous chapter to unlock</span>
+                  )}
                 </div>
               </div>
-              {unlocked && <div className="section-go">▶</div>}
+              {enterable && <div className="section-go">▶</div>}
             </button>
           );
         })}
@@ -116,7 +127,9 @@ function SectionLevels({
                 <div className="badges">
                   <span className="chip">{levelTotalWaves(lvl)} waves</span>
                   <span className="chip">Start 🪙{lvl.startingGold}</span>
-                  <span className="chip">Reward 💎{lvl.gemReward}</span>
+                  <span className="chip">
+                    Reward 💎{done ? REPLAY_GEM_REWARD : lvl.gemReward}
+                  </span>
                   <span className="chip boss-chip">{boss.visual.icon} {boss.name}</span>
                   {done && <span className="chip done">✓ Cleared</span>}
                 </div>

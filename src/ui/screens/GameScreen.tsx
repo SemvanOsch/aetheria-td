@@ -3,6 +3,7 @@ import { useGame } from '../../application/gameContext';
 import {
   effectiveMasteryUpgradesFor,
   resolvedMasteryUpgrades,
+  REPLAY_GEM_REWARD,
 } from '../../application/gameState';
 import { getLevel } from '../../domain/levels';
 import {
@@ -688,8 +689,8 @@ function ResultCard({
           <div style={{ color: '#6fd6ff' }}>Realm reward · 💎{gemReward}</div>
         )}
         {won && !firstClear && (
-          <div style={{ fontSize: 14, color: 'var(--text-dim)', fontWeight: 500 }}>
-            Realm already cleared — no bonus gems
+          <div style={{ color: '#6fd6ff' }}>
+            Replay reward · 💎{REPLAY_GEM_REWARD}
           </div>
         )}
       </div>

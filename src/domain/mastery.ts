@@ -301,17 +301,17 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
       id: 'better_soil',
       name: 'Better Soil',
       description:
-        'Richer earth yields 10% more gold from every harvest. Only one farming path can be active at a time — swap freely once both are learned.',
+        'Richer earth yields 20% more gold from every harvest.',
       cost: 100,
       major: true,
       exclusiveGroup: 'farming',
-      generateMult: 1.1,
+      generateMult: 1.2,
     },
     {
       id: 'fresh_food',
       name: 'Fresh Food',
       description:
-        'Well-fed troops march sooner — start every stage with 🪙50 more gold while this champion is on your team. Only one farming path can be active at a time — swap freely once both are learned.',
+        'Well-fed troops march sooner — start every stage with 🪙50 more gold while this champion is on your team.',
       cost: 100,
       major: true,
       exclusiveGroup: 'farming',

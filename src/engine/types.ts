@@ -52,6 +52,17 @@ export interface Enemy {
    */
   rise: number;
   /**
+   * Spawn-speech state. `speechIndex` starts at -1 ("walking in, not yet spoken")
+   * so the enemy first advances onto the board; once it has walked in it flips to
+   * 0 and delivers each line of `def.spawnLines` in turn (`speechTimer` = seconds
+   * left on the current line). While `speechIndex` is a valid index the enemy
+   * stays put and can't be hit — it's delivering its intro (Gowzer) — and the
+   * renderer floats the current line above it. For silent enemies `def.spawnLines`
+   * is undefined, so `isSpeaking` is always false regardless of these values.
+   */
+  speechIndex: number;
+  speechTimer: number;
+  /**
    * Dodge-weave animation timer, counting down over `DODGE_ANIM_TIME`: set when
    * an evasive enemy (Garrick Vane) slips a hit, driving a quick cosmetic
    * sidestep in the renderer. 0 when not dodging; never affects the simulation.
@@ -64,6 +75,31 @@ export interface Enemy {
    * damage) and by the renderer (a glow pooled in the enemy's shadow).
    */
   wardReduction: number;
+  /**
+   * Death-animation state. When an enemy with a `def.deathAnimation` takes a
+   * lethal hit it doesn't vanish immediately: `dying` flips true and `deathT`
+   * counts up in seconds while the renderer plays the special death (Gowzer's
+   * fall-and-shadow-swallow). It stays in the enemy list (untargetable, frozen,
+   * no longer takes damage) so victory is withheld until the animation finishes;
+   * only then is it truly removed. `dying` is false for every ordinary enemy,
+   * which pops instantly on death as before.
+   */
+  dying: boolean;
+  deathT: number;
+}
+
+/** Whether an enemy is still delivering its spawn lines (frozen & untargetable). */
+export function isSpeaking(e: Enemy): boolean {
+  return (
+    !!e.def.spawnLines &&
+    e.speechIndex >= 0 &&
+    e.speechIndex < e.def.spawnLines.length
+  );
+}
+
+/** The line an enemy is currently speaking, or undefined if it isn't speaking. */
+export function currentSpeechLine(e: Enemy): string | undefined {
+  return isSpeaking(e) ? e.def.spawnLines![e.speechIndex] : undefined;
 }
 
 export interface Tower {

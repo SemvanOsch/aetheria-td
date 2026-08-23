@@ -21,12 +21,18 @@ export interface SectionDef {
   subtitle: string;
   icon: string;
   color: string;
+  /**
+   * Work in progress: the chapter is authored but not ready to play, so the UI
+   * shows it locked ("coming soon") and refuses to enter it, regardless of the
+   * player's unlock progress. Flip off to release the chapter.
+   */
+  wip?: boolean;
 }
 
 export const SECTIONS: SectionDef[] = [
   { id: 'castle', name: 'The Castle', subtitle: 'Hold the halls against the usurpers.', icon: '🏰', color: '#8fa6c8' },
-  { id: 'forest', name: 'The Forest', subtitle: 'Beasts and old growth stir in the deep wood.', icon: '🌲', color: '#5fd38a' },
-  { id: 'inn', name: 'The Inn', subtitle: 'Something foul brews beneath the tavern.', icon: '🍺', color: '#f2b23c' },
+  { id: 'forest', name: 'The Forest', subtitle: 'Beasts and old growth stir in the deep wood.', icon: '🌲', color: '#5fd38a', wip: true },
+  { id: 'inn', name: 'The Inn', subtitle: 'Something foul brews beneath the tavern.', icon: '🍺', color: '#f2b23c', wip: true },
 ];
 
 export function getSection(id: SectionId): SectionDef {
@@ -97,7 +103,7 @@ const DEFAULT_SPACING = 0.85;
 const STARTING_GOLD = 200;
 
 // Shorthand enemy ids per section.
-const CAS = { g: 'cas_grunt', g2: 'cas_grunt2', r: 'cas_runner', b: 'cas_brute' };
+const CAS = { g: 'cas_grunt', g2: 'cas_grunt2', r: 'cas_runner', b: 'cas_brute', m: 'cas_mage' };
 const FOR = { g: 'for_grunt', r: 'for_runner', b: 'for_brute' };
 const INN = { g: 'inn_grunt', r: 'inn_runner', b: 'inn_brute' };
 
@@ -144,7 +150,7 @@ const CASTLE_SPECS: LevelSpec[] = [
     id: 1,
     name: 'Castle Door',
     subtitle: "Your way into the castle - Guarded by Company 7",
-    baseHealth: 10, gem: 100,
+    baseHealth: 10, gem: 150,
     theme: {
       groundEven: '#568042',
       groundOdd: '#506c42',
@@ -174,7 +180,7 @@ const CASTLE_SPECS: LevelSpec[] = [
     id: 2,
     name: 'Dining Room',
     subtitle: 'Guards scramble from the feast to stop you.',
-    baseHealth: 10, gem: 100,
+    baseHealth: 10, gem: 150,
     theme: {
       groundEven: '#423a2e',
       groundOdd: '#4a4234',
@@ -204,7 +210,7 @@ const CASTLE_SPECS: LevelSpec[] = [
     id: 3,
     name: 'The Grand Hall',
     subtitle: 'Loyalists flood the hall to turn you back.',
-    baseHealth: 10, gem: 100,
+    baseHealth: 10, gem: 150,
     theme: {
       groundEven: '#2b3352',
       groundOdd: '#323a5c',
@@ -237,7 +243,7 @@ const CASTLE_SPECS: LevelSpec[] = [
     id: 4,
     name: "The King's Chamber",
     subtitle: 'Corner the corrupt king where he hides.',
-    baseHealth: 10, gem: 100,
+    baseHealth: 10, gem: 150,
     theme: {
       groundEven: '#2e2540',
       groundOdd: '#352b4a',
@@ -248,7 +254,7 @@ const CASTLE_SPECS: LevelSpec[] = [
       { kind: 'chest', col: 6, row: 0 },
       { kind: 'chest', col: 9, row: 0 },
       { kind: 'torch', col: 12, row: 2 },
-      { kind: 'torch', col: 4, row: 4 },
+      { kind: 'torch', col: 4, row: 3 },
       { kind: 'bookshelf', col: 13, row: 0 },
       { kind: 'weaponRack', col: 1, row: 0 },
       { kind: 'crate', col: 2, row: 7 },
@@ -257,11 +263,11 @@ const CASTLE_SPECS: LevelSpec[] = [
       {
         path: [{ col: 12, row: 10 }, { col: 12, row: 5 }, { col: 3, row: 5 }, { col: 3, row: -1 }],
         waves: [
-          { groups: [{ enemyId: CAS.b, count: 2 }, { enemyId: CAS.g, count: 5, delay: 1 }] },
-          { groups: [{ enemyId: CAS.r, count: 8, spacing: 0.5 }] },
-          { groups: [{ enemyId: CAS.b, count: 3 }, { enemyId: CAS.r, count: 4, delay: 1 }] },
-          { groups: [{ enemyId: CAS.g, count: 9, spacing: 0.5 }] },
-          bossWave(4, [{ enemyId: CAS.g2, count: 4 }, { enemyId: CAS.r, count: 4, delay: 1 }]),
+          { groups: [{ enemyId: CAS.g2, count: 3 }] },
+          { groups: [{ enemyId: CAS.g, count: 20, spacing: 1 }] },
+          { groups: [{ enemyId: CAS.g2, count: 3, spacing: 0.7 }, { enemyId: CAS.m, count: 3, delay: 3 }] },
+          { groups: [{ enemyId: CAS.g, count: 9, spacing: 0.5 }, { enemyId: CAS.r, count: 4 }, { enemyId: CAS.m, count: 2, delay: 2 }] },
+          bossWave(4, []),
         ],
       },
     ],
@@ -270,7 +276,7 @@ const CASTLE_SPECS: LevelSpec[] = [
     id: 5,
     name: 'Throne Room',
     subtitle: 'His throne, ringed by loyal guards.',
-    baseHealth: 10, gem: 100,
+    baseHealth: 10, gem: 150,
     theme: {
       groundEven: '#262230',
       groundOdd: '#2d2838',
@@ -290,11 +296,11 @@ const CASTLE_SPECS: LevelSpec[] = [
         // the boss's escort; the boss itself arrives on the throne lane below.
         path: [{ col: 3, row: 10 }, { col: 3, row: 6 }, { col: 13, row: 6 }, { col: 13, row: 3 }, { col: 16, row: 3 }],
         waves: [
-          { groups: [{ enemyId: CAS.b, count: 2 }, { enemyId: CAS.g, count: 5, delay: 1 }] },
+          { groups: [{ enemyId: CAS.g, count: 6 }, { enemyId: CAS.m, count: 3, delay: 4 }] },
           { groups: [{ enemyId: CAS.r, count: 8, spacing: 0.5 }] },
-          { groups: [{ enemyId: CAS.b, count: 3 }, { enemyId: CAS.r, count: 4, delay: 1 }] },
-          { groups: [{ enemyId: CAS.g2, count: 4 }, { enemyId: CAS.g, count: 6, delay: 1 }] },
-          { groups: [{ enemyId: CAS.g2, count: 3 }, { enemyId: CAS.r, count: 4, delay: 1 }] },
+          { groups: [{ enemyId: CAS.m, count: 3 }, { enemyId: CAS.g2, count: 4, delay: 1 }] },
+          { groups: [{ enemyId: CAS.g2, count: 12, spacing: 2 }] },
+          { groups: [{ enemyId: CAS.g, count: 3 }, { enemyId: CAS.m, count: 2, delay: 3 }] },
         ],
       },
       {
@@ -324,7 +330,7 @@ const FOREST_SPECS: LevelSpec[] = [
     name: 'Forest Edge',
     subtitle: 'The treeline comes alive.',
     path: [{ col: -1, row: 3 }, { col: 10, row: 3 }, { col: 10, row: 7 }, { col: 2, row: 7 }, { col: 2, row: 9 }, { col: 16, row: 9 }],
-    baseHealth: 10, gem: 100,
+    baseHealth: 10, gem: 150,
     waves: [
       { groups: [{ enemyId: FOR.g, count: 8 }] },
       { groups: [{ enemyId: FOR.r, count: 8 }, { enemyId: FOR.g, count: 6, delay: 1 }] },
@@ -338,7 +344,7 @@ const FOREST_SPECS: LevelSpec[] = [
     name: 'Tangled Paths',
     subtitle: 'The wood coils back on itself.',
     path: [{ col: -1, row: 6 }, { col: 6, row: 6 }, { col: 6, row: 1 }, { col: 12, row: 1 }, { col: 12, row: 8 }, { col: 16, row: 8 }],
-    baseHealth: 10, gem: 100,
+    baseHealth: 10, gem: 150,
     waves: [
       { groups: [{ enemyId: FOR.r, count: 10 }, { enemyId: FOR.g, count: 6, delay: 1 }] },
       { groups: [{ enemyId: FOR.b, count: 4 }, { enemyId: FOR.g, count: 8, delay: 1 }] },
@@ -352,7 +358,7 @@ const FOREST_SPECS: LevelSpec[] = [
     name: 'Spider Hollow',
     subtitle: 'Webs stretch across the ravine.',
     path: [{ col: -1, row: 9 }, { col: 4, row: 9 }, { col: 4, row: 2 }, { col: 9, row: 2 }, { col: 9, row: 9 }, { col: 13, row: 9 }, { col: 13, row: 4 }, { col: 16, row: 4 }],
-    baseHealth: 10, gem: 100,
+    baseHealth: 10, gem: 150,
     waves: [
       { groups: [{ enemyId: FOR.g, count: 12 }, { enemyId: FOR.r, count: 6, delay: 1 }] },
       { groups: [{ enemyId: FOR.b, count: 5 }, { enemyId: FOR.g, count: 10, delay: 1 }] },
@@ -367,7 +373,7 @@ const FOREST_SPECS: LevelSpec[] = [
     name: 'The Deep Wood',
     subtitle: 'Light barely reaches the floor.',
     path: [{ col: -1, row: 1 }, { col: 14, row: 1 }, { col: 14, row: 4 }, { col: 3, row: 4 }, { col: 3, row: 7 }, { col: 14, row: 7 }, { col: 14, row: 9 }, { col: 16, row: 9 }],
-    baseHealth: 10, gem: 100,
+    baseHealth: 10, gem: 150,
     waves: [
       { groups: [{ enemyId: FOR.r, count: 14 }, { enemyId: FOR.g, count: 8, delay: 1 }] },
       { groups: [{ enemyId: FOR.b, count: 6 }, { enemyId: FOR.g, count: 12, delay: 1 }] },
@@ -382,7 +388,7 @@ const FOREST_SPECS: LevelSpec[] = [
     name: 'Heart of the Grove',
     subtitle: 'Oakheart will not yield.',
     path: [{ col: -1, row: 4 }, { col: 3, row: 4 }, { col: 3, row: 8 }, { col: 7, row: 8 }, { col: 7, row: 2 }, { col: 11, row: 2 }, { col: 11, row: 8 }, { col: 15, row: 8 }, { col: 15, row: 2 }, { col: 16, row: 2 }],
-    baseHealth: 10, gem: 100,
+    baseHealth: 10, gem: 150,
     waves: [
       { groups: [{ enemyId: FOR.b, count: 5 }, { enemyId: FOR.g, count: 12, delay: 1 }] },
       { groups: [{ enemyId: FOR.r, count: 18, spacing: 0.45 }] },
@@ -401,7 +407,7 @@ const INN_SPECS: LevelSpec[] = [
     name: 'The Common Room',
     subtitle: 'The brawl spills out of the tavern.',
     path: [{ col: -1, row: 2 }, { col: 13, row: 2 }, { col: 13, row: 8 }, { col: 3, row: 8 }, { col: 3, row: 5 }, { col: 16, row: 5 }],
-    baseHealth: 10, gem: 100,
+    baseHealth: 10, gem: 150,
     waves: [
       { groups: [{ enemyId: INN.g, count: 10 }, { enemyId: INN.r, count: 6, delay: 1 }] },
       { groups: [{ enemyId: INN.b, count: 4 }, { enemyId: INN.g, count: 10, delay: 1 }] },
@@ -415,7 +421,7 @@ const INN_SPECS: LevelSpec[] = [
     name: 'The Cellars',
     subtitle: 'Down among the casks and cobwebs.',
     path: [{ col: -1, row: 7 }, { col: 5, row: 7 }, { col: 5, row: 2 }, { col: 10, row: 2 }, { col: 10, row: 7 }, { col: 15, row: 7 }, { col: 15, row: 2 }, { col: 16, row: 2 }],
-    baseHealth: 10, gem: 100,
+    baseHealth: 10, gem: 150,
     waves: [
       { groups: [{ enemyId: INN.r, count: 12 }, { enemyId: INN.g, count: 8, delay: 1 }] },
       { groups: [{ enemyId: INN.b, count: 5 }, { enemyId: INN.g, count: 10, delay: 1 }] },
@@ -430,7 +436,7 @@ const INN_SPECS: LevelSpec[] = [
     name: "Witch's Nook",
     subtitle: 'Madame Hex stirs her brew.',
     path: [{ col: -1, row: 9 }, { col: 2, row: 9 }, { col: 2, row: 3 }, { col: 6, row: 3 }, { col: 6, row: 9 }, { col: 10, row: 9 }, { col: 10, row: 3 }, { col: 14, row: 3 }, { col: 14, row: 9 }, { col: 16, row: 9 }],
-    baseHealth: 10, gem: 100,
+    baseHealth: 10, gem: 150,
     waves: [
       { groups: [{ enemyId: INN.b, count: 5 }, { enemyId: INN.g, count: 10, delay: 1 }] },
       { groups: [{ enemyId: INN.r, count: 16, spacing: 0.45 }] },
@@ -445,7 +451,7 @@ const INN_SPECS: LevelSpec[] = [
     name: 'The Long Hall',
     subtitle: 'A wraith drifts the endless corridor.',
     path: [{ col: -1, row: 1 }, { col: 15, row: 1 }, { col: 15, row: 5 }, { col: 1, row: 5 }, { col: 1, row: 9 }, { col: 16, row: 9 }],
-    baseHealth: 10, gem: 100,
+    baseHealth: 10, gem: 150,
     waves: [
       { groups: [{ enemyId: INN.r, count: 14 }, { enemyId: INN.g, count: 10, delay: 1 }] },
       { groups: [{ enemyId: INN.b, count: 6 }, { enemyId: INN.g, count: 12, delay: 1 }] },
@@ -460,7 +466,7 @@ const INN_SPECS: LevelSpec[] = [
     name: "The Innkeeper's Bane",
     subtitle: 'The final horror rises from below.',
     path: [{ col: -1, row: 5 }, { col: 3, row: 5 }, { col: 3, row: 1 }, { col: 8, row: 1 }, { col: 8, row: 8 }, { col: 12, row: 8 }, { col: 12, row: 2 }, { col: 15, row: 2 }, { col: 15, row: 9 }, { col: 16, row: 9 }],
-    baseHealth: 10, gem: 100,
+    baseHealth: 10, gem: 150,
     waves: [
       { groups: [{ enemyId: INN.b, count: 6 }, { enemyId: INN.g, count: 12, delay: 1 }] },
       { groups: [{ enemyId: INN.r, count: 18, spacing: 0.42 }] },

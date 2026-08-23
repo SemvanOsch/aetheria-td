@@ -51,6 +51,7 @@ import {
   type MasteryStats,
 } from '../domain/mastery';
 import { critChanceFor, critMultiplierFor } from '../domain/combat';
+import { isSpeaking } from './types';
 import type {
   Burst,
   Enemy,
@@ -138,6 +139,22 @@ export const LANE_REVEAL_TIME = 1.3;
 // figure and the risen boss occupy the same spot with no jump.
 export const RISE_TIME = 0.9;
 export const RISE_LIFT = 40;
+
+// An enemy with `spawnLines` first walks SPEECH_ENTRY_DIST px onto the board so
+// it's clearly on screen, then stops and delivers its lines one at a time —
+// staying put and untargetable for SPEECH_LINE_TIME seconds each — before
+// resuming its march.
+export const SPEECH_ENTRY_DIST = 70;
+export const SPEECH_LINE_TIME = 2.5;
+
+// An enemy with a `deathAnimation` lingers on a lethal hit while its special
+// death plays out (see EnemyDef.deathAnimation): DEATH_ANIM_TIME total, split
+// into the slump to the ground (DEATH_FALL_TIME), a beat lying fallen
+// (DEATH_HOLD_TIME) and then being drawn down into its shadow (the remainder).
+// Victory is withheld until the whole sequence finishes.
+export const DEATH_FALL_TIME = 0.55;
+export const DEATH_HOLD_TIME = 2.0;
+export const DEATH_ANIM_TIME = 3.85; // fall + hold + ~1.3s shadow swallow
 // An evasive enemy (Garrick Vane) plays a quick sidestep-and-back when it dodges
 // a hit: the `dodge` timer counts down over DODGE_ANIM_TIME while the renderer
 // weaves the sprite up to DODGE_DIST pixels sideways (perpendicular to travel)
@@ -736,8 +753,13 @@ export class GameEngine {
         knockbackCooldown: 0,
         // A boss on a reveal lane rises off its throne before walking.
         rise: def.boss && this.laneRevealAt[laneIndex] !== undefined ? 1 : 0,
+        // An enemy with intro lines walks in a short way (-1) before speaking.
+        speechIndex: def.spawnLines ? -1 : 0,
+        speechTimer: def.spawnLines ? SPEECH_LINE_TIME : 0,
         dodge: 0,
         wardReduction: 0,
+        dying: false,
+        deathT: 0,
       });
       if (def.boss) {
         this.bossJustAppeared = true;
@@ -749,6 +771,13 @@ export class GameEngine {
   private updateEnemies(dt: number): void {
     for (const e of this.enemies) {
       if (e.dead) continue;
+      // Playing out a special death (Gowzer): frozen in place while the animation
+      // runs, then truly removed. Kept in the list until then so victory waits.
+      if (e.dying) {
+        e.deathT += dt;
+        if (e.deathT >= DEATH_ANIM_TIME) e.dead = true;
+        continue;
+      }
       if (e.hitFlash > 0) e.hitFlash = Math.max(0, e.hitFlash - dt);
       if (e.dodge > 0) e.dodge = Math.max(0, e.dodge - dt);
       if (e.slowTimer > 0) {
@@ -763,6 +792,26 @@ export class GameEngine {
         e.rise = Math.max(0, e.rise - dt / RISE_TIME);
         e.pos = this.positionAtDistance(lane, 0);
         e.heading = this.headingAtDistance(lane, 0);
+        continue;
+      }
+      // An enemy with intro lines walks in until it's on screen, then stops to
+      // speak (flip -1 → 0 so isSpeaking takes over from here).
+      if (e.def.spawnLines && e.speechIndex < 0 && e.dist >= SPEECH_ENTRY_DIST) {
+        e.speechIndex = 0;
+        e.speechTimer = SPEECH_LINE_TIME;
+      }
+      // Delivering its spawn lines: stay put (and untargetable) until every line
+      // has been spoken, then start walking.
+      if (isSpeaking(e)) {
+        e.speechTimer -= dt;
+        if (e.speechTimer <= 0) {
+          e.speechIndex++;
+          e.speechTimer = SPEECH_LINE_TIME;
+        }
+        // Hold at the spot it walked in to (not the lane start) so it doesn't
+        // teleport back while speaking.
+        e.pos = this.positionAtDistance(lane, e.dist);
+        e.heading = this.headingAtDistance(lane, e.dist);
         continue;
       }
       e.dist += e.def.speed * e.slowFactor * dt;
@@ -824,7 +873,9 @@ export class GameEngine {
   private recomputeWards(): void {
     // Clear last frame's shielding first.
     for (const e of this.enemies) e.wardReduction = 0;
-    const emitters = this.enemies.filter((e) => !e.dead && e.rise <= 0 && e.def.damageAura);
+    const emitters = this.enemies.filter(
+      (e) => !e.dead && !e.dying && e.rise <= 0 && e.def.damageAura,
+    );
     if (emitters.length === 0) return;
     for (const src of emitters) {
       const aura = src.def.damageAura!;
@@ -858,7 +909,9 @@ export class GameEngine {
       const inRange = [];
       for (const e of this.enemies) {
         if (e.dead) continue;
+        if (e.dying) continue; // playing out its death — no longer a valid target
         if (e.rise > 0) continue; // a boss still rising off its throne can't be hit
+        if (isSpeaking(e)) continue; // an enemy delivering its intro can't be hit
         const distance = Math.hypot(e.pos.x - t.pos.x, e.pos.y - t.pos.y);
         if (distance <= t.range) {
           // Remaining path to the base, comparable across lanes of different
@@ -1256,6 +1309,11 @@ export class GameEngine {
    */
   private damageEnemy(enemy: Enemy, amount: number, source?: Tower): boolean {
     if (enemy.dead) return false;
+    // Already playing out its death animation — no further hits register.
+    if (enemy.dying) return false;
+    // Untargetable while delivering its spawn lines — every attack type funnels
+    // through here, so this guarantees invulnerability during the intro.
+    if (isSpeaking(enemy)) return false;
     // Evasive enemies (the nimble Garrick Vane) slip aside from a fraction of
     // blows, taking no damage. Rolled here so it covers every attack type that
     // funnels through this choke point — melee, projectiles, line-AoE, gusts.
@@ -1281,19 +1339,29 @@ export class GameEngine {
     enemy.health -= dealt;
     enemy.hitFlash = 0.12;
     if (enemy.health <= 0) {
-      enemy.dead = true;
+      enemy.health = 0;
+      // An enemy with a special death lingers to play it out (frozen and
+      // untargetable) instead of popping — victory waits until it finishes. Every
+      // other enemy dies instantly as before. Rewards/kill credit bank now either
+      // way, at the moment of the lethal blow.
+      if (enemy.def.deathAnimation) {
+        enemy.dying = true;
+        enemy.deathT = 0;
+      } else {
+        enemy.dead = true;
+        this.bursts.push({
+          pos: { ...enemy.pos },
+          color: enemy.def.visual.color,
+          ttl: 0.45,
+          maxTtl: 0.45,
+          radius: enemy.def.radius,
+        });
+      }
       // Tally the kill for the Enemy Index (regardless of which unit landed it).
       this.enemyKills[enemy.def.id] = (this.enemyKills[enemy.def.id] ?? 0) + 1;
       if (source) this.creditKill(source, enemy);
       this.currency += enemy.def.reward;
       this.currencyEarned += enemy.def.reward;
-      this.bursts.push({
-        pos: { ...enemy.pos },
-        color: enemy.def.visual.color,
-        ttl: 0.45,
-        maxTtl: 0.45,
-        radius: enemy.def.radius,
-      });
       this.floaters.push({
         pos: { x: enemy.pos.x, y: enemy.pos.y - 6 },
         text: `+${enemy.def.reward}`,

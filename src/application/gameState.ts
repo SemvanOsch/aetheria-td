@@ -195,13 +195,20 @@ export function toggleTeamMember(state: GameState, unitId: string): GameState {
   return { ...state, team: [...state.team, unitId] };
 }
 
+/** Gems granted for re-clearing a stage the player has already beaten. */
+export const REPLAY_GEM_REWARD = 50;
+
 export function markLevelComplete(
   state: GameState,
   levelId: number,
   gemReward: number,
 ): GameState {
   const alreadyDone = state.completedLevels.includes(levelId);
-  if (alreadyDone) return state;
+  if (alreadyDone) {
+    // Re-clearing an already-beaten stage grants a small flat gem reward
+    // instead of the (one-time) first-clear bonus.
+    return { ...state, gems: state.gems + REPLAY_GEM_REWARD };
+  }
   return {
     ...state,
     completedLevels: [...state.completedLevels, levelId],

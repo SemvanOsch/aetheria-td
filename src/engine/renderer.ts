@@ -17,7 +17,17 @@ import {
 import { coneAngleDeg, getUnit } from '../domain/units';
 import { getEnemy } from '../domain/enemies';
 import { drawEnemySprite, drawUnitSprite, hasEnemySprite, hasSprite } from './sprites';
-import { THROW_ANIM_TIME, RISE_LIFT, DODGE_ANIM_TIME, DODGE_DIST } from './GameEngine';
+import {
+  THROW_ANIM_TIME,
+  RISE_LIFT,
+  DODGE_ANIM_TIME,
+  DODGE_DIST,
+  DEATH_ANIM_TIME,
+  DEATH_FALL_TIME,
+  DEATH_HOLD_TIME,
+} from './GameEngine';
+import { currentSpeechLine } from './types';
+import type { Enemy } from './types';
 import type { GameEngine } from './GameEngine';
 
 export interface RenderUiState {
@@ -1681,11 +1691,13 @@ const KING_FOOT_LIFT = 16;
 const CAPTAIN_FOOT_LIFT = 9;
 const MERCENARY_FOOT_LIFT = 9;
 const WARDEN_FOOT_LIFT = 13; // the Iron Warden's heavy 1.5× frame
+const GOWZER_FOOT_LIFT = 6; // Gowzer's slight 1.15× frame
 function footLiftFor(id: string): number {
   if (id === 'boss5') return KING_FOOT_LIFT;
   if (id === 'boss1') return CAPTAIN_FOOT_LIFT;
   if (id === 'boss2') return MERCENARY_FOOT_LIFT;
   if (id === 'boss3') return WARDEN_FOOT_LIFT;
+  if (id === 'boss4') return GOWZER_FOOT_LIFT;
   return 0;
 }
 
@@ -1706,6 +1718,12 @@ function drawSeatedKing(ctx: CanvasRenderingContext2D, engine: GameEngine): void
 function drawEnemies(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
   for (const e of engine.enemies) {
     if (e.dead) continue;
+    // An enemy playing out a special death draws its own sequence (and no health
+    // bar / speech), so branch out before the normal token rendering.
+    if (e.dying) {
+      drawDeathAnimation(ctx, e);
+      continue;
+    }
     const { x } = e.pos;
     const R = e.def.radius;
     // A boss rising off its throne is drawn lifted (its seat height above the
@@ -1783,7 +1801,141 @@ function drawEnemies(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
     ctx.fillRect(bx - 1, by - 1, w + 2, 5);
     ctx.fillStyle = pct > 0.5 ? '#5fd38a' : pct > 0.25 ? '#f2b23c' : '#ff5a5a';
     ctx.fillRect(bx, by, w * pct, 3);
+
+    // Intro speech bubble: while an enemy is delivering its spawn lines (Gowzer),
+    // float the current line above it.
+    const line = currentSpeechLine(e);
+    if (line) drawSpeechBubble(ctx, x + dodgeX, by - 8, line);
   }
+}
+
+/**
+ * Special death sequence for an enemy with `deathAnimation` (Gowzer's
+ * 'shadowSwallow'): it first slumps to the ground (over DEATH_FALL_TIME), then
+ * is drawn down into an expanding pool of its own shadow that draws shut over it.
+ * Reads `e.deathT` (elapsed seconds); drawn entirely in world space.
+ */
+function drawDeathAnimation(ctx: CanvasRenderingContext2D, e: Enemy): void {
+  const x = e.pos.x;
+  const R = e.def.radius;
+  const foot = footLiftFor(e.def.id);
+  const groundY = e.pos.y - foot;
+
+  const t = e.deathT;
+  const fall = Math.min(1, t / DEATH_FALL_TIME); // 0→1 slump to the ground
+  const fallEase = 1 - (1 - fall) * (1 - fall); // easeOut — quick topple, soft landing
+  // After the fall he lies fallen for DEATH_HOLD_TIME, then the shadow swallow
+  // runs over whatever time remains.
+  const swallowStart = DEATH_FALL_TIME + DEATH_HOLD_TIME;
+  const swallow = Math.min(
+    1,
+    Math.max(0, (t - swallowStart) / (DEATH_ANIM_TIME - swallowStart)),
+  ); // 0→1 sink into the shadow
+
+  // Shadow pool: the normal shadow swells into a dark pool as it swallows him,
+  // then draws shut to nothing at the very end.
+  const grow = Math.min(1, swallow / 0.65);
+  const close = swallow < 0.65 ? 0 : (swallow - 0.65) / 0.35;
+  const poolScale = (1 + grow * 1.05) * (1 - close);
+  ctx.save();
+  ctx.translate(x, groundY + R * 0.7);
+  ctx.fillStyle = `rgba(0,0,0,${(0.32 + 0.5 * grow).toFixed(3)})`;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, R * poolScale, R * 0.42 * poolScale, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // The figure topples about its feet, then shrinks and fades as it's drawn
+  // under. It slumps in the direction it was last facing.
+  const dir = e.heading.x < 0 ? -1 : 1;
+  const pivot = R * 0.7; // roughly the feet, below the sprite's centre origin
+  const fallSink = fallEase * R * 0.28;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, 1 - swallow * 1.05);
+  ctx.translate(x, groundY + fallSink + swallow * 10); // settle, then sink under
+  ctx.translate(0, pivot);
+  ctx.rotate(dir * 1.05 * fallEase); // topple to ~60°
+  ctx.translate(0, -pivot);
+  const shrink = 1 - swallow * 0.45;
+  ctx.scale(shrink, shrink);
+
+  if (hasEnemySprite(e.def.id)) {
+    const hx = e.heading.x;
+    const hy = e.heading.y;
+    const view = Math.abs(hx) >= Math.abs(hy) ? 'side' : hy > 0 ? 'front' : 'back';
+    drawEnemySprite(ctx, e.def.id, e.def.visual.color, view, hx < 0, e.dist, 0);
+  } else {
+    ctx.fillStyle = e.def.visual.color;
+    ctx.beginPath();
+    ctx.arc(0, 0, R, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = `${Math.round(R * 1.2)}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(e.def.visual.icon, 0, 1);
+  }
+  ctx.restore();
+
+  // Final words: a bubble floating above him, held through the fall and fading
+  // out as the shadow swallows him.
+  if (e.def.deathLine) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, 1 - swallow);
+    drawSpeechBubble(ctx, x, groundY - R * 1.8, e.def.deathLine);
+    ctx.restore();
+  }
+}
+
+/**
+ * A small comic speech bubble centred horizontally on `cx`, its downward tail
+ * tip resting at `tailY`, carrying `text`. Sized to the text.
+ */
+function drawSpeechBubble(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  tailY: number,
+  text: string,
+): void {
+  ctx.save();
+  ctx.font = '600 11px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const padX = 8;
+  const padY = 5;
+  const tw = ctx.measureText(text).width;
+  const bw = tw + padX * 2;
+  const bh = 11 + padY * 2;
+  const tail = 6;
+  const bottom = tailY - tail; // bubble box sits above the tail
+  const top = bottom - bh;
+  const left = cx - bw / 2;
+  const r = 6;
+
+  // Rounded-rect body.
+  ctx.beginPath();
+  ctx.moveTo(left + r, top);
+  ctx.lineTo(left + bw - r, top);
+  ctx.quadraticCurveTo(left + bw, top, left + bw, top + r);
+  ctx.lineTo(left + bw, bottom - r);
+  ctx.quadraticCurveTo(left + bw, bottom, left + bw - r, bottom);
+  // Down to the tail on the way across the bottom edge.
+  ctx.lineTo(cx + 5, bottom);
+  ctx.lineTo(cx, bottom + tail);
+  ctx.lineTo(cx - 5, bottom);
+  ctx.lineTo(left + r, bottom);
+  ctx.quadraticCurveTo(left, bottom, left, bottom - r);
+  ctx.lineTo(left, top + r);
+  ctx.quadraticCurveTo(left, top, left + r, top);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(20, 12, 24, 0.92)';
+  ctx.fill();
+  ctx.strokeStyle = '#d9b24a'; // Night Falcon gold
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+
+  ctx.fillStyle = '#f4ecd8';
+  ctx.fillText(text, cx, top + bh / 2 + 0.5);
+  ctx.restore();
 }
 
 function drawShots(ctx: CanvasRenderingContext2D, engine: GameEngine): void {

@@ -64,7 +64,30 @@ export interface EnemyDef {
    * lore yet show a placeholder. (Authored later; none is written for now.)
    */
   lore?: string;
+  /**
+   * Intro lines this enemy delivers on spawn, one after another, before it starts
+   * moving. While speaking it stays put at the lane start and can't be hit (the
+   * engine freezes it and the damage choke point ignores it, mirroring the boss
+   * throne-rise). Omitted for enemies that spawn silently.
+   */
+  spawnLines?: string[];
+  /**
+   * A special death sequence played instead of the instant pop. When set, a
+   * lethal hit starts the animation (the enemy lingers, frozen and untargetable)
+   * and victory is withheld until it finishes. `'shadowSwallow'` — the enemy
+   * slumps to the ground and is drawn down into its own shadow (Gowzer). Omitted
+   * for enemies that die instantly.
+   */
+  deathAnimation?: DeathAnimation;
+  /**
+   * A final line spoken during the death animation (floats above the enemy as it
+   * falls, fading as it's swallowed). Only meaningful alongside `deathAnimation`.
+   */
+  deathLine?: string;
 }
+
+/** Named special death sequences (see `EnemyDef.deathAnimation`). */
+export type DeathAnimation = 'shadowSwallow';
 
 /** Kills of a normal enemy required before its Enemy Index entry unlocks. */
 export const ENEMY_KILLS_TO_UNLOCK = 100;
@@ -98,7 +121,8 @@ const REGULAR: Record<string, EnemyDef> = {
   // Castle — disciplined rebels and siege beasts.
   cas_grunt: { id: 'cas_grunt', name: 'Footman', health: 60, speed: 46, reward: 2, damageToBase: 1, visual: { color: '#b3bccb', icon: '🛡️' }, boss: false, radius: 13 },
   cas_grunt2: { id: 'cas_grunt2', name: 'Sergeant', health: 140, speed: 42, reward: 5, damageToBase: 1, visual: { color: '#9aa6be', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2 },
-  cas_runner: { id: 'cas_runner', name: 'Outrider', health: 65, speed: 94, reward: 3, damageToBase: 1, visual: { color: '#d7a94a', icon: '🐎' }, boss: false, radius: 12 },
+  cas_runner: { id: 'cas_runner', name: 'Outrider', health: 65, speed: 94, reward: 3, damageToBase: 1, visual: { color: '#d7a94a', icon: '🐎' }, boss: false, radius: 14 },
+  cas_mage: { id: 'cas_mage', name: 'Royal Wizard', health: 110, speed: 50, reward: 4, damageToBase: 1, visual: { color: '#530a69', icon: '🧙' }, boss: false, radius: 12, magicResist: 0.2 },
   cas_brute: { id: 'cas_brute', name: 'Siege Ram', health: 245, speed: 30, reward: 8, damageToBase: 2, visual: { color: '#8a93a8', icon: '🐏' }, boss: false, radius: 17, physicalResist: 0.2 },
 
   // Forest — wild beasts and ancient growth.
@@ -146,6 +170,12 @@ interface BossMeta {
   mechanic?: string;
   /** Flavour text for the Enemy Index (authored later). */
   lore?: string;
+  /** Intro lines delivered on spawn before moving (see `EnemyDef.spawnLines`). */
+  spawnLines?: string[];
+  /** Special death sequence played on defeat (see `EnemyDef.deathAnimation`). */
+  deathAnimation?: DeathAnimation;
+  /** Final line spoken during the death animation (see `EnemyDef.deathLine`). */
+  deathLine?: string;
 }
 
 // Ordered by global level (1..15): Castle 1-5, Forest 6-10, Inn 11-15. Any stat
@@ -154,8 +184,13 @@ const BOSS_META: BossMeta[] = [
   { name: 'Captain Aldric', icon: '🗡️', color: '#c3ccdc', health: 400, speed: 40, radius: 25 },
   { name: 'Garrick Vane', icon: '🔪', color: '#8a94a8', health: 600, speed: 60, radius: 20, dodgeChance: 0.20, mechanic: 'Evasive — sidesteps a quarter of all incoming hits, taking no damage from them.' },
   { name: 'The Iron Warden', icon: '🛡️', color: '#c05a6a', health: 350, speed: 30, radius: 30, physicalResist: 0.4, damageAura: { reduction: 0.3, radius: 96 }, mechanic: 'Aegis aura — every other enemy near the Warden takes 30% less damage.' },
-  { name: 'Gowzer, the Night Falcon', icon: '⚜️', color: '#c69a3a' },
-  { name: 'King Kael', icon: '👑', color: '#e0574a', health: 4000, speed: 20, radius: 30, mechanic: 'Rises from his throne as the final wave begins.' },
+  {
+    name: 'Gowzer, the Night Falcon', icon: '🦅', color: '#1b031a', health: 700, speed: 44, radius: 20, magicResist: 0.2,
+    spawnLines: ['The king still has his use.', 'You shall not get past this point.'],
+    deathAnimation: 'shadowSwallow',
+    deathLine: 'It does not end here...',
+  },
+  { name: 'King Kael', icon: '👑', color: '#e0574a', health: 1000, speed: 20, radius: 30, mechanic: 'Rises from his throne as the final wave begins.' },
   // Forest
   { name: 'Thornmaw the Ancient', icon: '🌳', color: '#6a9a5a' },
   { name: 'Vexia, the Spider Queen', icon: '🕷️', color: '#8a6ac4' },
@@ -191,6 +226,9 @@ function buildBosses(): Record<string, EnemyDef> {
       damageAura: m.damageAura,
       mechanic: m.mechanic,
       lore: m.lore,
+      spawnLines: m.spawnLines,
+      deathAnimation: m.deathAnimation,
+      deathLine: m.deathLine,
     };
   });
   return out;
