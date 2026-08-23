@@ -6,11 +6,14 @@ import react from '@vitejs/plugin-react';
 declare const process: { env: Record<string, string | undefined> };
 
 // https://vitejs.dev/config/
-export default defineConfig(() => {
+export default defineConfig(({ command }) => {
   // Honor a port assigned via the PORT env var (used by the preview harness /
   // autoPort). Fall back to Vite's default when running `npm run dev` manually.
   const envPort = process.env.PORT ? Number(process.env.PORT) : undefined;
   return {
+    // GitHub Pages serves a project site under /<repo>/, so production assets
+    // must be requested from that sub-path. Dev/preview stay at the root.
+    base: command === 'build' ? '/aetheria-td/' : '/',
     plugins: [react()],
     server: envPort
       ? { port: envPort, strictPort: true }
