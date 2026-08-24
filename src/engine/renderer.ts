@@ -1437,9 +1437,13 @@ function drawTowers(
         : throwing
           ? t.throwAnim / THROW_ANIM_TIME
           : Math.max(0, Math.min(1, t.attackAnim / 0.18));
-      // A cone attacker (Wizard with Wind Slice bought) carries the empowered
-      // flourish — faint wind motes drifting around the figure.
-      const empowered = t.aoe === 'cone';
+      // The "empowered" flourish marks a champion whose signature upgrade is
+      // bought — faint wind motes for the Wizard (Wind Slice → cone), and arcane
+      // sparkles off the Elf's bow once she buys Chain Enchantment (which lifts
+      // her bounce count above the base). Each sprite reads the flag its own way.
+      const empowered =
+        t.aoe === 'cone' ||
+        (t.def.visual.shape === 'elf' && t.bounces > (t.def.bounces ?? 0));
       drawUnitSprite(ctx, t.def.visual.shape, t.def.visual.color, faceLeft, anim, throwing, empowered);
     } else {
       // Body disc.
@@ -1974,6 +1978,9 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine): voi
     const target = engine.enemies.find((e) => e.uid === p.targetUid && !e.dead);
     const dest = target ? target.pos : p.last;
     const ang = Math.atan2(dest.y - p.pos.y, dest.x - p.pos.x);
+    // Fading magical tail: draw the arrow's recent positions (world space, before
+    // the local rotate/scale) as motes that shrink and dim into the distance.
+    if (p.trail && p.trail.length) drawMagicTrail(ctx, p.trail, p.color);
     ctx.save();
     ctx.translate(p.pos.x, p.pos.y);
     ctx.rotate(ang);
@@ -1981,6 +1988,8 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine): voi
     ctx.lineCap = 'round';
     if (p.style === 'wind') {
       drawWindBullet(ctx, p.color);
+    } else if (p.style === 'magic') {
+      drawMagicArrow(ctx, p.color);
     } else {
       // Shaft.
       ctx.strokeStyle = '#6e4a26';
@@ -2055,6 +2064,102 @@ function drawWindBullet(ctx: CanvasRenderingContext2D, color: string): void {
   ctx.fillStyle = '#f2ffff';
   ctx.beginPath();
   ctx.arc(2.6, -0.4, 1.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/**
+ * The fading, translucent tail behind the Elf's magic arrow. Given the arrow's
+ * recent positions (newest first, in world space), it draws a long streak that
+ * tapers and dims from the head toward the tail: a soft outer glow ribbon, a
+ * brighter inner core ribbon, and a few white shimmer sparks near the head. Each
+ * segment is stroked on its own so width and opacity can fall off smoothly along
+ * the streak. Drawn before the arrow itself.
+ */
+function drawMagicTrail(
+  ctx: CanvasRenderingContext2D,
+  trail: { x: number; y: number }[],
+  color: string,
+): void {
+  const n = trail.length;
+  if (n < 2) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  // Two passes: a wide translucent glow, then a brighter thin core over it.
+  const passes: [string, number, number][] = [
+    // colour, base width, base alpha
+    [color, 5.5, 0.28],
+    ['#f4eeff', 2.2, 0.5],
+  ];
+  for (const [col, baseW, baseA] of passes) {
+    for (let i = 0; i < n - 1; i++) {
+      const f = 1 - i / n; // 1 near the head, →0 at the tail
+      ctx.strokeStyle = withAlpha(col, baseA * f * f);
+      ctx.lineWidth = Math.max(0.4, baseW * f);
+      ctx.beginPath();
+      ctx.moveTo(trail[i].x, trail[i].y);
+      ctx.lineTo(trail[i + 1].x, trail[i + 1].y);
+      ctx.stroke();
+    }
+  }
+  // A couple of bright shimmer sparks riding the freshest part of the streak.
+  ctx.fillStyle = '#f4eeff';
+  for (let i = 0; i < Math.min(3, n); i++) {
+    const f = 1 - i / n;
+    ctx.globalAlpha = 0.6 * f;
+    ctx.beginPath();
+    ctx.arc(trail[i].x, trail[i].y, 0.6 + 1.1 * f, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/**
+ * The Elf's enchanted magic arrow — drawn in the projectile's local space
+ * (translated to its position, rotated to face travel, +x forward). A fletched
+ * shaft wrapped in a soft glow of the champion's arcane colour, with a bright
+ * arrowhead and a sparkle or two trailing behind, so it reads as a spell-charged
+ * shaft rather than a plain arrow.
+ */
+function drawMagicArrow(ctx: CanvasRenderingContext2D, color: string): void {
+  ctx.save();
+  // Soft arcane glow along the shaft.
+  ctx.strokeStyle = withAlpha(color, 0.3);
+  ctx.lineWidth = 4.5;
+  ctx.beginPath();
+  ctx.moveTo(-7, 0);
+  ctx.lineTo(7, 0);
+  ctx.stroke();
+  // Bright glowing core shaft.
+  ctx.strokeStyle = withAlpha(color, 0.95);
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(-6, 0);
+  ctx.lineTo(6, 0);
+  ctx.stroke();
+  // Crystalline arrowhead.
+  ctx.fillStyle = '#f4eeff';
+  ctx.beginPath();
+  ctx.moveTo(5, -2);
+  ctx.lineTo(9.5, 0);
+  ctx.lineTo(5, 2);
+  ctx.closePath();
+  ctx.fill();
+  // Twin arcane fletches.
+  ctx.strokeStyle = withAlpha(color, 0.9);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(-6, 0);
+  ctx.lineTo(-8.5, -1.8);
+  ctx.moveTo(-6, 0);
+  ctx.lineTo(-8.5, 1.8);
+  ctx.stroke();
+  // Trailing sparkle motes.
+  ctx.fillStyle = withAlpha(color, 0.85);
+  ctx.beginPath();
+  ctx.arc(-8.5, -1.6, 0.9, 0, Math.PI * 2);
+  ctx.arc(-10.5, 1, 0.6, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }

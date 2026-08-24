@@ -3,3 +3,6 @@ dist
 dist-ssr
 *.local
 .DS_Store
+
+# Local-only design/reference docs (not shipped)
+/docs/aetheria-units.xlsx

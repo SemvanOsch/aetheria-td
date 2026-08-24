@@ -19,10 +19,17 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-08-25',
+    changes: [
+      'Duplicate summons now grant mastery EXP for that champion (Common +20, Rare +30) on top of the gem refund.',
+      'Cleaned up the champion detail sheet: stats are now grouped (cost/limit, then damage/speed/DPS/range, then crit) with dividers, and redundant rows already shown as tags at the top were removed.',
+    ],
+  },
+  {
     version: '2026-08-24',
     changes: [
       'Added this Patch Notes menu next to the Settings icon.',
-      'New Castle enemy: the Man-at-Arms, an armoured veteran with his own hand-drawn sprite.',
+      'New Castle enemy: the Man-at-Arms, an armoured veteran with his own sprite.',
       'Rebalanced Castle foes — Sergeant and Siege Ram hit the castle harder, and King Kael has slightly less health.',
       'Post-battle: the win screen now has Home + Continue, and the loss screen has Home + Retry.',
       'You can now select and carry a champion you cannot yet afford — the "not enough gold" popup only fires when you actually try to place it.',

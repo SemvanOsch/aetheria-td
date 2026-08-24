@@ -60,6 +60,11 @@ export interface UpgradeDef {
   /** Additive gold-per-harvest delta (for generator units). */
   generate?: number;
   /**
+   * Additive delta to how many extra foes a projectile leaps to on impact (the
+   * Elf's bouncing magic arrow). Adds on top of the unit's base `bounces`.
+   */
+  bounces?: number;
+  /**
    * If set, this upgrade *transforms* the attack shape from the tier it is
    * bought onward (e.g. the Wizard's Wind Slice turns his single-target gust
    * into a `cone`). Overrides `UnitDef.aoe` for that tower.
@@ -98,6 +103,12 @@ export interface UnitDef {
   /** For line AoE: half-thickness of the beam used for hit detection (px). */
   aoeWidth?: number;
   /**
+   * Base number of extra foes this unit's projectile leaps to on impact (the
+   * Elf's magic arrow). Omitted (0) for units whose shots don't bounce; in-stage
+   * upgrades can add more via `UpgradeDef.bounces`.
+   */
+  bounces?: number;
+  /**
    * For cone AoE: the full opening angle in degrees (e.g. 45). Only meaningful
    * once the unit's attack becomes a `cone` (via a `setAoe` upgrade); defaults
    * to DEFAULT_CONE_ANGLE_DEG if unset. Tune it per unit to widen/narrow the arc.
@@ -123,7 +134,7 @@ export interface UnitVisual {
   /** Single-glyph placeholder icon (emoji) used in cards & board. */
   icon: string;
   /** Rough archetype used to pick a board silhouette. */
-  shape: 'archer' | 'crossbow' | 'sword' | 'spear' | 'farmer' | 'wizard';
+  shape: 'archer' | 'crossbow' | 'sword' | 'spear' | 'farmer' | 'wizard' | 'elf';
 }
 
 export interface UnitSpecial {
@@ -316,6 +327,46 @@ export const UNITS: Record<string, UnitDef> = {
     ],
     visual: { color: '#6fe3e0', icon: '🌪️', shape: 'wizard' },
   },
+  elf: {
+    id: 'elf',
+    name: 'Elf',
+    description:
+      'A woodland archer who enchants every shaft she looses. Each arrow strikes true, then leaps onward to bite another nearby foe — a rare gift of the greenwood.',
+    rarity: 'rare',
+    damage: 12,
+    attackSpeed: 1.1,
+    range: 130,
+    targeting: 'first',
+    aoe: 'single',
+    attackType: 'ranged',
+    damageType: 'magic',
+    // Base magic-arrow leaps: her shaft bites one extra nearby foe on impact.
+    bounces: 1,
+    cost: 65,
+    deployLimit: 2,
+    upgrades: [
+      {
+        name: 'Enchanted Fletching',
+        description: 'Stronger enchantments let each arrow bite far harder.',
+        cost: 60,
+        damage: 10,
+      },
+      {
+        name: 'Arcane Draw',
+        description: 'A swifter draw and a longer, truer reach.',
+        cost: 65,
+        attackSpeed: 0.25,
+        range: 20,
+      },
+      {
+        name: 'Chain Enchantment',
+        description: 'The enchantment ripples further — each arrow leaps to one more nearby foe.',
+        cost: 80,
+        bounces: 1,
+      },
+    ],
+    visual: { color: '#b48cf0', icon: '🧝', shape: 'elf' },
+  },
   farmer: {
     id: 'farmer',
     name: 'Farmer',
@@ -466,12 +517,27 @@ export function effectiveGenerate(unit: UnitDef, tier: number): number {
   return amount;
 }
 
+/**
+ * How many extra foes a unit's projectile leaps to on impact after applying the
+ * first `tier` upgrades: the unit's base `bounces` plus every purchased upgrade's
+ * `bounces` delta. 0 for units whose shots don't bounce.
+ */
+export function effectiveBounces(unit: UnitDef, tier: number): number {
+  let bounces = unit.bounces ?? 0;
+  for (let i = 0; i < tier && i < unit.upgrades.length; i++) {
+    bounces += unit.upgrades[i].bounces ?? 0;
+  }
+  return bounces;
+}
+
 /** The stat deltas an upgrade adds — an `UpgradeDef` satisfies this shape. */
 export interface UpgradeEffect {
   damage?: number;
   attackSpeed?: number;
   range?: number;
   generate?: number;
+  /** Extra projectile leaps this upgrade grants (the Elf's Chain Enchantment). */
+  bounces?: number;
   /** An attack-shape transform this upgrade unlocks (e.g. 'cone'). */
   setAoe?: AoeType;
   /** Opening angle (degrees) to show for a `cone` transform. */
@@ -493,6 +559,7 @@ export function upgradeEffectLabel(e: UpgradeEffect): string {
   if (e.attackSpeed) parts.push(`${sign(e.attackSpeed)}${formatAttackSpeed(Math.abs(e.attackSpeed))}/s SPD`);
   if (e.range) parts.push(`${sign(e.range)}${Math.abs(e.range)} Range`);
   if (e.generate) parts.push(`${sign(e.generate)}${Math.abs(e.generate)} gold/harvest`);
+  if (e.bounces) parts.push(`${sign(e.bounces)}${Math.abs(e.bounces)} Bounce`);
   if (e.setAoe === 'cone') {
     parts.push(`⟶ Wind Slice${e.coneAngle ? ` (${e.coneAngle}° cone)` : ' (cone)'}`);
   }

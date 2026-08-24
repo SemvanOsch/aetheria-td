@@ -19,6 +19,8 @@ export interface RarityDef {
   color: string;
   /** Ordering used for sorting collections (higher = rarer). */
   order: number;
+  /** Mastery EXP granted to the champion when a summon is a duplicate. */
+  duplicateExp: number;
 }
 
 export const RARITIES: Record<Rarity, RarityDef> = {
@@ -29,6 +31,7 @@ export const RARITIES: Record<Rarity, RarityDef> = {
     available: true,
     color: '#9fb2c8',
     order: 0,
+    duplicateExp: 20,
   },
   rare: {
     id: 'rare',
@@ -37,6 +40,7 @@ export const RARITIES: Record<Rarity, RarityDef> = {
     available: true,
     color: '#4aa3ff',
     order: 1,
+    duplicateExp: 30,
   },
   epic: {
     id: 'epic',
@@ -45,6 +49,7 @@ export const RARITIES: Record<Rarity, RarityDef> = {
     available: false,
     color: '#b455ff',
     order: 2,
+    duplicateExp: 45,
   },
   legendary: {
     id: 'legendary',
@@ -53,6 +58,7 @@ export const RARITIES: Record<Rarity, RarityDef> = {
     available: false,
     color: '#ffb020',
     order: 3,
+    duplicateExp: 60,
   },
 };
 

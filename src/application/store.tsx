@@ -26,10 +26,13 @@ import {
   loadState,
   markLevelComplete,
   saveState,
+  reorderTeam as reorderTeamTx,
+  setPrefs as setPrefsTx,
   setActiveMasteryUpgrade as setActiveMasteryUpgradeTx,
   setMasteryDisabled as setMasteryDisabledTx,
   toggleTeamMember as toggleTeamMemberTx,
   type GameState,
+  type UiPrefs,
 } from './gameState';
 import {
   canAffordSummon,
@@ -56,10 +59,12 @@ export function GameProvider({ children }: { children: ReactNode }) {
     const current = stateRef.current;
     if (!canAffordSummon(current.gems)) return null;
     const outcome = rollSummon(current.ownedUnits);
-    // Pay the cost; refund a portion if it's a duplicate the player owns.
+    // Pay the cost; a duplicate refunds a portion of the gems *and* grants the
+    // champion some mastery EXP (scaled by rarity) instead of a wasted pull.
     let next = addGems(current, -SUMMON_COST);
     if (outcome.duplicate) {
       next = addGems(next, Math.round(SUMMON_COST * DUPLICATE_REFUND));
+      next = addMastery(next, { [outcome.unit.id]: outcome.duplicateExp });
     }
     next = addUnit(next, outcome.unit.id);
     commit(next);
@@ -115,6 +120,20 @@ export function GameProvider({ children }: { children: ReactNode }) {
     [commit],
   );
 
+  const reorderTeam = useCallback(
+    (from: number, to: number) => {
+      commit(reorderTeamTx(stateRef.current, from, to));
+    },
+    [commit],
+  );
+
+  const setPrefs = useCallback(
+    (patch: Partial<UiPrefs>) => {
+      commit(setPrefsTx(stateRef.current, patch));
+    },
+    [commit],
+  );
+
   const resetAccount = useCallback(() => {
     commit(createInitialState());
   }, [commit]);
@@ -137,11 +156,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setActiveMasteryUpgrade,
       setMasteryDisabled,
       toggleTeamMember,
+      reorderTeam,
+      setPrefs,
       resetAccount,
       grantGems,
       summonCost: SUMMON_COST,
     }),
-    [state, summon, completeLevel, awardMastery, awardEnemyKills, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, resetAccount, grantGems],
+    [state, summon, completeLevel, awardMastery, awardEnemyKills, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, reorderTeam, setPrefs, resetAccount, grantGems],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

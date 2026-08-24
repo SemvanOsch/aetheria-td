@@ -4,6 +4,7 @@ import {
   activeMasteryUpgradesFor,
   availableMasteryExp,
   effectiveMasteryUpgradesFor,
+  hasAffordableMasteryUpgrade,
   isInTeam,
   isMasteryDisabled,
   masteryExp,
@@ -30,11 +31,24 @@ export function Collection() {
     setActiveMasteryUpgrade,
     setMasteryDisabled,
     toggleTeamMember,
+    reorderTeam,
+    setPrefs,
   } = useGame();
   const [detail, setDetail] = useState<UnitDef | null>(null);
   const [masteryUnit, setMasteryUnit] = useState<UnitDef | null>(null);
-  // 'desc' = rarest first (default), 'asc' = most common first.
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  // Persisted preferences: 'desc' = rarest first (default), 'asc' = most common;
+  // showMarks toggles the "mastery upgrade available" dots on cards.
+  const sortDir = state.prefs.championSort;
+  const showMarks = state.prefs.showMasteryMarks;
+  // Index of the team slot currently being dragged, and the slot it's hovering
+  // over (for the drop-target highlight). Both null when no drag is in flight.
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  const endDrag = () => {
+    setDragIndex(null);
+    setDragOverIndex(null);
+  };
 
   const roster = summonableUnits();
   const ownedCount = roster.filter((u) => ownsUnit(state, u.id)).length;
@@ -60,13 +74,22 @@ export function Collection() {
         <span>
           🎴 Champions <small>{ownedCount} / {all.length} collected — tap a card for details</small>
         </span>
-        <button
-          className="btn ghost sort-toggle"
-          onClick={() => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
-          title={`Sort by rarity: ${sortDir === 'desc' ? 'rarest first' : 'most common first'}`}
-        >
-          Rarity {sortDir === 'desc' ? '↓' : '↑'}
-        </button>
+        <div className="collection-controls">
+          <button
+            className={`btn ghost sort-toggle marks-toggle ${showMarks ? '' : 'off'}`}
+            onClick={() => setPrefs({ showMasteryMarks: !showMarks })}
+            title={showMarks ? 'Hide mastery-available marks' : 'Show mastery-available marks'}
+          >
+            {showMarks ? '🔔 Marks On' : '🔕 Marks Off'}
+          </button>
+          <button
+            className="btn ghost sort-toggle"
+            onClick={() => setPrefs({ championSort: sortDir === 'desc' ? 'asc' : 'desc' })}
+            title={`Sort by rarity: ${sortDir === 'desc' ? 'rarest first' : 'most common first'}`}
+          >
+            Rarity {sortDir === 'desc' ? '↓' : '↑'}
+          </button>
+        </div>
       </div>
 
       <div className="team-bar">
@@ -78,12 +101,34 @@ export function Collection() {
           {Array.from({ length: MAX_TEAM_SIZE }).map((_, i) => {
             const id = state.team[i];
             const def = id ? getUnit(id) : undefined;
+            const dragging = dragIndex === i;
+            const dropTarget =
+              dragOverIndex === i && dragIndex !== null && dragIndex !== i;
             return def ? (
               <button
                 key={def.id}
-                className="team-slot filled"
-                title={`Remove ${def.name} from team`}
+                className={`team-slot filled${dragging ? ' dragging' : ''}${dropTarget ? ' drop-target' : ''}`}
+                title={`Drag to reorder · click to remove ${def.name}`}
+                draggable
                 onClick={() => toggleTeamMember(def.id)}
+                onDragStart={(e) => {
+                  setDragIndex(i);
+                  e.dataTransfer.effectAllowed = 'move';
+                  // Firefox requires data to be set for the drag to begin.
+                  e.dataTransfer.setData('text/plain', String(i));
+                }}
+                onDragEnter={() => setDragOverIndex(i)}
+                onDragOver={(e) => {
+                  // Allow dropping onto other filled slots.
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragIndex !== null) reorderTeam(dragIndex, i);
+                  endDrag();
+                }}
+                onDragEnd={endDrag}
               >
                 <span className="team-slot-ic"><UnitSprite unit={def} size={34} /></span>
                 <span className="team-slot-x">✕</span>
@@ -96,8 +141,8 @@ export function Collection() {
           })}
         </div>
         <p className="hint team-bar-hint">
-          Only these champions can be deployed in a stage. Tap an owned card
-          below to add or remove it.
+          Only these champions can be deployed in a stage. Drag to reorder; tap an
+          owned card below to add or remove it.
         </p>
       </div>
 
@@ -105,8 +150,17 @@ export function Collection() {
         {all.map((u) => {
           const owned = ownsUnit(state, u.id);
           const inTeam = isInTeam(state, u.id);
+          const masteryReady =
+            showMarks && owned && hasAffordableMasteryUpgrade(state, u.id);
           return (
             <div key={u.id} className={owned ? '' : 'not-owned'}>
+              {masteryReady && (
+                <span
+                  className="mastery-ready-dot"
+                  title="A mastery upgrade is available"
+                  aria-label="Mastery upgrade available"
+                />
+              )}
               <UnitCard
                 unit={u}
                 owned={owned}

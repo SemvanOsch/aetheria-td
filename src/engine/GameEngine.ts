@@ -32,6 +32,7 @@ import { selectTarget, type TargetingType } from '../domain/targeting';
 import {
   coneAngleDeg,
   effectiveAoe,
+  effectiveBounces,
   effectiveGenerate,
   getUnit,
   nextUpgrade,
@@ -41,6 +42,8 @@ import {
   expForKill,
   GOLD_PER_EXP,
   masteryAdjacentDamageMult,
+  masteryBounceDamageMult,
+  masteryFinalBounceDamageMult,
   masteryHarvest,
   masteryKnockback,
   masteryPreload,
@@ -139,6 +142,29 @@ export const LANE_REVEAL_TIME = 1.3;
 // figure and the risen boss occupy the same spot with no jump.
 export const RISE_TIME = 0.9;
 export const RISE_LIFT = 40;
+
+// The Elf's magic arrows leap on impact: each bounce seeks the nearest living
+// enemy within BOUNCE_RANGE of the impact point that the chain hasn't hit yet.
+// Kept modest so a single Elf can't chain-clear a whole pack.
+export const BOUNCE_RANGE = 70;
+// Per-leap damage multipliers, applied to the ORIGINAL hit's damage (not
+// compounding): the 1st bounce uses index 0, the 2nd index 1, and so on. A bounce
+// beyond the list reuses the last entry, so tuning each leap — or adding more
+// bounces with a different falloff — is just editing this array.
+export const BOUNCE_DAMAGE_MULTS = [0.4, 0.4];
+
+/**
+ * Damage multiplier for the `index`-th leap of a bounce chain (1 = first bounce),
+ * from `BOUNCE_DAMAGE_MULTS`. Leaps past the end of the list reuse the last entry
+ * (0 if the list is empty), so any number of bounces is covered.
+ */
+function bounceDamageMult(index: number): number {
+  if (BOUNCE_DAMAGE_MULTS.length === 0) return 0;
+  return BOUNCE_DAMAGE_MULTS[Math.min(index, BOUNCE_DAMAGE_MULTS.length) - 1];
+}
+// How many recent positions a magic arrow (the Elf) keeps for its fading trail —
+// enough to streak a long, wispy tail behind the shaft (~9.7px covered per tick).
+const MAGIC_TRAIL_LENGTH = 22;
 
 // An enemy with `spawnLines` first walks SPEECH_ENTRY_DIST px onto the board so
 // it's clearly on screen, then stops and delivers its lines one at a time —
@@ -414,6 +440,9 @@ export class GameEngine {
       rangeAuraMult: masteryRangeAura(def.id, purchased),
       rangeBuffed: false,
       knockback: masteryKnockback(def.id, purchased),
+      bounces: effectiveBounces(def, 0),
+      bounceDamageMult: masteryBounceDamageMult(def.id, purchased),
+      finalBounceMult: masteryFinalBounceDamageMult(def.id, purchased),
       preloadMax,
       preloaded: 0,
       preloadTimer: stats.attackSpeed > 0 ? 1 / stats.attackSpeed : 0,
@@ -575,6 +604,7 @@ export class GameEngine {
     tower.attackSpeed = s.attackSpeed;
     tower.range = s.range;
     tower.aoe = effectiveAoe(tower.def, tower.upgradeTier);
+    tower.bounces = effectiveBounces(tower.def, tower.upgradeTier);
     tower.genAmount = this.genAmountFor(tower.def, tower.upgradeTier);
     // A higher base damage rescales this tower's adjacency aura.
     this.recomputeAdjacency();
@@ -1037,31 +1067,45 @@ export class GameEngine {
     const crit = this.rollCrit(tower);
     const dmg = tower.damage * (crit ? tower.critMultiplier : 1);
 
-    if (shape === 'archer' || shape === 'crossbow' || shape === 'wizard') {
-      // The Archer looses from its bow and the Wizard from a raised staff, not
+    if (
+      shape === 'archer' ||
+      shape === 'crossbow' ||
+      shape === 'wizard' ||
+      shape === 'elf'
+    ) {
+      // The Archer/Elf loose from a bow and the Wizard from a raised staff, not
       // the chest. Mirror the renderer's muzzle (local tip ~ (12.5, -3.5),
       // flipped to face the target).
       let origin = tower.pos;
-      if (shape === 'archer' || shape === 'wizard') {
+      if (shape === 'archer' || shape === 'wizard' || shape === 'elf') {
         const dir = target.pos.x >= tower.pos.x ? 1 : -1;
         const offY = shape === 'wizard' ? -6 : -3.5;
         origin = { x: tower.pos.x + dir * 12.5, y: tower.pos.y + offY };
       }
       // The Crossbow's bolt flies a bit faster and reads slightly heavier; the
-      // Wizard's gust is a swirling bullet rather than a fletched shaft.
+      // Wizard's gust is a swirling bullet rather than a fletched shaft; the Elf's
+      // enchanted shaft glows and leaps once to a nearby foe on impact.
       const crossbow = shape === 'crossbow';
       const wind = shape === 'wizard';
+      const magic = shape === 'elf';
       this.projectiles.push({
         pos: { ...origin },
         targetUid: target.uid,
         last: { ...target.pos },
-        speed: wind ? 860 : crossbow ? 660 : 520,
+        speed: wind ? 860 : crossbow ? 660 : magic ? 580 : 520,
         damage: dmg,
         crit,
         color: tower.def.visual.color,
         scale: wind ? 1.1 : crossbow ? 1.2 : 1,
-        style: wind ? 'wind' : 'arrow',
+        style: wind ? 'wind' : magic ? 'magic' : 'arrow',
         source: tower,
+        // The Elf's normal bounces, plus one extra final leap when Parting Shot
+        // mastery is active (its weaker fraction is applied in spawnBounce).
+        bounces: magic ? tower.bounces + (tower.finalBounceMult > 0 ? 1 : 0) : 0,
+        hitUids: magic ? [target.uid] : undefined,
+        baseDamage: magic ? dmg : undefined,
+        bounceIndex: magic ? 0 : undefined,
+        trail: magic ? [] : undefined,
       });
       return;
     }
@@ -1102,14 +1146,76 @@ export class GameEngine {
           const landed = this.damageEnemy(target, p.damage, p.source);
           if (p.crit && landed) this.critFloater(target.pos);
         }
+        // A magic arrow (the Elf) leaps once to the nearest other foe on impact.
+        if (p.bounces > 0) this.spawnBounce(p, dest);
         this.arrowImpact(dest, p.color);
         continue; // drop the arrow
       }
 
       p.pos = { x: p.pos.x + (dx / dist) * step, y: p.pos.y + (dy / dist) * step };
+      // A magic arrow drops a breadcrumb of recent positions so the renderer can
+      // streak a fading tail behind it (newest first, capped to a short length).
+      if (p.trail) {
+        p.trail.unshift({ ...p.pos });
+        if (p.trail.length > MAGIC_TRAIL_LENGTH) p.trail.length = MAGIC_TRAIL_LENGTH;
+      }
       survivors.push(p);
     }
     this.projectiles = survivors;
+  }
+
+  /**
+   * Send an Elf's magic arrow leaping from an impact point to the nearest living
+   * enemy within `BOUNCE_RANGE` that this chain hasn't hit yet — so a multi-bounce
+   * arrow seeks fresh foes instead of ricocheting back. The follow-up arrow
+   * carries `BOUNCE_DAMAGE_MULT` of the damage, one fewer bounce, and the extended
+   * hit list. Does nothing if no unhit enemy is in reach.
+   */
+  private spawnBounce(p: Projectile, from: Vec2): void {
+    const hit = p.hitUids ?? [p.targetUid];
+    let best: Enemy | undefined;
+    let bestDist = Infinity;
+    for (const e of this.enemies) {
+      if (e.dead || e.dying || e.rise > 0 || isSpeaking(e)) continue;
+      if (hit.includes(e.uid)) continue; // skip foes this chain already struck
+      const d = Math.hypot(e.pos.x - from.x, e.pos.y - from.y);
+      if (d <= BOUNCE_RANGE && d < bestDist) {
+        best = e;
+        bestDist = d;
+      }
+    }
+    if (!best) return;
+    const base = p.baseDamage ?? p.damage;
+    const nextIndex = (p.bounceIndex ?? 0) + 1;
+    const newBounces = p.bounces - 1;
+    // The extra Parting Shot leap is always the last one in the chain (the leap
+    // after which no bounces remain) and deals its own weaker fraction. Every
+    // earlier ("normal") leap uses the Resonant Enchantment override if set,
+    // otherwise the engine's default per-leap fractions.
+    const isFinal = newBounces === 0 && p.source.finalBounceMult > 0;
+    const override = p.source.bounceDamageMult;
+    const mult = isFinal
+      ? p.source.finalBounceMult
+      : override > 0
+        ? override
+        : bounceDamageMult(nextIndex);
+    this.projectiles.push({
+      pos: { ...from },
+      targetUid: best.uid,
+      last: { ...best.pos },
+      speed: 580,
+      damage: base * mult,
+      crit: p.crit,
+      color: p.color,
+      scale: 0.85,
+      style: 'magic',
+      source: p.source,
+      bounces: newBounces,
+      hitUids: [...hit, best.uid],
+      baseDamage: base,
+      bounceIndex: nextIndex,
+      trail: [],
+    });
   }
 
   /** A small spark ring where an arrow lands. */

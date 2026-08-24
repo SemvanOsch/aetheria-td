@@ -500,12 +500,17 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                   const deployed = engine?.deployedCount(id) ?? 0;
                   const atLimit = deployed >= def.deployLimit;
                   const affordable = (hud?.currency ?? 0) >= def.cost;
+                  // Mastery-adjusted stats the unit will deploy with (single
+                  // source), falling back to base stats before the engine mounts.
+                  const stats = engine?.deployStats(id);
+                  const dmg = stats?.damage ?? def.damage;
+                  const spd = stats?.attackSpeed ?? def.attackSpeed;
+                  const rng = stats?.range ?? def.range;
                   return (
                     <button
                       key={id}
                       className={`deploy-item ${selectedUnitId === id ? 'active' : ''}`}
                       disabled={atLimit}
-                      title={atLimit ? 'Deploy limit reached' : undefined}
                       onClick={() => {
                         setSelectedUnitId((cur) => (cur === id ? null : id));
                         setSelectedTowerUid(null);
@@ -519,6 +524,21 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                         </span>
                       </span>
                       <span className={`cost ${affordable ? '' : 'unaffordable'}`}>🪙{def.cost}</span>
+                      <span className="deploy-stats-tip" role="tooltip">
+                        {def.generator ? (
+                          <>
+                            <span className="dst-row"><span>Harvest</span><b>🪙{def.generator.amount}</b></span>
+                            <span className="dst-row"><span>Harvests</span><b>{def.generator.timesPerWave}/wave</b></span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="dst-row"><span>Attack</span><b>{dmg}</b></span>
+                            <span className="dst-row"><span>Atk Speed</span><b>{formatAttackSpeed(spd)}/s</b></span>
+                            <span className="dst-row"><span>Range</span><b>{rng}</b></span>
+                          </>
+                        )}
+                        {atLimit && <span className="dst-limit">Deploy limit reached</span>}
+                      </span>
                     </button>
                   );
                 })}

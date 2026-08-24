@@ -24,6 +24,7 @@ import {
   activeMasteryUpgrades,
   getMasteryUpgrade,
   masterySpent,
+  masteryTree,
 } from '../domain/mastery';
 
 export interface GameState {
@@ -73,11 +74,26 @@ export interface GameState {
    * a normal enemy unlocks at ENEMY_KILLS_TO_UNLOCK kills, a boss at its first.
    */
   enemyKills: Record<string, number>;
+  /** Persisted UI preferences (Champions menu toggles, etc.). */
+  prefs: UiPrefs;
 }
+
+/** Persisted, non-gameplay UI preferences. */
+export interface UiPrefs {
+  /** Champions menu rarity sort: 'desc' = rarest first, 'asc' = most common. */
+  championSort: 'asc' | 'desc';
+  /** Whether the "mastery upgrade available" marks show on champion cards. */
+  showMasteryMarks: boolean;
+}
+
+const DEFAULT_PREFS: UiPrefs = {
+  championSort: 'desc',
+  showMasteryMarks: true,
+};
 
 const STORAGE_KEY = 'state';
 const STARTING_GEMS = 300;
-const CURRENT_VERSION = 10;
+const CURRENT_VERSION = 11;
 
 /** Maximum distinct champions the player may bring into a stage. */
 export const MAX_TEAM_SIZE = 6;
@@ -96,6 +112,7 @@ export function createInitialState(): GameState {
     masteryDisabled: {},
     team: [...starters],
     enemyKills: {},
+    prefs: { ...DEFAULT_PREFS },
   };
 }
 
@@ -142,6 +159,8 @@ export function loadState(): GameState {
   migrated.team = Array.from(new Set(raw.team ?? migrated.ownedUnits))
     .filter((id) => migrated.ownedUnits.includes(id))
     .slice(0, MAX_TEAM_SIZE);
+  // Pre-v11 saves have no UI preferences; fill missing keys with the defaults.
+  migrated.prefs = { ...DEFAULT_PREFS, ...(raw.prefs ?? {}) };
   return migrated;
 }
 
@@ -193,6 +212,33 @@ export function toggleTeamMember(state: GameState, unitId: string): GameState {
     return state;
   }
   return { ...state, team: [...state.team, unitId] };
+}
+
+/** Merge a partial UI-preferences patch into the persisted prefs. */
+export function setPrefs(state: GameState, patch: Partial<UiPrefs>): GameState {
+  return { ...state, prefs: { ...state.prefs, ...patch } };
+}
+
+/**
+ * Move the team member at `from` to index `to`, shifting the others. Used by the
+ * drag-and-drop reorder in the Champions team bar; out-of-range indices are a
+ * no-op. Only reorders existing members — never adds or drops anyone.
+ */
+export function reorderTeam(state: GameState, from: number, to: number): GameState {
+  const team = state.team;
+  if (
+    from === to ||
+    from < 0 ||
+    to < 0 ||
+    from >= team.length ||
+    to >= team.length
+  ) {
+    return state;
+  }
+  const next = [...team];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return { ...state, team: next };
 }
 
 /** Gems granted for re-clearing a stage the player has already beaten. */
@@ -358,6 +404,24 @@ export function availableMasteryExp(
     masteryExp(state, unitId) -
     masterySpent(unitId, masteryUpgradesFor(state, unitId))
   );
+}
+
+/**
+ * Whether this champion has at least one mastery node it can learn *right now*:
+ * not already learned, its prerequisite met, and affordable with the EXP on hand.
+ * Drives the "upgrade available" notification dot on the Champions cards.
+ */
+export function hasAffordableMasteryUpgrade(
+  state: GameState,
+  unitId: string,
+): boolean {
+  const available = availableMasteryExp(state, unitId);
+  const owned = masteryUpgradesFor(state, unitId);
+  return masteryTree(unitId).some((node) => {
+    if (owned.includes(node.id)) return false;
+    if (node.requires && !owned.includes(node.requires)) return false;
+    return available >= node.cost;
+  });
 }
 
 /**

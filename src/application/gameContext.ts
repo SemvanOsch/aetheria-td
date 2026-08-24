@@ -8,7 +8,7 @@
  */
 
 import { createContext, useContext } from 'react';
-import type { GameState } from './gameState';
+import type { GameState, UiPrefs } from './gameState';
 import type { SummonOutcome } from './summon';
 
 export interface GameStore {
@@ -29,6 +29,10 @@ export interface GameStore {
   setMasteryDisabled: (unitId: string, disabled: boolean) => void;
   /** Add/remove an owned champion from the deployable team (capped at 6). */
   toggleTeamMember: (unitId: string) => void;
+  /** Reorder the team by moving the member at `from` to index `to`. */
+  reorderTeam: (from: number, to: number) => void;
+  /** Merge a patch into the persisted UI preferences. */
+  setPrefs: (patch: Partial<UiPrefs>) => void;
   /** Wipe all progression back to a fresh account. */
   resetAccount: () => void;
   /** Add gems (used by the settings grant button). */

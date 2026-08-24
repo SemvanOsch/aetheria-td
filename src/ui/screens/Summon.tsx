@@ -86,7 +86,7 @@ export function Summon() {
               <span style={{ opacity: 0.5 }}> ({comingSoon.join(' · ')} coming soon)</span>
             )}
             <br />
-            Duplicates refund {Math.round(DUPLICATE_REFUND * 100)}% of the gem cost.
+            Duplicates refund {Math.round(DUPLICATE_REFUND * 100)}% of the gem cost and grant the champion mastery EXP.
           </p>
         </div>
       </div>
@@ -127,7 +127,8 @@ function RevealedUnit({ outcome }: { outcome: SummonOutcome }) {
       </p>
       {outcome.duplicate && (
         <p style={{ marginTop: 4, fontSize: 13, color: '#6fd6ff', fontWeight: 600 }}>
-          💎 {Math.round(SUMMON_COST * DUPLICATE_REFUND)} gems refunded
+          💎 {Math.round(SUMMON_COST * DUPLICATE_REFUND)} gems refunded · ⭐ +
+          {outcome.duplicateExp} {unit.name} mastery EXP
         </p>
       )}
     </div>

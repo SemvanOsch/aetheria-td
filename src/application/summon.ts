@@ -7,7 +7,7 @@
  * no change here.
  */
 
-import { ALL_RARITIES, type Rarity } from '../domain/rarity';
+import { ALL_RARITIES, RARITIES, type Rarity } from '../domain/rarity';
 import { ALL_UNITS, type UnitDef } from '../domain/units';
 
 /** Cost of one summon, paid in gems. */
@@ -21,6 +21,8 @@ export interface SummonOutcome {
   unit: UnitDef;
   /** True if this unit type was already in the collection. */
   duplicate: boolean;
+  /** Mastery EXP granted to the champion when this summon is a duplicate. */
+  duplicateExp: number;
 }
 
 function rollRarity(rng: () => number): Rarity {
@@ -50,7 +52,13 @@ export function rollSummon(
 ): SummonOutcome {
   const rarity = rollRarity(rng);
   const unit = pickUnitOfRarity(rarity, rng);
-  return { rarity, unit, duplicate: owned.includes(unit.id) };
+  const duplicate = owned.includes(unit.id);
+  return {
+    rarity,
+    unit,
+    duplicate,
+    duplicateExp: duplicate ? RARITIES[rarity].duplicateExp : 0,
+  };
 }
 
 /** Whether the player has enough gems to summon. */

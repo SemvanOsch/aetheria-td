@@ -11,6 +11,8 @@ import {
 } from '../../domain/units';
 import {
   masteryAttackSpeedMult,
+  masteryBounceDamageMult,
+  masteryFinalBounceDamageMult,
   masteryDamageMult,
   masteryGenerateMult,
   masteryHarvest,
@@ -20,8 +22,8 @@ import {
   masteryUpgradeDeltas,
 } from '../../domain/mastery';
 import { critChanceFor, critMultiplierFor } from '../../domain/combat';
+import { BOUNCE_DAMAGE_MULTS } from '../../engine/GameEngine';
 import { RARITIES } from '../../domain/rarity';
-import { targetingLabel } from '../../domain/targeting';
 import { UnitSprite } from './UnitSprite';
 
 /** "5%", "12.5%", "20%" — trims trailing zeros. */
@@ -63,38 +65,42 @@ export function ChampionDetail({
     ? masteryHarvest(unit.generator.amount, unit.id, purchased)
     : 0;
   const genBoosted = unit.generator != null && masteryGenerateMult(unit.id, purchased) > 1;
+  // Bouncing-projectile champions (the Elf): the damage fraction each leap deals,
+  // reflecting any mastery override (Resonant Enchantment) or the engine default.
+  const bounces = unit.bounces ?? 0;
+  const bounceFraction =
+    masteryBounceDamageMult(unit.id, purchased) || BOUNCE_DAMAGE_MULTS[0];
+  // An extra, weaker final leap from mastery (the Elf's Parting Shot), if learned.
+  const finalBounceFraction = masteryFinalBounceDamageMult(unit.id, purchased);
+  const bounceDamageValue =
+    finalBounceFraction > 0
+      ? `${+(bounceFraction * 100).toFixed(1)}% (final leap ${+(finalBounceFraction * 100).toFixed(1)}%)`
+      : `${+(bounceFraction * 100).toFixed(1)}%`;
 
-  const rows: { label: string; value: string }[] = unit.generator
+  type DetailItem = { divider: true } | { label: string; value: string };
+  const rows: DetailItem[] = unit.generator
     ? [
-        { label: 'Rarity', value: rarity.name },
-        { label: 'Type', value: 'Economy (Farmer)' },
-        ...(unit.attackType
-          ? [{ label: 'Range type', value: attackTypeLabel(unit.attackType) }]
-          : []),
+        { label: 'Deploy cost', value: `🪙 ${unit.cost}` },
+        { label: 'Per-stage limit', value: `${unit.deployLimit}` },
+        { divider: true },
         { label: 'Harvest', value: `🪙 ${harvest} gold` },
         { label: 'Harvests per wave', value: `${unit.generator.timesPerWave}×` },
         { label: 'Gold per wave', value: `🪙 ${harvest * unit.generator.timesPerWave}` },
-        { label: 'Deploy cost', value: `🪙 ${unit.cost}` },
-        { label: 'Per-stage limit', value: `${unit.deployLimit}` },
       ]
     : [
-        { label: 'Rarity', value: rarity.name },
-        { label: 'Attack type', value: aoeLabel(unit.aoe) },
-        ...(unit.attackType
-          ? [{ label: 'Range type', value: attackTypeLabel(unit.attackType) }]
-          : []),
-        ...(unit.damageType
-          ? [{ label: 'Damage type', value: damageTypeLabel(unit.damageType) }]
-          : []),
+        { label: 'Deploy cost', value: `🪙 ${unit.cost}` },
+        { label: 'Per-stage limit', value: `${unit.deployLimit}` },
+        { divider: true },
         { label: 'Damage', value: `${damage} / hit` },
         { label: 'Attack speed', value: `${formatAttackSpeed(attackSpeed)} / s` },
         { label: 'DPS', value: `${dps.toFixed(0)}${unit.aoe === 'line' ? ' per enemy in line' : ''}` },
         { label: 'Range', value: `${range}px (${rangeLabel(range)})` },
+        { divider: true },
         { label: 'Crit chance', value: critChanceLabel(critChanceFor(unit, purchased)) },
         { label: 'Crit damage', value: `${critMultiplierFor(unit, purchased)}×` },
-        { label: 'Default target', value: targetingLabel(unit.targeting) },
-        { label: 'Deploy cost', value: `🪙 ${unit.cost}` },
-        { label: 'Per-stage limit', value: `${unit.deployLimit}` },
+        ...(bounces > 0
+          ? [{ label: 'Bounce damage', value: bounceDamageValue }]
+          : []),
       ];
 
   // Portalled to <body> so an ancestor screen's transform can't shrink this
@@ -173,12 +179,16 @@ export function ChampionDetail({
         )}
 
         <div className="detail-grid">
-          {rows.map((r) => (
-            <div key={r.label} className="detail-row">
-              <span>{r.label}</span>
-              <b>{r.value}</b>
-            </div>
-          ))}
+          {rows.map((r, i) =>
+            'divider' in r ? (
+              <div key={`div-${i}`} className="detail-divider" />
+            ) : (
+              <div key={r.label} className="detail-row">
+                <span>{r.label}</span>
+                <b>{r.value}</b>
+              </div>
+            ),
+          )}
         </div>
 
         {genBoosted && (

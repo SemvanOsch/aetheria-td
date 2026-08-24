@@ -134,6 +134,20 @@ export interface MasteryUpgradeDef {
    * (e.g. the Crossbow's Quick Loader). Omit for no preloading.
    */
   preloadShots?: number;
+  /**
+   * Overrides the damage fraction each of a bouncing projectile's leaps deals
+   * (the Elf's magic arrow) — e.g. 0.5 makes every bounce hit for 50% of the
+   * original instead of the default. Applied to the normal leaps; highest wins if
+   * several nodes set it. Omit for a node that doesn't touch bounce damage.
+   */
+  bounceDamageMult?: number;
+  /**
+   * Appends one extra leap to the end of a bouncing projectile's chain (the Elf's
+   * magic arrow), always struck last and dealing this fraction of the original
+   * hit — independent of `bounceDamageMult`, which governs the normal leaps.
+   * Highest wins if several nodes set it. Omit for a node that adds no final leap.
+   */
+  finalBounceDamageMult?: number;
 }
 
 /**
@@ -294,6 +308,51 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
       requires: 'magical_bargaining',
       major: true,
       knockback: 14,
+    },
+  ],
+  elf: [
+    {
+      id: 'keen_instinct',
+      name: 'Keen Instinct',
+      description: 'A wild, woodland eye for the weak spot — +7.5% critical hit chance.',
+      cost: 125,
+      critChanceBonus: 0.075,
+    },
+    {
+      id: 'greenwood_might',
+      name: 'Greenwood Might',
+      description: 'The greenwood lends its strength to every draw — +5% damage.',
+      cost: 125,
+      requires: 'keen_instinct',
+      damageMult: 1.05,
+    },
+    {
+      id: 'resonant_enchantment',
+      name: 'Resonant Enchantment',
+      description:
+        'The bounce enchantment rings truer — each arrow’s leap now strikes for 50%.',
+      cost: 300,
+      requires: 'greenwood_might',
+      major: true,
+      bounceDamageMult: 0.5,
+    },
+    {
+      id: 'keen_instinct_2',
+      name: 'Keen Instinct II',
+      description: 'Her wild eye grows keener still — +7.5% critical hit chance.',
+      cost: 250,
+      requires: 'resonant_enchantment',
+      critChanceBonus: 0.075,
+    },
+    {
+      id: 'parting_shot',
+      name: 'Parting Shot',
+      description:
+        'The spell holds one last spark — after every other leap, the arrow ricochets a final time to one more nearby foe, striking for 25% of the original hit.',
+      cost: 500,
+      requires: 'keen_instinct_2',
+      major: true,
+      finalBounceDamageMult: 0.25,
     },
   ],
   farmer: [
@@ -628,6 +687,8 @@ export function masteryUpgradeDeltas(
     attackSpeed: cur.attackSpeed - prev.attackSpeed,
     range: cur.range - prev.range,
     generate: masteryGenerateDelta(unit, tier, purchased),
+    // Bounces aren't mastery-scaled, so pass this tier's own delta straight through.
+    bounces: unit.upgrades[tier - 1]?.bounces,
   };
 }
 
@@ -680,4 +741,42 @@ export function masteryKnockback(
     }
   }
   return max;
+}
+
+/**
+ * The damage fraction each leap of a bouncing projectile deals, overridden by a
+ * champion's purchased nodes (the Elf's Resonant Enchantment), or 0 when none
+ * apply — in which case the engine falls back to its default per-leap fractions.
+ * Highest override wins if several apply.
+ */
+export function masteryBounceDamageMult(
+  unitId: string,
+  purchased: readonly string[],
+): number {
+  let mult = 0;
+  for (const u of masteryTree(unitId)) {
+    if (u.bounceDamageMult && purchased.includes(u.id)) {
+      mult = Math.max(mult, u.bounceDamageMult);
+    }
+  }
+  return mult;
+}
+
+/**
+ * The damage fraction of the extra final leap a champion's purchased nodes append
+ * to a bouncing chain (the Elf's Parting Shot), or 0 when none apply. A value > 0
+ * means one additional leap is struck last for that fraction of the original hit.
+ * Highest wins if several apply.
+ */
+export function masteryFinalBounceDamageMult(
+  unitId: string,
+  purchased: readonly string[],
+): number {
+  let mult = 0;
+  for (const u of masteryTree(unitId)) {
+    if (u.finalBounceDamageMult && purchased.includes(u.id)) {
+      mult = Math.max(mult, u.finalBounceDamageMult);
+    }
+  }
+  return mult;
 }

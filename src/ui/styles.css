@@ -491,6 +491,20 @@ button:disabled {
   border-radius: 10px;
   flex-shrink: 0;
 }
+.btn.sort-toggle.off {
+  opacity: 0.6;
+}
+/* Fixed width so toggling between "Marks On" / "Marks Off" (different text
+   widths) doesn't resize the button. */
+.btn.sort-toggle.marks-toggle {
+  min-width: 118px;
+  text-align: center;
+}
+.collection-controls {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
 
 /* ---------------------------------------------------------- panels */
 .panel {
@@ -561,6 +575,20 @@ button:disabled {
   text-align: center;
   padding: 18px 12px;
 }
+button.stat-card.clickable {
+  width: 100%;
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+button.stat-card.clickable:hover {
+  transform: translateY(-3px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow);
+}
+button.stat-card.clickable:active {
+  transform: translateY(-1px);
+}
 .stat-card .value {
   font-size: 30px;
   font-weight: 800;
@@ -580,6 +608,34 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 14px;
+}
+/* Position context for the mastery-available notification dot. */
+.card-grid > div {
+  position: relative;
+}
+.mastery-ready-dot {
+  position: absolute;
+  top: -5px;
+  left: -5px;
+  z-index: 3;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--gold, #f2c14e);
+  border: 2px solid var(--bg-0, #0b0e1c);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  animation: mastery-dot-pulse 2.6s ease-in-out infinite;
+}
+@keyframes mastery-dot-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), 0 0 3px 1px var(--gold, #f2c14e);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), 0 0 5px 1px var(--gold, #f2c14e);
+  }
 }
 
 /* team configuration bar (champions menu) */
@@ -623,11 +679,20 @@ button:disabled {
 .team-slot.filled {
   background: rgba(95, 211, 138, 0.14);
   border: 1px solid rgba(95, 211, 138, 0.5);
-  cursor: pointer;
-  transition: filter 0.15s ease;
+  cursor: grab;
+  transition: filter 0.15s ease, transform 0.12s ease, box-shadow 0.12s ease;
 }
 .team-slot.filled:hover {
   filter: brightness(1.1);
+}
+.team-slot.filled.dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+.team-slot.filled.drop-target {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px var(--gold);
+  transform: translateY(-3px);
 }
 .team-slot.filled:hover .team-slot-x {
   opacity: 1;
@@ -954,6 +1019,11 @@ button:disabled {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border);
   font-size: 13.5px;
+}
+.detail-divider {
+  height: 1px;
+  margin: 2px 4px;
+  background: var(--border);
 }
 .detail-row span {
   color: var(--text-dim);
@@ -1989,6 +2059,70 @@ button.mastery-box.as-button:hover {
 }
 .deploy-item .cost.unaffordable {
   color: #e5658b;
+}
+/* Hover stats tooltip on deploy cards (attack / speed / range). */
+.deploy-item {
+  position: relative;
+}
+.deploy-stats-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  z-index: 40;
+  min-width: 150px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: rgba(16, 21, 40, 0.98);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  text-align: left;
+}
+.deploy-item:hover .deploy-stats-tip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+/* Little downward arrow — ::before is the (slightly larger) bordered triangle
+   sitting behind the ::after fill, so the tooltip's outline continues onto it. */
+.deploy-stats-tip::before,
+.deploy-stats-tip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 7px solid transparent;
+  border-top-color: var(--border-strong);
+}
+.deploy-stats-tip::after {
+  border-width: 6px;
+  border-top-color: rgba(16, 21, 40, 0.98);
+}
+.dst-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.dst-row b {
+  color: var(--text);
+  font-weight: 700;
+}
+.dst-limit {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--red);
+  text-align: center;
 }
 .hint {
   font-size: 12.5px;

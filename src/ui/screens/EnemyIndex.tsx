@@ -139,7 +139,7 @@ function EnemyDetail({ def, onClose }: { def: EnemyDef; onClose: () => void }) {
               {def.boss && '☠ '}
               {def.name}
             </h2>
-            <div className="rarity-row" style={{ textAlign: 'left', marginTop: 4 }}>
+            <div className="rarity-row" style={{ justifyContent: 'flex-start', marginTop: 4 }}>
               <span className={`aoe-tag ${def.boss ? 'line' : 'single'}`}>
                 {def.boss ? 'Boss' : 'Enemy'}
               </span>

@@ -154,6 +154,25 @@ export interface Tower {
    * Wizard's Gale Force). A fixed deploy-time property read in `damageEnemy`.
    */
   knockback: number;
+  /**
+   * Extra foes each of this tower's projectiles leaps to on impact (the Elf's
+   * bouncing magic arrow). Its base `bounces` plus any purchased upgrade; folded
+   * in on deploy and on upgrade, and read by `fire` when loosing the arrow.
+   */
+  bounces: number;
+  /**
+   * Overrides the per-leap damage fraction for this tower's bouncing projectiles
+   * (the Elf's Resonant Enchantment mastery). 0 = no override, so the engine uses
+   * its default per-leap fractions; a value like 0.5 makes every bounce deal that
+   * fraction of the original hit.
+   */
+  bounceDamageMult: number;
+  /**
+   * Fraction of the original hit dealt by an extra final leap appended to this
+   * tower's bounce chain (the Elf's Parting Shot mastery). 0 = no extra leap; a
+   * value like 0.25 adds one last bounce struck after all normal leaps.
+   */
+  finalBounceMult: number;
   /** Max spare shots this tower can crank up while idle (0 = no preloading). */
   preloadMax: number;
   /** Spare shots currently cranked and ready to loose in quick succession. */
@@ -294,14 +313,45 @@ export interface Projectile {
   color: string;
   /** Render size multiplier (e.g. the Crossbow's bolt is a touch bigger). */
   scale: number;
-  /** Visual style: a fletched arrow/bolt, or the Wizard's swirling wind bullet. */
+  /** Visual style: a fletched arrow/bolt, the Wizard's wind bullet, or the Elf's magic arrow. */
   style: ProjectileStyle;
   /** Tower that loosed it, credited with EXP if the impact kills. */
   source: Tower;
+  /**
+   * Remaining leaps to a nearby foe on impact (the Elf's bouncing magic arrow).
+   * 0 for an ordinary shot; a magic arrow starts at 1 and, when it lands, spawns
+   * a weaker follow-up arrow at `bounces - 1` toward the nearest other enemy.
+   */
+  bounces: number;
+  /**
+   * Enemies already struck earlier in this bounce chain (the Elf's magic arrow),
+   * so each leap skips foes it has already hit and seeks a fresh target instead
+   * of ricocheting back. Undefined for a non-bouncing shot; the first magic arrow
+   * starts with its primary target's uid.
+   */
+  hitUids?: number[];
+  /**
+   * The original (primary) hit's damage for a bounce chain, crit already folded
+   * in. Every leap's damage is this base × its per-bounce multiplier — so bounces
+   * scale off the first hit rather than compounding off each other.
+   */
+  baseDamage?: number;
+  /**
+   * Which leap of the chain this arrow is: 0 for the primary shot, 1 for the
+   * first bounce, and so on. Picks the per-bounce damage multiplier.
+   */
+  bounceIndex?: number;
+  /**
+   * Recent positions (newest first) left behind for a fading cosmetic trail —
+   * populated only for the Elf's `magic` arrow so it streaks a wispy tail. The
+   * engine appends the current position each tick and caps the length; the
+   * renderer draws older points progressively fainter. Undefined for plain shots.
+   */
+  trail?: Vec2[];
 }
 
 /** How a projectile is drawn in flight. */
-export type ProjectileStyle = 'arrow' | 'wind';
+export type ProjectileStyle = 'arrow' | 'wind' | 'magic';
 
 export type Outcome = 'playing' | 'won' | 'lost';
 

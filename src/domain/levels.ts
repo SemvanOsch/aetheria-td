@@ -100,7 +100,7 @@ export interface LevelDef {
 const DEFAULT_SPACING = 0.85;
 
 /** Every stage starts the player with this much gold (per-stage resource). */
-const STARTING_GOLD = 200;
+const STARTING_GOLD = 400;
 
 // Shorthand enemy ids per section.
 const CAS = { g: 'cas_grunt', g2: 'cas_grunt2', g3: 'cas_grunt3', r: 'cas_runner', b: 'cas_brute', m: 'cas_mage' };

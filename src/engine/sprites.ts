@@ -127,6 +127,222 @@ export function drawArcher(
 }
 
 /**
+ * Procedural Elf silhouette — a slender female woodland archer drawing a glowing
+ * enchanted longbow — painted in the caller's local space (origin at the figure's
+ * centre; feet near y=+11, head near y=-16, bow reaching to about x=+18). The
+ * figure is authored facing +x and flipped horizontally when `faceLeft`.
+ * `release` (0..1) snaps the bowstring forward and empties the nock just after a
+ * shot, easing back to a ready draw at rest. Distinguished from the Archer by a
+ * long golden ponytail, a pointed ear and a slim circlet, and by the arcane glow
+ * on her bow and nocked shaft. Replaces the emoji token for `shape: 'elf'` units.
+ */
+export function drawElf(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  faceLeft: boolean,
+  release: number,
+  empowered = false,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (faceLeft) ctx.scale(-1, 1);
+
+  const tunicLit = shade(color, 0.2);
+  const sleeve = shade(color, -0.22);
+  const glow = shade(color, 0.4);
+  const hair = '#e6c25a';
+  const hairDark = shade(hair, -0.28);
+  const skin = '#f0d0ad';
+
+  // Legs — slim leggings.
+  ctx.strokeStyle = '#4a5a3a';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-1.2, 4);
+  ctx.lineTo(-2.6, 11);
+  ctx.moveTo(2.4, 4);
+  ctx.lineTo(3.2, 11);
+  ctx.stroke();
+
+  // Long ponytail flowing back behind the torso (drawn first so it sits behind).
+  ctx.fillStyle = hairDark;
+  ctx.beginPath();
+  ctx.moveTo(-2.5, -12);
+  ctx.quadraticCurveTo(-9.5, -8, -7, 3);
+  ctx.quadraticCurveTo(-5.5, -1, -4, -5);
+  ctx.quadraticCurveTo(-3, -9, -2.5, -12);
+  ctx.closePath();
+  ctx.fill();
+
+  // Tunic / torso — a slimmer teardrop with a lit front edge for volume.
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, -8.5);
+  ctx.quadraticCurveTo(6.5, -5, 5.5, 6);
+  ctx.quadraticCurveTo(0, 8, -5.5, 6);
+  ctx.quadraticCurveTo(-6.5, -5, 0, -8.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = tunicLit;
+  ctx.beginPath();
+  ctx.moveTo(0, -8.5);
+  ctx.quadraticCurveTo(6.5, -5, 5.5, 6);
+  ctx.quadraticCurveTo(2.6, 7, 2.1, 6);
+  ctx.quadraticCurveTo(2.9, -4, 0, -8.5);
+  ctx.closePath();
+  ctx.fill();
+
+  // Head.
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.arc(1.6, -11.4, 3.2, 0, Math.PI * 2);
+  ctx.fill();
+  // Pointed ear swept back.
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.moveTo(-0.8, -11.6);
+  ctx.lineTo(-3.4, -13.2);
+  ctx.lineTo(-1.2, -10);
+  ctx.closePath();
+  ctx.fill();
+  // Hair crown / fringe over the head.
+  ctx.fillStyle = hair;
+  ctx.beginPath();
+  ctx.moveTo(-2.2, -10.6);
+  ctx.quadraticCurveTo(-3, -16, 2, -16);
+  ctx.quadraticCurveTo(5.4, -15.4, 4.8, -11);
+  ctx.quadraticCurveTo(2.6, -14, 0, -13.6);
+  ctx.quadraticCurveTo(-1.8, -13.4, -2.2, -10.6);
+  ctx.closePath();
+  ctx.fill();
+  // Slim circlet band across the brow.
+  ctx.strokeStyle = glow;
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.moveTo(-1.4, -12.6);
+  ctx.quadraticCurveTo(1.8, -14.4, 4.4, -12.2);
+  ctx.stroke();
+
+  // --- Enchanted bow & arms ---
+  // The string hand pulls back at full draw (release -> 0) and snaps to the bow
+  // as the shot looses (release -> 1). Mirrors the Archer's bow geometry.
+  const gripX = 9.5;
+  const gripY = -4.5;
+  const bowCx = gripX - 1;
+  const bowCy = gripY + 2.5;
+  const bowR = 8.5;
+  const drawBack = 5 * (1 - release);
+  const stringX = gripX - 7 - drawBack;
+  const stringY = gripY + 3;
+
+  // Bow limb — a glowing arcane arc rather than plain wood.
+  ctx.strokeStyle = withAlpha(color, 0.28);
+  ctx.lineWidth = 3.4;
+  ctx.beginPath();
+  ctx.arc(bowCx, bowCy, bowR, -1.15, 1.15);
+  ctx.stroke();
+  ctx.strokeStyle = glow;
+  ctx.lineWidth = 1.7;
+  ctx.beginPath();
+  ctx.arc(bowCx, bowCy, bowR, -1.15, 1.15);
+  ctx.stroke();
+
+  // Bowstring from top limb to the draw hand to the bottom limb.
+  const topX = bowCx + Math.cos(-1.15) * bowR;
+  const topY = bowCy + Math.sin(-1.15) * bowR;
+  const botX = bowCx + Math.cos(1.15) * bowR;
+  const botY = bowCy + Math.sin(1.15) * bowR;
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(topX, topY);
+  ctx.lineTo(stringX, stringY);
+  ctx.lineTo(botX, botY);
+  ctx.stroke();
+
+  // Nocked magic arrow (only while still drawn) — a glowing shaft with a bright tip.
+  if (release < 0.5) {
+    ctx.strokeStyle = glow;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(stringX, stringY);
+    ctx.lineTo(gripX + 4, gripY + 1);
+    ctx.stroke();
+    ctx.fillStyle = '#f4eeff';
+    ctx.beginPath();
+    ctx.arc(gripX + 4, gripY + 1, 1.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Arms (tunic sleeves): front to the grip, back to the string hand.
+  ctx.strokeStyle = sleeve;
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.moveTo(1, -5);
+  ctx.lineTo(gripX, gripY);
+  ctx.moveTo(0, -4);
+  ctx.lineTo(stringX, stringY);
+  ctx.stroke();
+
+  // Enchanted sparkles spilling off the whole bow limb once Chain Enchantment is
+  // bought (the limb is the arc centred at (bowCx, bowCy), radius bowR).
+  if (empowered) drawBowSparkles(ctx, color, bowCx, bowCy, bowR);
+
+  ctx.restore();
+}
+
+/**
+ * Small arcane sparkles spilling off the Elf's whole bow limb — the ambient tell
+ * that her Chain Enchantment upgrade is bought. The limb is the arc centred at
+ * `(cx, cy)` with radius `r` (drawn in the figure's local space). Each mote is
+ * born at a point spread along that arc, then drifts outward (away from the bow's
+ * centre) and fades over its own looped life off the shared clock, so motes rise
+ * from the top, middle and bottom of the bow alike. A soft coloured glow with a
+ * bright core, tinted the champion's arcane colour.
+ */
+function drawBowSparkles(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  cx: number,
+  cy: number,
+  r: number,
+): void {
+  const t = nowMs() / 1000;
+  const a0 = -1.15; // top limb tip (matches the bow arc drawn above)
+  const a1 = 1.15; // bottom limb tip
+  ctx.save();
+  const N = 8;
+  for (let i = 0; i < N; i++) {
+    const seed = i * 1.7;
+    const life = (t * 0.85 + i / N) % 1; // 0→1 loop, staggered per mote
+    // Birth point spread along the limb, drifting slowly so motes keep appearing
+    // at fresh spots up and down the bow rather than fixed stations.
+    const frac = ((i / N) + t * 0.11 + 0.5 * Math.sin(seed)) % 1;
+    const ang = a0 + (a1 - a0) * ((frac + 1) % 1);
+    const nx = Math.cos(ang);
+    const ny = Math.sin(ang);
+    // Drift outward along the limb's normal, plus a small sideways wobble.
+    const out = life * 3.5;
+    const x = cx + nx * (r + out) + Math.sin(t * 3 + seed) * 0.7;
+    const y = cy + ny * (r + out) - life * 1.5;
+    // Fade in then out over the life, with a small twinkle.
+    const alpha = Math.sin(life * Math.PI) * (0.55 + 0.2 * Math.sin(t * 5 + seed));
+    const size = 1.1 * (1 - life * 0.4);
+    ctx.globalAlpha = Math.max(0, alpha);
+    ctx.fillStyle = withAlpha(color, 0.6);
+    ctx.beginPath();
+    ctx.arc(x, y, size + 0.7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#f4eeff';
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/**
  * Lighten (`amt` > 0) or darken (`amt` < 0) a `#rgb`/`#rrggbb` colour by mixing
  * it toward white or black. `amt` is a 0..1 fraction; returns an `rgb(...)`
  * string. Used to derive shading tones from a unit's single accent colour.
@@ -142,6 +358,14 @@ export function shade(hex: string, amt: number): string {
   const g = mix((n >> 8) & 255);
   const b = mix(n & 255);
   return `rgb(${r},${g},${b})`;
+}
+
+/** A `#rgb`/`#rrggbb` colour as an `rgba(...)` string with the given alpha. */
+function withAlpha(hex: string, alpha: number): string {
+  const c = hex.replace('#', '');
+  const full = c.length === 3 ? c.split('').map((x) => x + x).join('') : c;
+  const n = parseInt(full, 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
 
 /**
@@ -4219,7 +4443,8 @@ export function hasSprite(shape: string): boolean {
     shape === 'spear' ||
     shape === 'crossbow' ||
     shape === 'farmer' ||
-    shape === 'wizard'
+    shape === 'wizard' ||
+    shape === 'elf'
   );
 }
 
@@ -4249,4 +4474,5 @@ export function drawUnitSprite(
   else if (shape === 'crossbow') drawCrossbowman(ctx, color, faceLeft, anim);
   else if (shape === 'farmer') drawFarmer(ctx, color, faceLeft);
   else if (shape === 'wizard') drawWizard(ctx, color, faceLeft, anim, empowered);
+  else if (shape === 'elf') drawElf(ctx, color, faceLeft, anim, empowered);
 }
