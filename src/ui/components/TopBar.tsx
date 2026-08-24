@@ -3,6 +3,7 @@ import type { Screen } from '../App';
 import { useGame } from '../../application/gameContext';
 import { Gems } from './Currency';
 import { Settings } from './Settings';
+import { PatchNotes } from './PatchNotes';
 
 interface Props {
   active: Screen;
@@ -19,6 +20,7 @@ const TABS: { id: Screen; label: string }[] = [
 export function TopBar({ active, onNavigate }: Props) {
   const { state } = useGame();
   const [showSettings, setShowSettings] = useState(false);
+  const [showPatchNotes, setShowPatchNotes] = useState(false);
 
   return (
     <header className="topbar">
@@ -39,6 +41,14 @@ export function TopBar({ active, onNavigate }: Props) {
       <Gems amount={state.gems} />
       <button
         className="settings-btn"
+        onClick={() => setShowPatchNotes(true)}
+        aria-label="Patch notes"
+        title="Patch notes"
+      >
+        📝
+      </button>
+      <button
+        className="settings-btn"
         onClick={() => setShowSettings(true)}
         aria-label="Settings"
         title="Settings"
@@ -46,6 +56,7 @@ export function TopBar({ active, onNavigate }: Props) {
         ⚙️
       </button>
       {showSettings && <Settings onClose={() => setShowSettings(false)} />}
+      {showPatchNotes && <PatchNotes onClose={() => setShowPatchNotes(false)} />}
     </header>
   );
 }

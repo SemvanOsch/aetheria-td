@@ -120,10 +120,11 @@ export interface EnemyVisual {
 const REGULAR: Record<string, EnemyDef> = {
   // Castle — disciplined rebels and siege beasts.
   cas_grunt: { id: 'cas_grunt', name: 'Footman', health: 60, speed: 46, reward: 2, damageToBase: 1, visual: { color: '#b3bccb', icon: '🛡️' }, boss: false, radius: 13 },
-  cas_grunt2: { id: 'cas_grunt2', name: 'Sergeant', health: 140, speed: 42, reward: 5, damageToBase: 1, visual: { color: '#9aa6be', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2 },
+  cas_grunt2: { id: 'cas_grunt2', name: 'Sergeant', health: 140, speed: 42, reward: 5, damageToBase: 2, visual: { color: '#9aa6be', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2 },
+  cas_grunt3: { id: 'cas_grunt3', name: 'Man-at-Arms', health: 185, speed: 46, reward: 6, damageToBase: 2, visual: { color: '#7d8697', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2 },
   cas_runner: { id: 'cas_runner', name: 'Outrider', health: 65, speed: 94, reward: 3, damageToBase: 1, visual: { color: '#d7a94a', icon: '🐎' }, boss: false, radius: 14 },
   cas_mage: { id: 'cas_mage', name: 'Royal Wizard', health: 110, speed: 50, reward: 4, damageToBase: 1, visual: { color: '#530a69', icon: '🧙' }, boss: false, radius: 12, magicResist: 0.2 },
-  cas_brute: { id: 'cas_brute', name: 'Siege Ram', health: 245, speed: 30, reward: 8, damageToBase: 2, visual: { color: '#8a93a8', icon: '🐏' }, boss: false, radius: 17, physicalResist: 0.2 },
+  cas_brute: { id: 'cas_brute', name: 'Siege Ram', health: 245, speed: 30, reward: 8, damageToBase: 3, visual: { color: '#8a93a8', icon: '🐏' }, boss: false, radius: 17, physicalResist: 0.2 },
 
   // Forest — wild beasts and ancient growth.
   for_grunt: { id: 'for_grunt', name: 'Goblin Forager', health: 96, speed: 48, reward: 6, damageToBase: 1, visual: { color: '#7bb86f', icon: '👺' }, boss: false, radius: 13 },
@@ -190,7 +191,7 @@ const BOSS_META: BossMeta[] = [
     deathAnimation: 'shadowSwallow',
     deathLine: 'It does not end here...',
   },
-  { name: 'King Kael', icon: '👑', color: '#e0574a', health: 1000, speed: 20, radius: 30, mechanic: 'Rises from his throne as the final wave begins.' },
+  { name: 'King Kael', icon: '👑', color: '#e0574a', health: 900, speed: 20, radius: 30, mechanic: 'Rises from his throne as the final wave begins.' },
   // Forest
   { name: 'Thornmaw the Ancient', icon: '🌳', color: '#6a9a5a' },
   { name: 'Vexia, the Spider Queen', icon: '🕷️', color: '#8a6ac4' },

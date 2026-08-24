@@ -1328,7 +1328,10 @@ function drawPlacementHints(
   const { hoverCol, hoverRow } = ui;
   if (hoverCol < 0 || hoverRow < 0) return;
 
-  const ok = engine.canPlaceAt(hoverCol, hoverRow) && engine.currency >= def.cost;
+  // The cell highlight reflects buildability alone (gold is only enforced on the
+  // click), but the range circle also reddens when the unit is unaffordable.
+  const buildable = engine.canPlaceAt(hoverCol, hoverRow);
+  const ok = buildable && engine.currency >= def.cost;
   const cx = hoverCol * TILE + TILE / 2;
   const cy = hoverRow * TILE + TILE / 2;
   // Preview the range the unit will actually deploy with (mastery included).
@@ -1345,7 +1348,7 @@ function drawPlacementHints(
   ctx.stroke();
 
   // Cell highlight.
-  ctx.fillStyle = ok ? 'rgba(95, 211, 138, 0.25)' : 'rgba(255, 90, 90, 0.25)';
+  ctx.fillStyle = buildable ? 'rgba(95, 211, 138, 0.25)' : 'rgba(255, 90, 90, 0.25)';
   ctx.fillRect(hoverCol * TILE, hoverRow * TILE, TILE, TILE);
   ctx.restore();
 }

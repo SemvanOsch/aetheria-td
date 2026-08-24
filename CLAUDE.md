@@ -8,6 +8,8 @@ Aetheria is a playable Tower Defense MVP: Vite + React + TypeScript, battle boar
 
 Scripts in `package.json`: `dev`, `build`, `typecheck`, `lint`. **No test framework** — don't reference `npm test`. Verify with `npm run typecheck` plus exercising the app in the browser preview. Environment is **Windows / PowerShell**; Vite dev server on port 5173 (auto-bumps if taken).
 
+**Update the patch notes on every GitHub push.** Whenever you push (or the user asks you to push) to GitHub, first prepend a new entry to the `PATCH_NOTES` array in `src/ui/components/PatchNotes.tsx` (newest first) summarizing the user-facing changes in that push. This changelog is shown in-game via the 📝 Patch Notes button next to the ⚙️ Settings icon in the `TopBar`. Do this as part of the push, not as a separate step to be reminded about.
+
 **Don't block on browser screenshots.** The Browser pane is often not displayed, so `computer` screenshots time out — that's expected, not a failure to chase. A clean `npm run typecheck` plus a `read_console_messages`/`preview_logs` error check is sufficient. To drive the app headlessly, `import('/src/...')` modules in the page and construct a `GameEngine` (private methods callable via `engine['name']`), or seed `localStorage['aetheria-td:state']` and reload.
 
 ## Architecture

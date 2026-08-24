@@ -31,6 +31,8 @@ import { UnitSprite } from '../components/UnitSprite';
 interface Props {
   levelId: number;
   onExit: () => void;
+  onHome: () => void;
+  onRetry: () => void;
 }
 
 /** Snapshot of engine fields the HUD needs (updated each frame). */
@@ -88,7 +90,7 @@ function ResistShield({ kind, pct }: { kind: 'physical' | 'magic'; pct: number }
   );
 }
 
-export function GameScreen({ levelId, onExit }: Props) {
+export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   const game = useGame();
   const level = getLevel(levelId)!;
 
@@ -468,7 +470,8 @@ export function GameScreen({ levelId, onExit }: Props) {
                 gemReward={level.gemReward}
                 firstClear={firstClearRef.current}
                 onExit={onExit}
-                onReplay={onExit}
+                onHome={onHome}
+                onRetry={onRetry}
               />
             )}
           </div>
@@ -501,7 +504,7 @@ export function GameScreen({ levelId, onExit }: Props) {
                     <button
                       key={id}
                       className={`deploy-item ${selectedUnitId === id ? 'active' : ''}`}
-                      disabled={!affordable || atLimit}
+                      disabled={atLimit}
                       title={atLimit ? 'Deploy limit reached' : undefined}
                       onClick={() => {
                         setSelectedUnitId((cur) => (cur === id ? null : id));
@@ -515,7 +518,7 @@ export function GameScreen({ levelId, onExit }: Props) {
                           {deployed}/{def.deployLimit} deployed
                         </span>
                       </span>
-                      <span className="cost">🪙{def.cost}</span>
+                      <span className={`cost ${affordable ? '' : 'unaffordable'}`}>🪙{def.cost}</span>
                     </button>
                   );
                 })}
@@ -667,13 +670,15 @@ function ResultCard({
   gemReward,
   firstClear,
   onExit,
-  onReplay,
+  onHome,
+  onRetry,
 }: {
   outcome: Outcome;
   gemReward: number;
   firstClear: boolean;
   onExit: () => void;
-  onReplay: () => void;
+  onHome: () => void;
+  onRetry: () => void;
 }) {
   const won = outcome === 'won';
   return (
@@ -695,12 +700,18 @@ function ResultCard({
         )}
       </div>
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-        <button className="btn primary" onClick={onExit}>
-          Continue
+        <button className="btn ghost" onClick={onHome}>
+          Home
         </button>
-        <button className="btn ghost" onClick={onReplay}>
-          Realms
-        </button>
+        {won ? (
+          <button className="btn primary" onClick={onExit}>
+            Continue
+          </button>
+        ) : (
+          <button className="btn primary" onClick={onRetry}>
+            Retry
+          </button>
+        )}
       </div>
     </div>
   );

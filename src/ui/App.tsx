@@ -15,6 +15,8 @@ export function App() {
   const [screen, setScreen] = useState<Screen>('home');
   const [activeLevel, setActiveLevel] = useState<number | null>(null);
   const [storySection, setStorySection] = useState<SectionId | null>(null);
+  // Bumped to force a fresh GameScreen mount when retrying a stage.
+  const [retryNonce, setRetryNonce] = useState(0);
 
   // Play always starts at the mode picker (reset any drilled-in section).
   const goPlay = () => {
@@ -32,6 +34,15 @@ export function App() {
     setActiveLevel(null);
     setScreen('story');
   };
+
+  // From a battle result, jump straight back to the home screen.
+  const goHome = () => {
+    setActiveLevel(null);
+    setScreen('home');
+  };
+
+  // Restart the current stage by remounting GameScreen with a fresh engine.
+  const retryLevel = () => setRetryNonce((n) => n + 1);
 
   // Highlight the "Play" tab across the whole play flow.
   const navActive: Screen = screen === 'story' ? 'modes' : screen;
@@ -61,7 +72,13 @@ export function App() {
         />
       )}
       {screen === 'game' && activeLevel != null && (
-        <GameScreen levelId={activeLevel} onExit={exitLevel} />
+        <GameScreen
+          key={`${activeLevel}-${retryNonce}`}
+          levelId={activeLevel}
+          onExit={exitLevel}
+          onHome={goHome}
+          onRetry={retryLevel}
+        />
       )}
     </div>
   );

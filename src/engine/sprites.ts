@@ -945,6 +945,103 @@ function drawBackHelm(
 }
 
 /**
+ * A short flanged mace head centred on `(x, y)`, sized by `r`: a steel knob ringed
+ * by a handful of stubby wedge flanges, with a small top spike and a highlight dot.
+ * Shared by the Man-at-Arms' three views so his weapon reads the same whichever way
+ * he marches. Drawn in the caller's local space with the shaft assumed to arrive
+ * from below-left of the head.
+ */
+function drawFlangedMaceHead(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  steel: string,
+  steelDark: string,
+): void {
+  // Wedge flanges radiating from the core.
+  ctx.fillStyle = steelDark;
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + 0.4;
+    const bx = x + Math.cos(a) * r * 0.6;
+    const by = y + Math.sin(a) * r * 0.6;
+    const tx = x + Math.cos(a) * r * 1.7;
+    const ty = y + Math.sin(a) * r * 1.7;
+    const px = Math.cos(a + Math.PI / 2) * r * 0.55;
+    const py = Math.sin(a + Math.PI / 2) * r * 0.55;
+    ctx.beginPath();
+    ctx.moveTo(bx + px, by + py);
+    ctx.lineTo(tx, ty);
+    ctx.lineTo(bx - px, by - py);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // Central knob.
+  ctx.fillStyle = steel;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#eef3f8'; // glint
+  ctx.beginPath();
+  ctx.arc(x - r * 0.35, y - r * 0.35, r * 0.3, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/**
+ * A wooden round shield of radius `r` centred on the caller's local origin: a
+ * plank-boarded face with a couple of seam lines and a lit edge, ringed by a steel
+ * rim and capped with a steel central boss. Gives the Grunt footman a timber shield
+ * distinct from the Man-at-Arms' bare steel heater. Drawn face-on; the caller
+ * translates/positions it.
+ */
+function drawWoodenRoundShield(
+  ctx: CanvasRenderingContext2D,
+  r: number,
+  steel: string,
+  steelDark: string,
+): void {
+  const wood = '#7a5a34';
+  const woodDark = shade(wood, -0.3);
+  const woodLit = shade(wood, 0.14);
+  // Planked face.
+  ctx.fillStyle = wood;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = woodLit; // lit half for a little grain volume
+  ctx.beginPath();
+  ctx.arc(0, 0, r, Math.PI * 1.15, Math.PI * 1.95);
+  ctx.arc(0, 0, r * 0.2, Math.PI * 1.95, Math.PI * 1.15, true);
+  ctx.closePath();
+  ctx.fill();
+  // Plank seams (clipped to the disc).
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.strokeStyle = woodDark;
+  ctx.lineWidth = 0.7;
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.4, -r);
+  ctx.lineTo(-r * 0.4, r);
+  ctx.moveTo(r * 0.4, -r);
+  ctx.lineTo(r * 0.4, r);
+  ctx.stroke();
+  ctx.restore();
+  // Steel rim.
+  ctx.lineWidth = 1.3;
+  ctx.strokeStyle = steelDark;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.stroke();
+  // Steel central boss.
+  ctx.fillStyle = steel;
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.29, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/**
  * Procedural Grunt silhouette — a shield-and-spear footman marching along the
  * path — painted in the caller's local space (origin at the figure's centre;
  * feet near y=+12, head near y=-15). Unlike the champion sprites (which always
@@ -1052,17 +1149,7 @@ export function drawGrunt(
     // Round shield carried on the front arm.
     ctx.save();
     ctx.translate(5.5, 0.5);
-    ctx.fillStyle = armorDark;
-    ctx.beginPath();
-    ctx.arc(0, 0, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.lineWidth = 1.4;
-    ctx.strokeStyle = steelDark;
-    ctx.stroke();
-    ctx.fillStyle = steel; // central boss
-    ctx.beginPath();
-    ctx.arc(0, 0, 1.7, 0, Math.PI * 2);
-    ctx.fill();
+    drawWoodenRoundShield(ctx, 6, steel, steelDark);
     ctx.restore();
 
     ctx.restore();
@@ -1134,17 +1221,7 @@ export function drawGrunt(
   } else {
     ctx.save();
     ctx.translate(-4.5, 1);
-    ctx.fillStyle = armorDark;
-    ctx.beginPath();
-    ctx.arc(0, 0, 5.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.lineWidth = 1.3;
-    ctx.strokeStyle = steelDark;
-    ctx.stroke();
-    ctx.fillStyle = steel;
-    ctx.beginPath();
-    ctx.arc(0, 0, 1.6, 0, Math.PI * 2);
-    ctx.fill();
+    drawWoodenRoundShield(ctx, 5.5, steel, steelDark);
     ctx.restore();
   }
 
@@ -1461,6 +1538,259 @@ export function drawGrunt2(
   ctx.quadraticCurveTo(0, -14.6, -1.3, -16.4);
   ctx.closePath();
   ctx.fill();
+
+  ctx.restore();
+  ctx.restore();
+}
+
+/**
+ * Procedural Man-at-Arms silhouette — a grizzled, road-worn veteran in the vein of
+ * Darkest Dungeon's man-at-arms: lighter than the Rebel Sergeant (mail hauberk and
+ * an open barbute helm rather than full plate and a visored great-helm), a bearded
+ * face left bare, a small battered heater shield and a flanged war-mace instead of
+ * a sword. Same three authored views ('side' mirrored on `faceLeft`, 'front',
+ * 'back') and the `phase` walk cadence advanced from distance travelled. Replaces
+ * the emoji token for the Castle man-at-arms (`cas_grunt3`).
+ */
+export function drawGrunt3(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  view: 'side' | 'front' | 'back',
+  faceLeft: boolean,
+  phase: number,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (view === 'side' && faceLeft) ctx.scale(-1, 1);
+
+  const armorLit = shade(color, 0.18);
+  const armorDark = shade(color, -0.28);
+  const steel = '#c9d2dc';
+  const steelDark = '#8b95a3';
+  const skin = '#d9ad82';
+  const beard = '#6b6156';
+  const boot = '#3a2f26';
+  const wood = '#5a4634';
+
+  const swing = Math.sin(phase);
+  const bob = Math.abs(Math.sin(phase));
+
+  if (view === 'side') {
+    // --- Profile (walking along the row) ---
+    const s = swing * 3.6;
+    ctx.strokeStyle = boot;
+    ctx.lineWidth = 3.4;
+    ctx.beginPath();
+    ctx.moveTo(1, 3);
+    ctx.lineTo(1 + s, 12);
+    ctx.moveTo(-1, 3);
+    ctx.lineTo(-1 - s, 12);
+    ctx.stroke();
+
+    ctx.save();
+    ctx.translate(0, -bob * 1.2);
+
+    // War-mace shouldered, haft angled up and back, flanged head at the top.
+    ctx.strokeStyle = wood;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(-2.5, -3.5);
+    ctx.lineTo(-10.5, -18);
+    ctx.stroke();
+    drawFlangedMaceHead(ctx, -11.4, -20, 2.6, steel, steelDark);
+
+    // Torso / mail hauberk — a touch slimmer than the plated sergeant, with a lit
+    // front edge and a scatter of mail rings for texture.
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(0, -9);
+    ctx.quadraticCurveTo(6.6, -6, 5.8, 6);
+    ctx.quadraticCurveTo(0, 8, -5.8, 6);
+    ctx.quadraticCurveTo(-6.6, -6, 0, -9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = armorLit;
+    ctx.beginPath();
+    ctx.moveTo(0, -9);
+    ctx.quadraticCurveTo(6.6, -6, 5.8, 6);
+    ctx.quadraticCurveTo(3, 6.8, 2.5, 6);
+    ctx.quadraticCurveTo(3.3, -4, 0, -9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = armorDark; // mail-ring speckle
+    for (const [mx, my] of [[-2, -4], [1, -2], [-1, 1], [2, 3], [-3, 3]]) {
+      ctx.beginPath();
+      ctx.arc(mx, my, 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Head — open barbute helm with a bare, bearded veteran's face and a nasal bar.
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.arc(1.8, -11, 3.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = beard; // jaw stubble
+    ctx.beginPath();
+    ctx.moveTo(-0.4, -10);
+    ctx.quadraticCurveTo(1.8, -6.4, 4.4, -9.5);
+    ctx.quadraticCurveTo(2.6, -8.6, 1.6, -8.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = steel; // helm skull-cap
+    ctx.beginPath();
+    ctx.moveTo(-2.4, -11.4);
+    ctx.quadraticCurveTo(-2.6, -16, 1.8, -16);
+    ctx.quadraticCurveTo(5.4, -16, 5, -11.4);
+    ctx.quadraticCurveTo(4.4, -12.6, 3.4, -12.4);
+    ctx.lineTo(3.4, -11.4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = steelDark; // nasal bar
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(3.6, -12.2);
+    ctx.lineTo(3.9, -9.6);
+    ctx.stroke();
+
+    // Small battered heater shield on the front arm.
+    ctx.save();
+    ctx.translate(5, 0.8);
+    ctx.fillStyle = armorDark;
+    ctx.beginPath();
+    ctx.moveTo(-3.4, -5);
+    ctx.lineTo(3.4, -5);
+    ctx.quadraticCurveTo(3.4, 3, 0, 6.5);
+    ctx.quadraticCurveTo(-3.4, 3, -3.4, -5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = steelDark;
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.restore();
+    ctx.restore();
+    return;
+  }
+
+  // --- Front / back (marching toward or away from the viewer) ---
+  const back = view === 'back';
+  const liftL = Math.max(0, swing) * 2.6;
+  const liftR = Math.max(0, -swing) * 2.6;
+  ctx.strokeStyle = boot;
+  ctx.lineWidth = 3.6;
+  ctx.beginPath();
+  ctx.moveTo(-3, 3);
+  ctx.lineTo(-3, 12 - liftL);
+  ctx.moveTo(3, 3);
+  ctx.lineTo(3, 12 - liftR);
+  ctx.stroke();
+
+  ctx.save();
+  ctx.translate(0, -bob * 1);
+
+  if (back) {
+    ctx.fillStyle = armorDark;
+    ctx.beginPath();
+    ctx.moveTo(0, -9);
+    ctx.quadraticCurveTo(7.5, -6, 6.4, 6.8);
+    ctx.quadraticCurveTo(0, 8.2, -6.4, 6.8);
+    ctx.quadraticCurveTo(-7.5, -6, 0, -9);
+    ctx.closePath();
+    ctx.fill();
+    // Mail speckle down the back instead of rigid backplate seams.
+    ctx.fillStyle = shade(color, -0.5);
+    for (const [mx, my] of [[0, -5], [-2.5, -2], [2.5, -2], [0, 1], [-2, 4], [2, 4]]) {
+      ctx.beginPath();
+      ctx.arc(mx, my, 0.55, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(0, -9);
+    ctx.quadraticCurveTo(7, -6, 6.2, 6.8);
+    ctx.quadraticCurveTo(0, 8.2, -6.2, 6.8);
+    ctx.quadraticCurveTo(-7, -6, 0, -9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = armorLit;
+    ctx.beginPath();
+    ctx.ellipse(0, -1.5, 2.3, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = armorDark; // mail rings across the chest
+    for (const [mx, my] of [[-2.5, -3], [2.5, -3], [0, 0], [-2.5, 3], [2.5, 3]]) {
+      ctx.beginPath();
+      ctx.arc(mx, my, 0.55, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Mace held upright on the far side: haft with the flanged head up top.
+  ctx.strokeStyle = wood;
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(6.5, -13);
+  ctx.lineTo(6.5, 7);
+  ctx.stroke();
+  drawFlangedMaceHead(ctx, 6.5, -15.5, 2.6, steel, steelDark);
+
+  // Small heater shield: face-on when marching toward us, a slim edge from behind.
+  if (back) {
+    ctx.fillStyle = armorDark;
+    ctx.beginPath();
+    ctx.ellipse(-6.6, 1, 1.8, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.save();
+    ctx.translate(-5, 1);
+    ctx.fillStyle = armorDark;
+    ctx.beginPath();
+    ctx.moveTo(-3, -5);
+    ctx.lineTo(3, -5);
+    ctx.quadraticCurveTo(3, 3, 0, 6);
+    ctx.quadraticCurveTo(-3, 3, -3, -5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = steelDark;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Head — bare bearded face + open barbute toward us; a full helm from behind so
+  // the head reads clearly rather than vanishing to a thin cap.
+  if (back) {
+    drawBackHelm(ctx, -12.2, 4.3, steel, steelDark, skin);
+  } else {
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.arc(0, -11, 3.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = beard; // beard framing the jaw
+    ctx.beginPath();
+    ctx.moveTo(-3.2, -11);
+    ctx.quadraticCurveTo(0, -6.2, 3.2, -11);
+    ctx.quadraticCurveTo(0, -8.8, -3.2, -11);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = steel; // helm skull-cap
+    ctx.beginPath();
+    ctx.arc(0, -12, 4.1, Math.PI, 0);
+    ctx.fill();
+    ctx.strokeStyle = steelDark; // nasal bar
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(0, -12.4);
+    ctx.lineTo(0, -9.6);
+    ctx.stroke();
+    ctx.fillStyle = '#2a2230'; // eyes under the brow
+    ctx.beginPath();
+    ctx.arc(-1.7, -11.4, 0.7, 0, Math.PI * 2);
+    ctx.arc(1.7, -11.4, 0.7, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   ctx.restore();
   ctx.restore();
@@ -3840,6 +4170,7 @@ export function hasEnemySprite(id: string): boolean {
   return (
     id === 'cas_grunt' ||
     id === 'cas_grunt2' ||
+    id === 'cas_grunt3' ||
     id === 'cas_runner' ||
     id === 'cas_mage' ||
     id === 'cas_brute' ||
@@ -3873,6 +4204,7 @@ export function drawEnemySprite(
   else if (id === 'boss4') drawGowzer(ctx, color, view, faceLeft, dist * 0.22);
   else if (id === 'cas_grunt') drawGrunt(ctx, color, view, faceLeft, dist * 0.22);
   else if (id === 'cas_grunt2') drawGrunt2(ctx, color, view, faceLeft, dist * 0.2);
+  else if (id === 'cas_grunt3') drawGrunt3(ctx, color, view, faceLeft, dist * 0.21);
   else if (id === 'cas_runner') drawOutrider(ctx, color, view, faceLeft, dist * 0.28);
   else if (id === 'cas_mage') drawRoyalMage(ctx, color, view, faceLeft, dist * 0.2);
   else if (id === 'cas_brute') drawSiegeRam(ctx, color, view, faceLeft, dist * 0.2);

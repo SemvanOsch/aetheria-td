@@ -103,7 +103,7 @@ const DEFAULT_SPACING = 0.85;
 const STARTING_GOLD = 200;
 
 // Shorthand enemy ids per section.
-const CAS = { g: 'cas_grunt', g2: 'cas_grunt2', r: 'cas_runner', b: 'cas_brute', m: 'cas_mage' };
+const CAS = { g: 'cas_grunt', g2: 'cas_grunt2', g3: 'cas_grunt3', r: 'cas_runner', b: 'cas_brute', m: 'cas_mage' };
 const FOR = { g: 'for_grunt', r: 'for_runner', b: 'for_brute' };
 const INN = { g: 'inn_grunt', r: 'inn_runner', b: 'inn_brute' };
 
