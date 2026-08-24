@@ -21,6 +21,7 @@ const PATCH_NOTES: PatchEntry[] = [
   {
     version: '2026-08-25',
     changes: [
+      'New champion: the Elf, a Rare woodland archer whose enchanted arrows leap from foe to foe — with a mastery tree and Chain Enchantment upgrade to make them bounce further.',
       'Duplicate summons now grant mastery EXP for that champion (Common +20, Rare +30) on top of the gem refund.',
       'Cleaned up the champion detail sheet: stats are now grouped (cost/limit, then damage/speed/DPS/range, then crit) with dividers, and redundant rows already shown as tags at the top were removed.',
     ],
