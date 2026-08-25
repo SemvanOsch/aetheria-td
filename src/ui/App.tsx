@@ -7,11 +7,15 @@ import { Story } from './screens/Story';
 import { GameScreen } from './screens/GameScreen';
 import { Collection } from './screens/Collection';
 import { EnemyIndex } from './screens/EnemyIndex';
+import { PlayerIntro } from './components/PlayerIntro';
+import { useGame } from '../application/gameContext';
+import { hasCompletedIntro } from '../application/gameState';
 import type { SectionId } from '../domain/levels';
 
 export type Screen = 'home' | 'summon' | 'collection' | 'enemies' | 'modes' | 'story' | 'game';
 
 export function App() {
+  const { state, setPlayerProfile } = useGame();
   const [screen, setScreen] = useState<Screen>('home');
   const [activeLevel, setActiveLevel] = useState<number | null>(null);
   const [storySection, setStorySection] = useState<SectionId | null>(null);
@@ -46,6 +50,17 @@ export function App() {
 
   // Highlight the "Play" tab across the whole play flow.
   const navActive: Screen = screen === 'story' ? 'modes' : screen;
+
+  // First-launch detection: with no saved adventurer, run the journal intro in
+  // place of the normal shell. Completing it commits the profile, which flips
+  // this gate and drops the player into the game's normal home screen.
+  if (!hasCompletedIntro(state)) {
+    return (
+      <div className="app">
+        <PlayerIntro onComplete={(name, sprite) => setPlayerProfile(name, sprite)} />
+      </div>
+    );
+  }
 
   return (
     <div className="app">

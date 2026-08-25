@@ -19,6 +19,14 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-08-25 · Adventurer Intro',
+    changes: [
+      'First-launch cinematic: a new player now opens an Adventurer’s Journal, sketches their own custom character portrait, and signs their name onto the Identification Page before entering the game.',
+'New preset-based sprite creator (body, skin, hair + colour, headwear, outfit + colour) with a live preview, per-part steppers, colour swatches, a free custom-colour picker on every colour, and a Randomize button — drawn in the same procedural style as the champions.',
+      'Your adventurer (name + look) is saved and reused across sessions, ready for future features. Returning players skip the intro; existing saves keep all their progress and simply create an identity on next launch.',
+    ],
+  },
+  {
     version: '2026-08-25',
     changes: [
       'New champion: the Elf, a Rare woodland archer whose enchanted arrows leap from foe to foe — with a mastery tree and Chain Enchantment upgrade to make them bounce further.',

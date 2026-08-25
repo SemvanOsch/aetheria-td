@@ -6,6 +6,8 @@
  * on every menu card. Pure drawing — no game rules, no engine state.
  */
 
+import type { PlayerSpriteConfig } from '../domain/playerSprite';
+
 /**
  * Procedural Archer silhouette — a hooded ranger drawing a longbow — painted in
  * the caller's local space (origin at the figure's centre; feet near y=+11, head
@@ -4475,4 +4477,257 @@ export function drawUnitSprite(
   else if (shape === 'farmer') drawFarmer(ctx, color, faceLeft);
   else if (shape === 'wizard') drawWizard(ctx, color, faceLeft, anim, empowered);
   else if (shape === 'elf') drawElf(ctx, color, faceLeft, anim, empowered);
+}
+
+// ============================================================================
+// Player adventurer — a composed, preset-driven silhouette.
+//
+// The champions above are one monolithic function per archetype. The player's
+// avatar is instead assembled from interchangeable parts (see
+// domain/playerSprite), but it obeys exactly the same drawing conventions so it
+// stands beside the champions: authored facing +x (flipped when `faceLeft`),
+// origin at the figure's centre with feet near y=+11 and the head near y=-15,
+// flat fills with a lit front edge via `shade`, dark trousers, a skin-tone head
+// and steel/leather materials shared with the soldiers. Layered back-to-front:
+// legs → back-hair → neck → torso/outfit → arms → head → hair → headwear
+// (the neck sits *behind* the torso so the collar overlaps it, and headwear is
+// drawn last so it always sits *over* the hair).
+// ============================================================================
+
+/** Per-build proportions: shoulder/hip half-widths, leg spread and head radius. */
+const PLAYER_BUILDS: Record<string, { sw: number; hw: number; leg: number; head: number }> = {
+  slim: { sw: 6.0, hw: 5.2, leg: 2.6, head: 3.3 },
+  average: { sw: 7.2, hw: 6.2, leg: 3.2, head: 3.5 },
+  sturdy: { sw: 8.6, hw: 7.4, leg: 4.2, head: 3.7 },
+};
+
+/**
+ * Draw the player's custom adventurer described by `cfg`, in the caller's local
+ * space (same framing as `drawUnitSprite`). `faceLeft` flips it; `anim` is
+ * accepted for parity with the champion sprites (idle avatar ignores it).
+ */
+export function drawPlayerSprite(
+  ctx: CanvasRenderingContext2D,
+  cfg: PlayerSpriteConfig,
+  faceLeft: boolean,
+  _anim = 0,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (faceLeft) ctx.scale(-1, 1);
+
+  const b = PLAYER_BUILDS[cfg.build] ?? PLAYER_BUILDS.average;
+  const skin = cfg.skin;
+  const skinShade = shade(skin, -0.16);
+  const oc = cfg.outfitColor;
+  const outfitLit = shade(oc, 0.18);
+  const sleeve = shade(oc, -0.2);
+  const leather = '#6e4a26';
+  const hairC = cfg.hairColor;
+  const headCx = 0;
+  const headCy = -11.6;
+  const r = b.head;
+
+  // --- Legs (hidden under a robe hem) ---
+  if (cfg.outfit !== 'robe') {
+    ctx.strokeStyle = '#3a2f26';
+    ctx.lineWidth = cfg.build === 'sturdy' ? 3.8 : 3.3;
+    ctx.beginPath();
+    ctx.moveTo(-1.6, 4);
+    ctx.lineTo(-b.leg, 11);
+    ctx.moveTo(2.2, 4);
+    ctx.lineTo(b.leg - 0.4, 11);
+    ctx.stroke();
+    // Boots.
+    ctx.strokeStyle = shade(leather, -0.1);
+    ctx.lineWidth = cfg.build === 'sturdy' ? 4.2 : 3.7;
+    ctx.beginPath();
+    ctx.moveTo(-b.leg - 0.6, 11);
+    ctx.lineTo(-b.leg + 0.8, 11);
+    ctx.moveTo(b.leg - 1.2, 11);
+    ctx.lineTo(b.leg + 0.6, 11);
+    ctx.stroke();
+  }
+
+  // --- Back hair mass (behind head/torso) for the long style ---
+  if (cfg.hair === 'long') {
+    ctx.fillStyle = shade(hairC, -0.16);
+    ctx.beginPath();
+    ctx.moveTo(headCx - 2.6, headCy - r + 1);
+    ctx.quadraticCurveTo(-b.sw + 0.5, -6, -b.hw + 1.5, 4.5);
+    ctx.quadraticCurveTo(-2.2, 1, headCx - 1.6, headCy + 1);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // --- Neck (drawn BEFORE the torso so the collar overlaps its base) ---
+  ctx.fillStyle = skinShade;
+  ctx.beginPath();
+  ctx.moveTo(headCx - 1.7, headCy + r * 0.45);
+  ctx.lineTo(headCx + 1.7, headCy + r * 0.45);
+  ctx.lineTo(headCx + 1.4, -4);
+  ctx.lineTo(headCx - 1.4, -4);
+  ctx.closePath();
+  ctx.fill();
+
+  // --- Torso / outfit ---
+  drawPlayerTorso(ctx, cfg, b, oc, outfitLit);
+
+  // --- Arms hanging at the sides, with hands ---
+  ctx.strokeStyle = sleeve;
+  ctx.lineWidth = cfg.build === 'sturdy' ? 2.9 : 2.5;
+  ctx.beginPath();
+  ctx.moveTo(2, -5.5);
+  ctx.lineTo(b.hw - 0.5, 3.5);
+  ctx.moveTo(-1.5, -5.5);
+  ctx.lineTo(-b.hw + 1.5, 3);
+  ctx.stroke();
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.arc(b.hw - 0.5, 4, 1.5, 0, Math.PI * 2);
+  ctx.arc(-b.hw + 1.5, 3.5, 1.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- Head ---
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.arc(headCx, headCy, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- Hair (drawn last, over the head) ---
+  drawPlayerHair(ctx, cfg, headCx, headCy, r, hairC);
+
+  ctx.restore();
+}
+
+/** The torso silhouette + outfit-specific trim (tunic / leather / robe). */
+function drawPlayerTorso(
+  ctx: CanvasRenderingContext2D,
+  cfg: PlayerSpriteConfig,
+  b: { sw: number; hw: number },
+  oc: string,
+  outfitLit: string,
+): void {
+  const { sw, hw } = b;
+  if (cfg.outfit === 'robe') {
+    // A tall bell to the hem (hides the legs), like the Wizard's robe.
+    ctx.fillStyle = oc;
+    ctx.beginPath();
+    ctx.moveTo(0, -8.5);
+    ctx.quadraticCurveTo(sw, -4, sw + 1.5, 11);
+    ctx.lineTo(-(sw + 1.5), 11);
+    ctx.quadraticCurveTo(-sw, -4, 0, -8.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = outfitLit;
+    ctx.beginPath();
+    ctx.moveTo(0, -8.5);
+    ctx.quadraticCurveTo(sw, -4, sw + 1.5, 11);
+    ctx.lineTo(2.5, 11);
+    ctx.quadraticCurveTo(3, -3, 0, -8.5);
+    ctx.closePath();
+    ctx.fill();
+    // Sash across the waist.
+    ctx.strokeStyle = shade(oc, -0.3);
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(-sw + 1, 1.5);
+    ctx.lineTo(sw - 1, 0.5);
+    ctx.stroke();
+    return;
+  }
+
+  // Standard teardrop torso used by tunic / leather.
+  ctx.fillStyle = oc;
+  ctx.beginPath();
+  ctx.moveTo(0, -9);
+  ctx.quadraticCurveTo(sw, -5, hw, 7.5);
+  ctx.quadraticCurveTo(0, 9.5, -hw, 7.5);
+  ctx.quadraticCurveTo(-sw, -5, 0, -9);
+  ctx.closePath();
+  ctx.fill();
+  // Lit front edge.
+  ctx.fillStyle = outfitLit;
+  ctx.beginPath();
+  ctx.moveTo(0, -9);
+  ctx.quadraticCurveTo(sw, -5, hw, 7.5);
+  ctx.quadraticCurveTo(hw - 3.4, 8.4, hw - 4, 7.5);
+  ctx.quadraticCurveTo(hw - 3, -4, 0, -9);
+  ctx.closePath();
+  ctx.fill();
+
+  if (cfg.outfit === 'tunic') {
+    // Collar V + a belt.
+    ctx.strokeStyle = shade(oc, -0.28);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-1.6, -8);
+    ctx.lineTo(0.6, -4.5);
+    ctx.lineTo(3, -7.6);
+    ctx.stroke();
+    ctx.strokeStyle = '#5a4634';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(-hw + 0.5, 3.2);
+    ctx.lineTo(hw - 0.5, 2.6);
+    ctx.stroke();
+    ctx.fillStyle = '#caa64a';
+    ctx.fillRect(-0.4, 1.6, 1.8, 2);
+  } else if (cfg.outfit === 'leather') {
+    // Diagonal baldric strap + belt + a shoulder pad.
+    ctx.strokeStyle = shade(oc, -0.34);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-hw + 1, 5);
+    ctx.lineTo(sw - 2, -6.5);
+    ctx.stroke();
+    ctx.strokeStyle = '#4a3a2a';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(-hw + 0.5, 3.4);
+    ctx.lineTo(hw - 0.5, 2.8);
+    ctx.stroke();
+    ctx.fillStyle = shade(oc, 0.1);
+    ctx.beginPath();
+    ctx.ellipse(sw - 3, -5.5, 2.4, 1.8, -0.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/**
+ * Hair crown drawn over the head (the flowing back mass, for 'long', is drawn
+ * earlier so it sits behind the body). Only 'none' / 'short' / 'long'.
+ */
+function drawPlayerHair(
+  ctx: CanvasRenderingContext2D,
+  cfg: PlayerSpriteConfig,
+  cx: number,
+  cy: number,
+  r: number,
+  hairC: string,
+): void {
+  if (cfg.hair === 'none') return;
+  ctx.fillStyle = hairC;
+  // A crown cap hugging the top and back of the head, sweeping to a short fringe
+  // over the brow on the front (+x) side. Shared by short & long. Sits low so it
+  // hugs the skull rather than floating above it.
+  ctx.beginPath();
+  ctx.moveTo(cx - r - 0.6, cy + 2.4);
+  ctx.quadraticCurveTo(cx - r - 1.0, cy - r - 0.4, cx - 0.2, cy - r - 0.6);
+  ctx.quadraticCurveTo(cx + r + 1.2, cy - r + 0.3, cx + r + 0.7, cy + 0.8);
+  ctx.quadraticCurveTo(cx + r - 0.8, cy - r + 2.8, cx + 0.4, cy - r + 2.6);
+  ctx.quadraticCurveTo(cx - r + 0.4, cy - r + 3.0, cx - r - 0.6, cy + 2.4);
+  ctx.closePath();
+  ctx.fill();
+  if (cfg.hair === 'long') {
+    // A short lock in front of the ear on the shadow side to tie the back mass in.
+    ctx.fillStyle = shade(hairC, -0.08);
+    ctx.beginPath();
+    ctx.moveTo(cx - r - 0.6, cy - 0.6);
+    ctx.quadraticCurveTo(cx - r - 1.4, cy + 3, cx - r + 0.6, cy + 3.4);
+    ctx.quadraticCurveTo(cx - r + 0.4, cy + 0.6, cx - r - 0.6, cy - 0.6);
+    ctx.closePath();
+    ctx.fill();
+  }
 }

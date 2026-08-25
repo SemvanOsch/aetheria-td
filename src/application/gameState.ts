@@ -19,6 +19,12 @@
 
 import { readJSON, writeJSON } from '../infrastructure/storage';
 import { DEFAULT_OWNED_UNIT_IDS } from '../domain/units';
+import {
+  isValidPlayerName,
+  normalizePlayerSprite,
+  sanitizePlayerName,
+  type PlayerSpriteConfig,
+} from '../domain/playerSprite';
 import { ENEMY_KILLS_TO_UNLOCK, type EnemyDef } from '../domain/enemies';
 import {
   activeMasteryUpgrades,
@@ -27,9 +33,26 @@ import {
   masteryTree,
 } from '../domain/mastery';
 
+/**
+ * The player's own adventurer: their chosen name and a fully-reconstructable
+ * sprite config (see domain/playerSprite). Persisted so any system can redraw
+ * the avatar at any size — we never store a rendered image. `null` until the
+ * player has finished the first-launch journal introduction (portrait + name);
+ * its presence is exactly the "has completed player identification" flag.
+ */
+export interface PlayerProfile {
+  name: string;
+  sprite: PlayerSpriteConfig;
+}
+
 export interface GameState {
   /** Schema version, for future migrations. */
   version: number;
+  /**
+   * The player's identity, created in the first-launch journal intro. `null`
+   * means the intro has not been completed yet (drives first-launch detection).
+   */
+  player: PlayerProfile | null;
   /** Summon currency (the only persistent currency). */
   gems: number;
   /** Unique unit type ids the player owns. */
@@ -93,7 +116,7 @@ const DEFAULT_PREFS: UiPrefs = {
 
 const STORAGE_KEY = 'state';
 const STARTING_GEMS = 300;
-const CURRENT_VERSION = 11;
+const CURRENT_VERSION = 12;
 
 /** Maximum distinct champions the player may bring into a stage. */
 export const MAX_TEAM_SIZE = 6;
@@ -102,6 +125,8 @@ export function createInitialState(): GameState {
   const starters = [...DEFAULT_OWNED_UNIT_IDS];
   return {
     version: CURRENT_VERSION,
+    // A fresh account has no adventurer yet — the journal intro creates one.
+    player: null,
     gems: STARTING_GEMS,
     ownedUnits: starters,
     completedLevels: [],
@@ -161,7 +186,31 @@ export function loadState(): GameState {
     .slice(0, MAX_TEAM_SIZE);
   // Pre-v11 saves have no UI preferences; fill missing keys with the defaults.
   migrated.prefs = { ...DEFAULT_PREFS, ...(raw.prefs ?? {}) };
+  // Pre-v12 saves have no player profile. Rather than fabricate an identity,
+  // leave it null so the first-launch journal intro runs on next load — this
+  // never touches existing progression (gems/champions/levels are untouched),
+  // it just lets a returning player create their adventurer. A malformed or
+  // half-finished profile also normalizes to null so the intro reopens (the
+  // safe default for an incomplete first-time setup).
+  migrated.player = normalizePlayerProfile(raw.player);
   return migrated;
+}
+
+/**
+ * Coerce a stored/partial player profile into a valid one, or `null` when it is
+ * absent or unusable (missing/empty name). A null result means the first-launch
+ * intro should run. The sprite config is repaired against the current catalog.
+ */
+function normalizePlayerProfile(
+  raw: PlayerProfile | null | undefined,
+): PlayerProfile | null {
+  if (!raw || typeof raw.name !== 'string' || !isValidPlayerName(raw.name)) {
+    return null;
+  }
+  return {
+    name: sanitizePlayerName(raw.name),
+    sprite: normalizePlayerSprite(raw.sprite),
+  };
 }
 
 export function saveState(state: GameState): void {
@@ -217,6 +266,30 @@ export function toggleTeamMember(state: GameState, unitId: string): GameState {
 /** Merge a partial UI-preferences patch into the persisted prefs. */
 export function setPrefs(state: GameState, patch: Partial<UiPrefs>): GameState {
   return { ...state, prefs: { ...state.prefs, ...patch } };
+}
+
+/** Whether the player has finished the first-launch identification journal. */
+export function hasCompletedIntro(state: GameState): boolean {
+  return state.player != null;
+}
+
+/**
+ * Save the player's created adventurer, completing the first-launch intro. The
+ * name is sanitised and the sprite normalised; an empty/invalid name is a no-op
+ * so a half-finished journal can never mark itself complete. This only sets the
+ * profile — all other progression is untouched, so a returning (pre-v12) player
+ * keeps their gems, champions and cleared realms.
+ */
+export function setPlayerProfile(
+  state: GameState,
+  name: string,
+  sprite: PlayerSpriteConfig,
+): GameState {
+  if (!isValidPlayerName(name)) return state;
+  return {
+    ...state,
+    player: { name: sanitizePlayerName(name), sprite: normalizePlayerSprite(sprite) },
+  };
 }
 
 /**

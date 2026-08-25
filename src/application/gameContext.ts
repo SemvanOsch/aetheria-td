@@ -9,6 +9,7 @@
 
 import { createContext, useContext } from 'react';
 import type { GameState, UiPrefs } from './gameState';
+import type { PlayerSpriteConfig } from '../domain/playerSprite';
 import type { SummonOutcome } from './summon';
 
 export interface GameStore {
@@ -33,6 +34,11 @@ export interface GameStore {
   reorderTeam: (from: number, to: number) => void;
   /** Merge a patch into the persisted UI preferences. */
   setPrefs: (patch: Partial<UiPrefs>) => void;
+  /**
+   * Save the player's adventurer (name + sprite), completing the first-launch
+   * journal introduction. No-op on an invalid/empty name.
+   */
+  setPlayerProfile: (name: string, sprite: PlayerSpriteConfig) => void;
   /** Wipe all progression back to a fresh account. */
   resetAccount: () => void;
   /** Add gems (used by the settings grant button). */
