@@ -73,6 +73,68 @@ export function drawBoard(
   drawPuffs(ctx, engine);
   drawBursts(ctx, engine);
   drawFloaters(ctx, engine);
+  // Big boss health bar(s) pinned to the top of the board, over everything.
+  drawBossBars(ctx, engine);
+}
+
+/**
+ * Boss health bars pinned to the top-centre of the board, drawn over everything
+ * else. One stacked bar per living boss on the field: the boss's name sits above
+ * the bar and its current/max HP reads inside it. Only shown once a boss has
+ * actually spawned (a seated/hidden throne boss doesn't get a bar yet).
+ */
+function drawBossBars(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
+  const bosses = engine.enemies.filter((e) => e.def.boss && (e.rise ?? 0) === 0);
+  if (bosses.length === 0) return;
+
+  const barW = Math.min(BOARD_WIDTH - 40, 520);
+  const barH = 20;
+  const gap = 10;
+  const nameH = 18;
+  const rowH = nameH + barH + gap;
+  let top = 16;
+
+  for (const e of bosses) {
+    const pct = Math.max(0, Math.min(1, e.health / e.def.health));
+    const bx = (BOARD_WIDTH - barW) / 2;
+    const by = top + nameH;
+
+    // Name (with icon) centred above the bar.
+    ctx.font = 'bold 15px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillText(`${e.def.visual.icon} ${e.def.name}`, BOARD_WIDTH / 2 + 1, top + 14 + 1);
+    ctx.fillStyle = '#ffe6a8';
+    ctx.fillText(`${e.def.visual.icon} ${e.def.name}`, BOARD_WIDTH / 2, top + 14);
+
+    // Bar frame.
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(bx - 3, by - 3, barW + 6, barH + 6);
+    ctx.fillStyle = '#1a1d22';
+    ctx.fillRect(bx, by, barW, barH);
+
+    // Fill.
+    ctx.fillStyle = pct > 0.5 ? '#5fd38a' : pct > 0.25 ? '#f2b23c' : '#ff5a5a';
+    ctx.fillRect(bx, by, barW * pct, barH);
+
+    // Gold outline.
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#ffd76a';
+    ctx.strokeRect(bx, by, barW, barH);
+
+    // HP text inside the bar.
+    const hp = `${Math.max(0, Math.ceil(e.health))} / ${Math.round(e.def.health)}`;
+    ctx.font = 'bold 12px system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillText(hp, BOARD_WIDTH / 2 + 1, by + barH / 2 + 1);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(hp, BOARD_WIDTH / 2, by + barH / 2);
+
+    top += rowH;
+  }
+  ctx.textBaseline = 'alphabetic';
 }
 
 function drawSelectedAoe(
