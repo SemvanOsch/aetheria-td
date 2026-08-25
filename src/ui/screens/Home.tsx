@@ -7,9 +7,10 @@ interface Props {
   onSummon: () => void;
   onCollection: () => void;
   onEnemyIndex: () => void;
+  onJournal: () => void;
 }
 
-export function Home({ onPlay, onSummon, onCollection, onEnemyIndex }: Props) {
+export function Home({ onPlay, onSummon, onCollection, onEnemyIndex, onJournal }: Props) {
   const { state } = useGame();
   const ownedCount = state.ownedUnits.length;
   const totalKinds = summonableUnits().length;
@@ -33,6 +34,9 @@ export function Home({ onPlay, onSummon, onCollection, onEnemyIndex }: Props) {
           </button>
           <button className="btn big" onClick={onEnemyIndex}>
             📖 Enemy Index
+          </button>
+          <button className="btn big" onClick={onJournal}>
+            📔 Adventurer's Journal
           </button>
         </div>
       </div>

@@ -24,6 +24,7 @@ import {
   buyMasteryUpgrade as buyMasteryUpgradeTx,
   createInitialState,
   loadState,
+  markChapterRead as markChapterReadTx,
   markLevelComplete,
   saveState,
   reorderTeam as reorderTeamTx,
@@ -36,6 +37,7 @@ import {
   type UiPrefs,
 } from './gameState';
 import type { PlayerSpriteConfig } from '../domain/playerSprite';
+import type { Proficiency } from '../domain/proficiency';
 import {
   canAffordSummon,
   DUPLICATE_REFUND,
@@ -137,8 +139,15 @@ export function GameProvider({ children }: { children: ReactNode }) {
   );
 
   const setPlayerProfile = useCallback(
-    (name: string, sprite: PlayerSpriteConfig) => {
-      commit(setPlayerProfileTx(stateRef.current, name, sprite));
+    (name: string, sprite: PlayerSpriteConfig, proficiency: Proficiency) => {
+      commit(setPlayerProfileTx(stateRef.current, name, sprite, proficiency));
+    },
+    [commit],
+  );
+
+  const markChapterRead = useCallback(
+    (index: number) => {
+      commit(markChapterReadTx(stateRef.current, index));
     },
     [commit],
   );
@@ -168,11 +177,12 @@ export function GameProvider({ children }: { children: ReactNode }) {
       reorderTeam,
       setPrefs,
       setPlayerProfile,
+      markChapterRead,
       resetAccount,
       grantGems,
       summonCost: SUMMON_COST,
     }),
-    [state, summon, completeLevel, awardMastery, awardEnemyKills, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, reorderTeam, setPrefs, setPlayerProfile, resetAccount, grantGems],
+    [state, summon, completeLevel, awardMastery, awardEnemyKills, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, reorderTeam, setPrefs, setPlayerProfile, markChapterRead, resetAccount, grantGems],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

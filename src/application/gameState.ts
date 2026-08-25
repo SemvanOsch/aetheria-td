@@ -25,6 +25,7 @@ import {
   sanitizePlayerName,
   type PlayerSpriteConfig,
 } from '../domain/playerSprite';
+import { normalizeProficiency, type Proficiency } from '../domain/proficiency';
 import { ENEMY_KILLS_TO_UNLOCK, type EnemyDef } from '../domain/enemies';
 import {
   activeMasteryUpgrades,
@@ -37,12 +38,14 @@ import {
  * The player's own adventurer: their chosen name and a fully-reconstructable
  * sprite config (see domain/playerSprite). Persisted so any system can redraw
  * the avatar at any size — we never store a rendered image. `null` until the
- * player has finished the first-launch journal introduction (portrait + name);
- * its presence is exactly the "has completed player identification" flag.
+ * player has finished the first-launch journal introduction (portrait + name +
+ * proficiency); its presence is exactly the "has completed identification" flag.
  */
 export interface PlayerProfile {
   name: string;
   sprite: PlayerSpriteConfig;
+  /** Chosen martial discipline (blade / bow / magic). */
+  proficiency: Proficiency;
 }
 
 export interface GameState {
@@ -99,6 +102,12 @@ export interface GameState {
   enemyKills: Record<string, number>;
   /** Persisted UI preferences (Champions menu toggles, etc.). */
   prefs: UiPrefs;
+  /**
+   * Journal chapter indices whose lore has been typed out at least once. Used to
+   * play the letter-by-letter reveal only the *first time ever* a chapter is
+   * opened; thereafter it renders instantly. See domain/journal.
+   */
+  readChapters: number[];
 }
 
 /** Persisted, non-gameplay UI preferences. */
@@ -116,7 +125,7 @@ const DEFAULT_PREFS: UiPrefs = {
 
 const STORAGE_KEY = 'state';
 const STARTING_GEMS = 300;
-const CURRENT_VERSION = 12;
+const CURRENT_VERSION = 13;
 
 /** Maximum distinct champions the player may bring into a stage. */
 export const MAX_TEAM_SIZE = 6;
@@ -138,6 +147,7 @@ export function createInitialState(): GameState {
     team: [...starters],
     enemyKills: {},
     prefs: { ...DEFAULT_PREFS },
+    readChapters: [],
   };
 }
 
@@ -193,6 +203,13 @@ export function loadState(): GameState {
   // half-finished profile also normalizes to null so the intro reopens (the
   // safe default for an incomplete first-time setup).
   migrated.player = normalizePlayerProfile(raw.player);
+  // Pre-v13 saves have no read-chapter record; start empty (all reveal on first
+  // open). Keep only valid, de-duplicated indices.
+  migrated.readChapters = Array.from(
+    new Set((Array.isArray(raw.readChapters) ? raw.readChapters : []).filter(
+      (n): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 0,
+    )),
+  );
   return migrated;
 }
 
@@ -210,6 +227,9 @@ function normalizePlayerProfile(
   return {
     name: sanitizePlayerName(raw.name),
     sprite: normalizePlayerSprite(raw.sprite),
+    // Pre-proficiency saves default to Blade rather than being sent back through
+    // the intro — progression is preserved.
+    proficiency: normalizeProficiency(raw.proficiency),
   };
 }
 
@@ -268,6 +288,13 @@ export function setPrefs(state: GameState, patch: Partial<UiPrefs>): GameState {
   return { ...state, prefs: { ...state.prefs, ...patch } };
 }
 
+/** Record that a journal chapter's lore has been read (typed out) — no-op if
+ *  it's already marked, so the letter-by-letter reveal only ever plays once. */
+export function markChapterRead(state: GameState, index: number): GameState {
+  if (state.readChapters.includes(index)) return state;
+  return { ...state, readChapters: [...state.readChapters, index] };
+}
+
 /** Whether the player has finished the first-launch identification journal. */
 export function hasCompletedIntro(state: GameState): boolean {
   return state.player != null;
@@ -284,11 +311,16 @@ export function setPlayerProfile(
   state: GameState,
   name: string,
   sprite: PlayerSpriteConfig,
+  proficiency: Proficiency,
 ): GameState {
   if (!isValidPlayerName(name)) return state;
   return {
     ...state,
-    player: { name: sanitizePlayerName(name), sprite: normalizePlayerSprite(sprite) },
+    player: {
+      name: sanitizePlayerName(name),
+      sprite: normalizePlayerSprite(sprite),
+      proficiency: normalizeProficiency(proficiency),
+    },
   };
 }
 

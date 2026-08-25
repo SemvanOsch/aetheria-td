@@ -7,6 +7,7 @@ import { getUnit, summonableUnits } from '../../domain/units';
 import type { SummonOutcome } from '../../application/summon';
 import { UnitCard } from '../components/UnitCard';
 import { Gems } from '../components/Currency';
+import { playSummonSound } from '../summonAudio';
 
 type Stage = 'idle' | 'charging' | 'revealed';
 
@@ -33,8 +34,13 @@ export function Summon() {
     if (!outcome) return;
     setResult(outcome);
     setStage('charging');
-    // Brief charge-up, then reveal.
-    window.setTimeout(() => setStage('revealed'), 850);
+    // The orb channels gems — a rising hum leading into the reveal.
+    playSummonSound('charge');
+    // Brief charge-up, then reveal with a rarity-scaled chime flourish.
+    window.setTimeout(() => {
+      setStage('revealed');
+      playSummonSound('reveal', RARITIES[outcome.rarity].order);
+    }, 850);
   };
 
   return (

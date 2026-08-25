@@ -15,12 +15,14 @@ import type { SectionId } from '../domain/levels';
 export type Screen = 'home' | 'summon' | 'collection' | 'enemies' | 'modes' | 'story' | 'game';
 
 export function App() {
-  const { state, setPlayerProfile } = useGame();
+  const { state, setPlayerProfile, markChapterRead } = useGame();
   const [screen, setScreen] = useState<Screen>('home');
   const [activeLevel, setActiveLevel] = useState<number | null>(null);
   const [storySection, setStorySection] = useState<SectionId | null>(null);
   // Bumped to force a fresh GameScreen mount when retrying a stage.
   const [retryNonce, setRetryNonce] = useState(0);
+  // Replay the journal cinematic on demand (read-only review of the adventurer).
+  const [showJournal, setShowJournal] = useState(false);
 
   // Play always starts at the mode picker (reset any drilled-in section).
   const goPlay = () => {
@@ -57,7 +59,11 @@ export function App() {
   if (!hasCompletedIntro(state)) {
     return (
       <div className="app">
-        <PlayerIntro onComplete={(name, sprite) => setPlayerProfile(name, sprite)} />
+        <PlayerIntro
+          onComplete={(name, sprite, proficiency) => setPlayerProfile(name, sprite, proficiency)}
+          readChapters={state.readChapters}
+          onChapterRead={markChapterRead}
+        />
       </div>
     );
   }
@@ -72,6 +78,7 @@ export function App() {
           onSummon={() => setScreen('summon')}
           onCollection={() => setScreen('collection')}
           onEnemyIndex={() => setScreen('enemies')}
+          onJournal={() => setShowJournal(true)}
         />
       )}
       {screen === 'summon' && <Summon />}
@@ -93,6 +100,25 @@ export function App() {
           onExit={exitLevel}
           onHome={goHome}
           onRetry={retryLevel}
+        />
+      )}
+
+      {/* On-demand replay of the journal cinematic, filled with the saved
+          adventurer (review mode — no ID to fill in again). */}
+      {showJournal && state.player && (
+        <PlayerIntro
+          review={{
+            name: state.player.name,
+            sprite: state.player.sprite,
+            proficiency: state.player.proficiency,
+          }}
+          stagesCleared={state.completedLevels.length}
+          readChapters={state.readChapters}
+          onChapterRead={markChapterRead}
+          onClose={(name, sprite, proficiency) => {
+            setPlayerProfile(name, sprite, proficiency);
+            setShowJournal(false);
+          }}
         />
       )}
     </div>

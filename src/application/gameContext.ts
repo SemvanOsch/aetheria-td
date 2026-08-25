@@ -10,6 +10,7 @@
 import { createContext, useContext } from 'react';
 import type { GameState, UiPrefs } from './gameState';
 import type { PlayerSpriteConfig } from '../domain/playerSprite';
+import type { Proficiency } from '../domain/proficiency';
 import type { SummonOutcome } from './summon';
 
 export interface GameStore {
@@ -35,10 +36,12 @@ export interface GameStore {
   /** Merge a patch into the persisted UI preferences. */
   setPrefs: (patch: Partial<UiPrefs>) => void;
   /**
-   * Save the player's adventurer (name + sprite), completing the first-launch
-   * journal introduction. No-op on an invalid/empty name.
+   * Save the player's adventurer (name + sprite + proficiency), completing the
+   * first-launch journal introduction. No-op on an invalid/empty name.
    */
-  setPlayerProfile: (name: string, sprite: PlayerSpriteConfig) => void;
+  setPlayerProfile: (name: string, sprite: PlayerSpriteConfig, proficiency: Proficiency) => void;
+  /** Mark a journal chapter's lore as read, so its reveal only plays once ever. */
+  markChapterRead: (index: number) => void;
   /** Wipe all progression back to a fresh account. */
   resetAccount: () => void;
   /** Add gems (used by the settings grant button). */

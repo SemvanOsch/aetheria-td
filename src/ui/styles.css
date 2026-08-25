@@ -2489,11 +2489,16 @@ button.mastery-box.as-button:hover {
   flex: 1;
   padding: 26px 30px;
   overflow: hidden;
+  animation: page-in 0.65s ease both;
   background:
     radial-gradient(120% 100% at 100% 0%, rgba(255,255,255,0.25), transparent 40%),
     repeating-linear-gradient(92deg, rgba(120, 90, 40, 0.05) 0 2px, transparent 2px 26px),
     linear-gradient(160deg, var(--parch-0) 0%, var(--parch-1) 70%, var(--parch-2) 100%);
   color: var(--ink);
+}
+@keyframes page-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 .book-page.left {
   border-radius: 10px 0 0 10px;
@@ -2596,10 +2601,15 @@ button.mastery-box.as-button:hover {
   border: 2px solid var(--ink);
   box-shadow: inset 0 0 0 4px rgba(255,255,255,0.35), inset 0 0 0 6px var(--ink-soft);
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.2s ease;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease;
   overflow: hidden;
 }
 .id-portrait-frame:disabled { cursor: default; }
+.id-portrait-frame:not(:disabled):hover {
+  background:
+    radial-gradient(80% 80% at 50% 30%, rgba(255,255,255,0.5), transparent 70%),
+    linear-gradient(160deg, #fdf3dd, #ecd6ac);
+}
 .id-portrait-frame.empty {
   background:
     repeating-linear-gradient(45deg, rgba(107,83,53,0.06) 0 8px, transparent 8px 16px),
@@ -2709,6 +2719,68 @@ button.mastery-box.as-button:hover {
 .id-name-block.active .id-label {
   color: var(--gold-deep);
 }
+
+/* ---- Proficiency choice (dropdown → handwritten, like the name) ---- */
+.id-prof-block {
+  margin-top: 22px;
+  transition: opacity 0.4s ease;
+}
+.id-prof-block.locked { opacity: 0.5; }
+.id-prof-block.active .id-label {
+  color: var(--gold-deep);
+}
+.id-prof-line {
+  min-height: 44px;
+  border-bottom: 2px solid var(--ink);
+  display: flex;
+  align-items: center;
+  padding-bottom: 4px;
+}
+.id-prof-select {
+  width: 100%;
+  max-width: 388px;
+  font-family: var(--font-hand);
+  font-size: 20px;
+  color: var(--ink);
+  /* Match the parchment page tone. */
+  background: linear-gradient(160deg, var(--parch-0) 0%, var(--parch-1) 70%, var(--parch-2) 100%);
+  border: 1.5px solid var(--ink-soft);
+  border-radius: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+  transition: border-color 0.14s ease, filter 0.14s ease;
+}
+.id-prof-select:hover:not(:disabled) {
+  border-color: var(--gold-deep);
+  filter: brightness(1.03);
+}
+.id-prof-select option {
+  background: var(--parch-1);
+  color: var(--ink);
+}
+.id-prof-select:disabled { cursor: default; }
+.id-prof-written {
+  font-family: var(--font-hand);
+  font-size: 30px;
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.id-prof-written.final {
+  animation: name-settle 0.5s ease both;
+}
+.id-prof-written.editable {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  gap: 8px;
+}
+.id-prof-written.editable:disabled { cursor: default; }
+.id-prof-written.editable:hover:not(:disabled) .id-name-edit-pencil {
+  opacity: 1;
+}
 .id-name-line {
   min-height: 44px;
   border-bottom: 2px solid var(--ink);
@@ -2772,6 +2844,22 @@ button.mastery-box.as-button:hover {
 .id-name-written.final {
   animation: name-settle 0.5s ease both;
 }
+.id-name-written.editable {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  gap: 8px;
+}
+.id-name-edit-pencil {
+  font-size: 15px;
+  color: #b9925c;
+  opacity: 0.5;
+  transition: opacity 0.12s ease;
+}
+.id-name-written.editable:hover .id-name-edit-pencil {
+  opacity: 1;
+}
 @keyframes name-settle {
   0% { text-shadow: 0 0 10px rgba(242,193,78,0.8); }
   100% { text-shadow: none; }
@@ -2808,6 +2896,195 @@ button.mastery-box.as-button:hover {
   font-size: 24px;
   color: #2f7d4f;
   animation: reveal 0.6s ease both;
+}
+
+/* ---- Close button, beneath the journal ---- */
+.journal-close-btn {
+  position: absolute;
+  left: 50%;
+  bottom: max(18px, env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 6;
+  padding: 10px 30px;
+  font-family: var(--font-title);
+  font-size: 17px;
+  letter-spacing: 0.5px;
+  color: #f0d9a0;
+  background: linear-gradient(150deg, var(--leather) 0%, var(--leather-2) 100%);
+  border: 1.5px solid #2a180d;
+  border-radius: 9px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(242, 193, 78, 0.35);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+  /* Opacity-only fade — must NOT use `reveal` (its `both` fill would clobber
+     the translateX(-50%) that centres the button). */
+  animation: page-in 0.5s ease both;
+}
+.journal-close-btn:hover {
+  transform: translateX(-50%) translateY(-2px);
+  filter: brightness(1.12);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(242, 193, 78, 0.55);
+}
+.journal-close-btn:active {
+  transform: translateX(-50%) translateY(0);
+}
+/* Confirm variant (intro): gilded when ready, muted while incomplete. */
+.journal-close-btn.confirm {
+  color: #1c1206;
+  background: linear-gradient(150deg, var(--gold) 0%, var(--gold-deep) 100%);
+  border-color: #6b4d16;
+  box-shadow: 0 6px 18px rgba(120, 80, 20, 0.5), inset 0 0 0 1px rgba(255, 240, 200, 0.5);
+}
+.journal-close-btn.confirm:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: 0 8px 24px rgba(120, 80, 20, 0.6), inset 0 0 0 1px rgba(255, 240, 200, 0.7);
+}
+.journal-close-btn.confirm:disabled {
+  cursor: not-allowed;
+  color: #6a5a3a;
+  background: linear-gradient(150deg, #b7a988, #9c8e6d);
+  border-color: #6f6045;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  filter: none;
+  transform: translateX(-50%);
+}
+
+/* ---- Page-turn arrows, bottom corners of the journal ---- */
+.journal-arrow {
+  position: absolute;
+  bottom: 14px;
+  z-index: 5;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  font-size: 34px;
+  line-height: 1;
+  padding-bottom: 4px;
+  color: #4a2f18;
+  background:
+    radial-gradient(80% 80% at 50% 30%, rgba(255,255,255,0.4), transparent 70%),
+    linear-gradient(160deg, #f6ead0, #e3caa0);
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  box-shadow: 0 3px 10px rgba(60, 40, 15, 0.4);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+  animation: reveal 0.5s ease both;
+}
+.journal-arrow.left { left: 16px; }
+.journal-arrow.right { right: 16px; }
+.journal-arrow:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 5px 14px rgba(60, 40, 15, 0.45);
+}
+.journal-arrow.left:hover { transform: translateX(-2px); }
+.journal-arrow.right:hover { transform: translateX(2px); }
+
+/* ---- Journal scrollbars: slim, parchment-toned ---- */
+.chapter-list,
+.chapter-body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-soft) transparent;
+}
+.chapter-list::-webkit-scrollbar,
+.chapter-body::-webkit-scrollbar {
+  width: 8px;
+}
+.chapter-list::-webkit-scrollbar-track,
+.chapter-body::-webkit-scrollbar-track {
+  background: rgba(107, 83, 53, 0.08);
+  border-radius: 8px;
+  margin: 4px 0;
+}
+.chapter-list::-webkit-scrollbar-thumb,
+.chapter-body::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #b9925c, #8a6a3e);
+  border-radius: 8px;
+  border: 1px solid rgba(60, 40, 10, 0.35);
+}
+.chapter-list::-webkit-scrollbar-thumb:hover,
+.chapter-body::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #caa066, #9a7648);
+}
+
+/* ---- Chapters index list ---- */
+.chapter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  max-height: calc(100% - 70px);
+  padding-right: 8px;
+}
+.chapter-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  text-align: left;
+  font-family: var(--font-hand);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.28);
+  border: 1.5px solid var(--ink-soft);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+.chapter-entry:hover {
+  background: rgba(255, 255, 255, 0.5);
+  transform: translateX(3px);
+  box-shadow: 0 2px 8px rgba(60, 40, 15, 0.2);
+}
+.chapter-index {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-title);
+  font-size: 15px;
+  color: var(--ink);
+  background: rgba(242, 193, 78, 0.22);
+  border: 1px solid var(--ink-soft);
+  border-radius: 50%;
+}
+.chapter-title {
+  flex: 1;
+  font-size: 20px;
+}
+.chapter-status {
+  flex-shrink: 0;
+  font-size: 18px;
+  color: var(--ink-soft);
+}
+
+/* ---- Chapter reader ---- */
+.chapter-reader-kicker {
+  font-family: var(--font-hand);
+  font-size: 18px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.chapter-body {
+  overflow-y: auto;
+  max-height: calc(100% - 70px);
+  padding-right: 8px;
+  font-family: var(--font-hand);
+  font-size: 20px;
+  line-height: 1.55;
+  color: var(--ink);
+}
+.chapter-body p {
+  margin: 0 0 14px;
+}
+.chapter-body-empty {
+  color: var(--ink-soft);
+  font-style: italic;
+  text-align: center;
+  margin-top: 40px;
 }
 
 /* ---- Sprite creator overlay ---- */
