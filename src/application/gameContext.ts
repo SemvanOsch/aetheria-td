@@ -8,7 +8,7 @@
  */
 
 import { createContext, useContext } from 'react';
-import type { GameState, UiPrefs } from './gameState';
+import type { AudioSettings, GameState, UiPrefs } from './gameState';
 import type { PlayerSpriteConfig } from '../domain/playerSprite';
 import type { Proficiency } from '../domain/proficiency';
 import type { SummonOutcome } from './summon';
@@ -35,6 +35,8 @@ export interface GameStore {
   reorderTeam: (from: number, to: number) => void;
   /** Merge a patch into the persisted UI preferences. */
   setPrefs: (patch: Partial<UiPrefs>) => void;
+  /** Merge a patch into the persisted volume settings. */
+  setAudioSettings: (patch: Partial<AudioSettings>) => void;
   /**
    * Save the player's adventurer (name + sprite + proficiency), completing the
    * first-launch journal introduction. No-op on an invalid/empty name.

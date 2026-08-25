@@ -12,22 +12,12 @@
  * user gesture — the Summon button — so autoplay policies allow it).
  */
 
-let ctx: AudioContext | null = null;
+import { audioBus } from './audioBus';
 
-function audio(): AudioContext | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    if (!ctx) {
-      const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AC) return null;
-      ctx = new AC();
-    }
-    if (ctx.state === 'suspended') void ctx.resume();
-    return ctx;
-  } catch {
-    return null;
-  }
-}
+// Destination for the sound being scheduled — the shared bus's interface output,
+// so summon cues obey the player's volume settings. Set synchronously in
+// `playSummonSound` before the voice runs.
+let dest: AudioNode | null = null;
 
 /** A sine tone with a soft attack and exponential fade — the chime building block. */
 function tone(ac: AudioContext, freq: number, dur: number, gain: number, delay = 0, type: OscillatorType = 'sine'): void {
@@ -39,7 +29,7 @@ function tone(ac: AudioContext, freq: number, dur: number, gain: number, delay =
   g.gain.setValueAtTime(0.0001, t);
   g.gain.linearRampToValueAtTime(gain, t + Math.min(0.03, dur * 0.3));
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  osc.connect(g).connect(ac.destination);
+  osc.connect(g).connect(dest ?? ac.destination);
   osc.start(t);
   osc.stop(t + dur);
 }
@@ -55,7 +45,7 @@ function sweep(ac: AudioContext, from: number, to: number, dur: number, gain: nu
   g.gain.setValueAtTime(0.0001, t);
   g.gain.linearRampToValueAtTime(gain, t + dur * 0.35);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  osc.connect(g).connect(ac.destination);
+  osc.connect(g).connect(dest ?? ac.destination);
   osc.start(t);
   osc.stop(t + dur);
 }
@@ -77,7 +67,7 @@ function shimmer(ac: AudioContext, dur: number, freq: number, gain: number, dela
   g.gain.setValueAtTime(0.0001, t);
   g.gain.linearRampToValueAtTime(gain, t + dur * 0.4);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  src.connect(bp).connect(g).connect(ac.destination);
+  src.connect(bp).connect(g).connect(dest ?? ac.destination);
   src.start(t);
   src.stop(t + dur);
 }
@@ -130,8 +120,10 @@ export type SummonSound = 'charge' | 'reveal';
  * the reveal's grandeur (ignored by `charge`).
  */
 export function playSummonSound(sound: SummonSound, rarityOrder = 0): void {
-  const ac = audio();
-  if (!ac) return;
+  const bus = audioBus('ui');
+  if (!bus) return;
+  const { ac } = bus;
+  dest = bus.out;
   try {
     switch (sound) {
       case 'charge':

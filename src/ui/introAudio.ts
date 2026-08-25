@@ -11,24 +11,14 @@
  * user gesture in the intro, so autoplay policies allow it).
  */
 
+import { audioBus } from './audioBus';
+
 type IntroSound = 'open' | 'pageTurn' | 'quill' | 'sketch' | 'stamp' | 'confirm' | 'hover';
 
-let ctx: AudioContext | null = null;
-
-function audio(): AudioContext | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    if (!ctx) {
-      const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AC) return null;
-      ctx = new AC();
-    }
-    if (ctx.state === 'suspended') void ctx.resume();
-    return ctx;
-  } catch {
-    return null;
-  }
-}
+// Destination for the sound being scheduled — the shared bus's interface output,
+// so intro cues obey the player's volume settings. Set synchronously in
+// `playIntroSound` before the sound runs.
+let dest: AudioNode | null = null;
 
 /** A short burst of band-passed noise — used for paper/ink textures. */
 function noiseSwish(ac: AudioContext, dur: number, freq: number, q: number, gain: number): void {
@@ -47,7 +37,7 @@ function noiseSwish(ac: AudioContext, dur: number, freq: number, q: number, gain
   g.gain.setValueAtTime(0.0001, t);
   g.gain.linearRampToValueAtTime(gain, t + dur * 0.25);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  src.connect(bp).connect(g).connect(ac.destination);
+  src.connect(bp).connect(g).connect(dest ?? ac.destination);
   src.start(t);
   src.stop(t + dur);
 }
@@ -85,7 +75,7 @@ function inkScratch(ac: AudioContext, delay = 0, gainScale = 1): void {
   g.gain.setValueAtTime(0.0001, t);
   g.gain.linearRampToValueAtTime(gain, t + dur * 0.4);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  src.connect(bp).connect(g).connect(ac.destination);
+  src.connect(bp).connect(g).connect(dest ?? ac.destination);
   src.start(t);
   src.stop(t + dur);
 }
@@ -117,15 +107,17 @@ function tone(ac: AudioContext, freq: number, dur: number, gain: number, delay =
   g.gain.setValueAtTime(0.0001, t);
   g.gain.linearRampToValueAtTime(gain, t + 0.02);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  osc.connect(g).connect(ac.destination);
+  osc.connect(g).connect(dest ?? ac.destination);
   osc.start(t);
   osc.stop(t + dur);
 }
 
 /** Play one of the intro cues. Silent no-op if audio is unavailable. */
 export function playIntroSound(sound: IntroSound): void {
-  const ac = audio();
-  if (!ac) return;
+  const bus = audioBus('ui');
+  if (!bus) return;
+  const { ac } = bus;
+  dest = bus.out;
   try {
     switch (sound) {
       case 'open': // leather journal opening — a low, slow paper swish

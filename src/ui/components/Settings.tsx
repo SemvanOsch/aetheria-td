@@ -1,47 +1,62 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useGame } from '../../application/gameContext';
-import { ALL_UNITS } from '../../domain/units';
-import { BOSS_ENEMIES, REGULAR_ENEMIES } from '../../domain/enemies';
-import { LevelDesigner } from '../screens/LevelDesigner';
+import type { AudioSettings } from '../../application/gameState';
+import { Developer } from './Developer';
 
 interface Props {
   onClose: () => void;
 }
 
-/** Skill-tree EXP granted to every champion by the debug settings control. */
-const MASTERY_GRANT = 50;
+/** One labelled volume slider (0–100), disabled while everything is muted. */
+function VolumeSlider({
+  label,
+  hint,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  value: number;
+  disabled?: boolean;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className={`volume-row ${disabled ? 'disabled' : ''}`}>
+      <div className="volume-head">
+        <span className="volume-label">{label}</span>
+        <span className="volume-value">{value}%</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+      {hint && <p className="hint volume-hint">{hint}</p>}
+    </div>
+  );
+}
 
-/** Enemy Index kills granted to every enemy by the debug settings control. */
-const KILLS_GRANT = 50;
-
-/** Settings modal. Currently just the account-reset control (two-step confirm). */
+/**
+ * Player-facing Settings modal: volume controls. The old debug/authoring
+ * controls now live behind the Developer menu, opened from the bottom here.
+ */
 export function Settings({ onClose }: Props) {
-  const { resetAccount, grantGems, awardMastery, awardEnemyKills, state } = useGame();
-  const [confirming, setConfirming] = useState(false);
-  const [showDesigner, setShowDesigner] = useState(false);
+  const { state, setAudioSettings } = useGame();
+  const [showDeveloper, setShowDeveloper] = useState(false);
+  const audio = state.audio;
 
-  const doReset = () => {
-    resetAccount();
-    onClose();
-  };
+  const set = (patch: Partial<AudioSettings>) => setAudioSettings(patch);
 
-  const grantMasteryAll = () => {
-    const gains: Record<string, number> = {};
-    for (const u of ALL_UNITS) gains[u.id] = MASTERY_GRANT;
-    awardMastery(gains);
-  };
-
-  const grantKillsAll = () => {
-    const gains: Record<string, number> = {};
-    for (const e of [...REGULAR_ENEMIES, ...BOSS_ENEMIES]) gains[e.id] = KILLS_GRANT;
-    awardEnemyKills(gains);
-  };
-
-  // The designer is its own full-screen overlay rendered as a sibling (not
+  // The Developer menu is its own full-screen overlay rendered as a sibling (not
   // nested) so its backdrop clicks don't bubble up and close Settings too.
-  if (showDesigner) {
-    return <LevelDesigner onClose={() => setShowDesigner(false)} />;
+  if (showDeveloper) {
+    return <Developer onClose={() => setShowDeveloper(false)} />;
   }
 
   // Portalled to <body> so the TopBar's backdrop-filter can't trap this fixed
@@ -52,71 +67,49 @@ export function Settings({ onClose }: Props) {
         <button className="modal-close" onClick={onClose} aria-label="Close">✕</button>
         <h2>⚙️ Settings</h2>
 
-        <div className="settings-section gems">
-          <div className="settings-row-title">Gems</div>
-          <p className="hint">You currently have 💎 {state.gems.toLocaleString()}.</p>
-          <button className="btn primary block" onClick={() => grantGems(100)}>
-            💎 +100 Gems
-          </button>
-        </div>
-
-        <div className="settings-section">
-          <div className="settings-row-title">Champion Mastery</div>
-          <p className="hint">
-            Grants ⭐ {MASTERY_GRANT} skill-tree EXP to every champion, to spend
-            in their mastery trees.
-          </p>
-          <button className="btn primary block" onClick={grantMasteryAll}>
-            ⭐ +{MASTERY_GRANT} EXP to All Champions
-          </button>
-        </div>
-
-        <div className="settings-section">
-          <div className="settings-row-title">Enemy Index</div>
-          <p className="hint">
-            Grants +{KILLS_GRANT} kills toward every enemy and boss in the Enemy
-            Index, to help unlock their entries.
-          </p>
-          <button className="btn primary block" onClick={grantKillsAll}>
-            📖 +{KILLS_GRANT} Kills to All Enemies
-          </button>
-        </div>
-
-        <div className="settings-section">
-          <div className="settings-row-title">Level Designer</div>
-          <p className="hint">
-            Draw a stage's enemy path on an interactive grid, then export the
-            code to paste into a level in <code>domain/levels.ts</code>.
-          </p>
-          <button className="btn primary block" onClick={() => setShowDesigner(true)}>
-            🗺️ Open Level Designer
-          </button>
-        </div>
-
-        <div className="settings-section">
-          <div className="settings-row-title">Account Data</div>
-          <p className="hint">
-            Wipes all progress — gems, champions, and cleared realms — back to a
-            brand-new account. This cannot be undone.
-          </p>
-
-          {!confirming ? (
-            <button className="btn danger block" onClick={() => setConfirming(true)}>
-              🗑️ Reset Account Data
+        <div className="settings-section audio">
+          <div className="settings-row-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>🔊 Sound</span>
+            <button
+              className={`btn sort-toggle ${audio.muted ? 'off' : ''}`}
+              onClick={() => set({ muted: !audio.muted })}
+            >
+              {audio.muted ? '🔇 Muted' : '🔈 Mute'}
             </button>
-          ) : (
-            <div className="settings-confirm">
-              <p className="confirm-text">Are you sure? This erases everything.</p>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button className="btn danger" style={{ flex: 1 }} onClick={doReset}>
-                  Yes, reset
-                </button>
-                <button className="btn ghost" style={{ flex: 1 }} onClick={() => setConfirming(false)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
+          </div>
+
+          <VolumeSlider
+            label="Master"
+            hint="Scales all game sound."
+            value={audio.master}
+            disabled={audio.muted}
+            onChange={(master) => set({ master })}
+          />
+          <VolumeSlider
+            label="Interface"
+            hint="Menus, the summoning altar and the journal intro."
+            value={audio.ui}
+            disabled={audio.muted}
+            onChange={(ui) => set({ ui })}
+          />
+          <VolumeSlider
+            label="Combat"
+            hint="In-battle champion attacks and impacts."
+            value={audio.combat}
+            disabled={audio.muted}
+            onChange={(combat) => set({ combat })}
+          />
+        </div>
+
+        <div className="settings-section">
+          <div className="settings-row-title">Developer Menu</div>
+          <p className="hint">
+            Debug &amp; authoring tools — gem/EXP grants, the Level Designer, and
+            account reset.
+          </p>
+          <button className="btn ghost block" onClick={() => setShowDeveloper(true)}>
+            🛠️ Open Developer Menu
+          </button>
         </div>
       </div>
     </div>,

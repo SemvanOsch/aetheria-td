@@ -143,6 +143,28 @@ export const LANE_REVEAL_TIME = 1.3;
 export const RISE_TIME = 0.9;
 export const RISE_LIFT = 40;
 
+/**
+ * Semantic sound-cue names the engine emits into `GameEngine.sfx` for the UI to
+ * play. The engine stays audio-agnostic — these are just labels, mapped to
+ * actual synthesized sounds in `ui/combatAudio.ts`.
+ */
+export type SfxName =
+  | 'archerShot'
+  | 'archerHit'
+  | 'swordSwing'
+  | 'swordHit'
+  | 'spearThrust'
+  | 'spearThrow'
+  | 'spearHit'
+  | 'crossbowShot'
+  | 'crossbowHit'
+  | 'windCast'
+  | 'windHit'
+  | 'windSlice'
+  | 'windSliceHit'
+  | 'elfShot'
+  | 'elfHit';
+
 // The Elf's magic arrows leap on impact: each bounce seeks the nearest living
 // enemy within BOUNCE_RANGE of the impact point that the chain hasn't hit yet.
 // Kept modest so a single Elf can't chain-clear a whole pack.
@@ -243,6 +265,13 @@ export class GameEngine {
   /** Latches true once this stage's boss has spawned (e.g. the king rising off
    * his throne on the Throne Room's final wave). */
   bossHasSpawned = false;
+  /**
+   * Cosmetic sound cues emitted this frame (semantic names only — the engine
+   * knows nothing about audio, like `Shot`/`Burst` markers). The UI bridge
+   * drains and plays them each frame, then clears the queue. Throttling/mixing
+   * is the audio layer's job, so this can safely fill up on busy frames.
+   */
+  readonly sfx: SfxName[] = [];
 
   private uidCounter = 1;
   private spawnQueue: ScheduledSpawn[] = [];
@@ -1088,6 +1117,12 @@ export class GameEngine {
       const crossbow = shape === 'crossbow';
       const wind = shape === 'wizard';
       const magic = shape === 'elf';
+      // A soft release cue per shooter (crossbow snap, airy wizard gust, the
+      // Elf's enchanted twang) — the audio layer keeps them quiet and throttled.
+      if (shape === 'archer') this.sfx.push('archerShot');
+      else if (crossbow) this.sfx.push('crossbowShot');
+      else if (wind) this.sfx.push('windCast');
+      else if (magic) this.sfx.push('elfShot');
       this.projectiles.push({
         pos: { ...origin },
         targetUid: target.uid,
@@ -1119,7 +1154,9 @@ export class GameEngine {
       maxTtl: 0.16,
       style: 'slash',
     });
+    this.sfx.push('swordSwing');
     const landed = this.damageEnemy(target, dmg, tower);
+    if (landed) this.sfx.push('swordHit');
     if (crit && landed) this.critFloater(target.pos);
   }
 
@@ -1145,6 +1182,15 @@ export class GameEngine {
         if (target) {
           const landed = this.damageEnemy(target, p.damage, p.source);
           if (p.crit && landed) this.critFloater(target.pos);
+          // A soft impact cue when the shot actually connects, keyed to the
+          // shooter (arrow thud, bolt thunk, airy gust, the Elf's chime tick).
+          if (landed) {
+            const sh = p.source.def.visual.shape;
+            if (sh === 'archer') this.sfx.push('archerHit');
+            else if (sh === 'crossbow') this.sfx.push('crossbowHit');
+            else if (sh === 'wizard') this.sfx.push('windHit');
+            else if (sh === 'elf') this.sfx.push('elfHit');
+          }
         }
         // A magic arrow (the Elf) leaps once to the nearest other foe on impact.
         if (p.bounces > 0) this.spawnBounce(p, dest);
@@ -1287,6 +1333,9 @@ export class GameEngine {
     const crit = this.rollCrit(tower);
     const dmg = tower.damage * (crit ? tower.critMultiplier : 1);
 
+    // The thrust's cast cue: the heavier Javelin THROW gets its own launch sound.
+    this.sfx.push(isThrow ? 'spearThrow' : 'spearThrust');
+
     // Pierce the corridor, landing an impact (slash + spark) on each enemy hit
     // rather than drawing a single beam down the line.
     let targetLanded = false;
@@ -1300,6 +1349,8 @@ export class GameEngine {
       if (perp <= halfWidth + e.def.radius) {
         const landed = this.damageEnemy(e, dmg, tower);
         if (e === target) targetLanded = landed;
+        // Quieter AoE impact (a thrust can pierce several foes at once).
+        if (landed) this.sfx.push('spearHit');
         this.thrustImpact(e.pos, tower.def.visual.color, ux, uy, isThrow);
       }
     }
@@ -1353,6 +1404,9 @@ export class GameEngine {
     const crit = this.rollCrit(tower);
     const dmg = tower.damage * (crit ? tower.critMultiplier : 1);
 
+    // The Wind Slice's own sweeping-arc cast cue, distinct from the wind bullet.
+    this.sfx.push('windSlice');
+
     this.slices.push({
       pos: { ...tower.pos },
       angle: aim,
@@ -1394,6 +1448,8 @@ export class GameEngine {
         if (diff <= s.halfAngle + slack) {
           s.hit.push(e.uid);
           const landed = this.damageEnemy(e, s.damage, s.source);
+          // Quieter AoE cut cue as the crescent reaches each foe.
+          if (landed) this.sfx.push('windSliceHit');
           if (s.crit && landed) this.critFloater(e.pos);
           this.bursts.push({
             pos: { ...e.pos },

@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { applyAudioSettings } from './audioBus';
 import { TopBar } from './components/TopBar';
 import { Home } from './screens/Home';
 import { Summon } from './screens/Summon';
@@ -23,6 +24,13 @@ export function App() {
   const [retryNonce, setRetryNonce] = useState(0);
   // Replay the journal cinematic on demand (read-only review of the adventurer).
   const [showJournal, setShowJournal] = useState(false);
+
+  // Keep the shared audio bus in sync with the persisted volume settings, so
+  // sliders in Settings take effect immediately and the saved levels apply on
+  // load. The bus itself is created lazily on the first sound.
+  useEffect(() => {
+    applyAudioSettings(state.audio);
+  }, [state.audio]);
 
   // Play always starts at the mode picker (reset any drilled-in section).
   const goPlay = () => {

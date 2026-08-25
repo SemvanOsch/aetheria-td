@@ -26,6 +26,7 @@ import { RARITIES } from '../../domain/rarity';
 import { GameEngine } from '../../engine/GameEngine';
 import { drawBoard, type RenderUiState } from '../../engine/renderer';
 import type { Outcome } from '../../engine/types';
+import { playCombatSound } from '../combatAudio';
 import { UnitSprite } from '../components/UnitSprite';
 
 interface Props {
@@ -223,6 +224,13 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
       for (let i = 0; i < steps; i++) {
         engine.update(dt);
         if (engine.outcome !== 'playing') break; // stop stepping once settled
+      }
+
+      // Drain this frame's sound cues (the audio layer throttles each type, so
+      // dense bursts stay light) and clear the queue for the next frame.
+      if (engine.sfx.length) {
+        for (const s of engine.sfx) playCombatSound(s);
+        engine.sfx.length = 0;
       }
 
       drawBoard(ctx, engine, uiRef.current);

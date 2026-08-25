@@ -19,6 +19,22 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-08-25 · Sound & Settings',
+    changes: [
+      'Champions now have battle sounds: every champion has its own attack and impact cue — the Archer’s bow, the Swordsman’s slice, the Spearman’s thrust (with a heavier Javelin Toss), the Crossbow’s bolt, the Wizard’s gust and sweeping Wind Slice, and the Elf’s enchanted arrows. They’re kept soft and layered so a full board never turns into a wall of noise.',
+      'New Settings menu with volume controls — separate Master, Interface, and Combat sliders plus a Mute toggle, all saved between sessions.',
+      'The old debug/authoring tools (gem & EXP grants, the Level Designer, and account reset) have moved into a dedicated Developer Menu, opened from the bottom of Settings.',
+    ],
+  },
+  {
+    version: '2026-08-25 · Journal & Proficiency',
+    changes: [
+      'The Adventurer’s Journal can now be reopened from the home screen — page through it with arrows and read a growing Chapters section: an introduction plus a fresh chapter for every stage you clear. New lore types itself out letter-by-letter the first time you open each chapter.',
+      'Character creation now includes choosing a proficiency — Blade, Bow, or Magic — with a Confirm step before your adventurer is finalised.',
+      'Added synthesized sound: quill scratches and a sketching flurry during the journal intro, plus Summoning Altar cues — a charge-up as the orb winds up and a reveal chime that grows grander with the champion’s rarity.',
+    ],
+  },
+  {
     version: '2026-08-25 · Adventurer Intro',
     changes: [
       'First-launch cinematic: a new player now opens an Adventurer’s Journal, sketches their own custom character portrait, and signs their name onto the Identification Page before entering the game.',

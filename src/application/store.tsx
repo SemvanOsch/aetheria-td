@@ -29,10 +29,12 @@ import {
   saveState,
   reorderTeam as reorderTeamTx,
   setPlayerProfile as setPlayerProfileTx,
+  setAudioSettings as setAudioSettingsTx,
   setPrefs as setPrefsTx,
   setActiveMasteryUpgrade as setActiveMasteryUpgradeTx,
   setMasteryDisabled as setMasteryDisabledTx,
   toggleTeamMember as toggleTeamMemberTx,
+  type AudioSettings,
   type GameState,
   type UiPrefs,
 } from './gameState';
@@ -138,6 +140,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
     [commit],
   );
 
+  const setAudioSettings = useCallback(
+    (patch: Partial<AudioSettings>) => {
+      commit(setAudioSettingsTx(stateRef.current, patch));
+    },
+    [commit],
+  );
+
   const setPlayerProfile = useCallback(
     (name: string, sprite: PlayerSpriteConfig, proficiency: Proficiency) => {
       commit(setPlayerProfileTx(stateRef.current, name, sprite, proficiency));
@@ -176,13 +185,14 @@ export function GameProvider({ children }: { children: ReactNode }) {
       toggleTeamMember,
       reorderTeam,
       setPrefs,
+      setAudioSettings,
       setPlayerProfile,
       markChapterRead,
       resetAccount,
       grantGems,
       summonCost: SUMMON_COST,
     }),
-    [state, summon, completeLevel, awardMastery, awardEnemyKills, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, reorderTeam, setPrefs, setPlayerProfile, markChapterRead, resetAccount, grantGems],
+    [state, summon, completeLevel, awardMastery, awardEnemyKills, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, reorderTeam, setPrefs, setAudioSettings, setPlayerProfile, markChapterRead, resetAccount, grantGems],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

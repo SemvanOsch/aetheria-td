@@ -102,6 +102,8 @@ export interface GameState {
   enemyKills: Record<string, number>;
   /** Persisted UI preferences (Champions menu toggles, etc.). */
   prefs: UiPrefs;
+  /** Persisted volume settings (master / interface / combat / mute). */
+  audio: AudioSettings;
   /**
    * Journal chapter indices whose lore has been typed out at least once. Used to
    * play the letter-by-letter reveal only the *first time ever* a chapter is
@@ -123,9 +125,43 @@ const DEFAULT_PREFS: UiPrefs = {
   showMasteryMarks: true,
 };
 
+/**
+ * Persisted volume settings. Each level is a 0–100 percentage. `master` scales
+ * everything; `ui` covers menu/interface cues (journal intro, summon altar) and
+ * `combat` covers in-battle champion sounds; `muted` silences all of it. The
+ * audio bus (ui/audioBus) maps these onto its gain nodes.
+ */
+export interface AudioSettings {
+  master: number;
+  ui: number;
+  combat: number;
+  muted: boolean;
+}
+
+const DEFAULT_AUDIO: AudioSettings = {
+  master: 100,
+  ui: 100,
+  combat: 100,
+  muted: false,
+};
+
+/** Clamp a stored/partial audio-settings object into a valid one (0–100 levels). */
+function normalizeAudio(raw: Partial<AudioSettings> | undefined | null): AudioSettings {
+  const lvl = (n: unknown, fallback: number): number => {
+    const v = typeof n === 'number' && Number.isFinite(n) ? n : fallback;
+    return Math.max(0, Math.min(100, Math.round(v)));
+  };
+  return {
+    master: lvl(raw?.master, DEFAULT_AUDIO.master),
+    ui: lvl(raw?.ui, DEFAULT_AUDIO.ui),
+    combat: lvl(raw?.combat, DEFAULT_AUDIO.combat),
+    muted: raw?.muted === true,
+  };
+}
+
 const STORAGE_KEY = 'state';
 const STARTING_GEMS = 300;
-const CURRENT_VERSION = 13;
+const CURRENT_VERSION = 14;
 
 /** Maximum distinct champions the player may bring into a stage. */
 export const MAX_TEAM_SIZE = 6;
@@ -147,6 +183,7 @@ export function createInitialState(): GameState {
     team: [...starters],
     enemyKills: {},
     prefs: { ...DEFAULT_PREFS },
+    audio: { ...DEFAULT_AUDIO },
     readChapters: [],
   };
 }
@@ -196,6 +233,8 @@ export function loadState(): GameState {
     .slice(0, MAX_TEAM_SIZE);
   // Pre-v11 saves have no UI preferences; fill missing keys with the defaults.
   migrated.prefs = { ...DEFAULT_PREFS, ...(raw.prefs ?? {}) };
+  // Pre-v14 saves have no volume settings; default everything to full/unmuted.
+  migrated.audio = normalizeAudio(raw.audio);
   // Pre-v12 saves have no player profile. Rather than fabricate an identity,
   // leave it null so the first-launch journal intro runs on next load — this
   // never touches existing progression (gems/champions/levels are untouched),
@@ -286,6 +325,14 @@ export function toggleTeamMember(state: GameState, unitId: string): GameState {
 /** Merge a partial UI-preferences patch into the persisted prefs. */
 export function setPrefs(state: GameState, patch: Partial<UiPrefs>): GameState {
   return { ...state, prefs: { ...state.prefs, ...patch } };
+}
+
+/** Merge a partial volume-settings patch into the persisted audio settings. */
+export function setAudioSettings(
+  state: GameState,
+  patch: Partial<AudioSettings>,
+): GameState {
+  return { ...state, audio: normalizeAudio({ ...state.audio, ...patch }) };
 }
 
 /** Record that a journal chapter's lore has been read (typed out) — no-op if
