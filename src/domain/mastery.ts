@@ -436,6 +436,35 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
       damageMult: 1.1,
     },
   ],
+  // The player's Magic adventurer. Keyed by the stable path id like the others.
+  'player-magic': [
+    {
+      id: 'focused_will',
+      name: 'Focused Will',
+      description: 'A disciplined mind gathers the orb faster — +10% attack speed.',
+      cost: 100,
+      attackSpeedMult: 1.1,
+    },
+    {
+      id: 'raw_power',
+      name: 'Raw Power',
+      description: 'A denser, angrier orb — +10% damage on every burst.',
+      cost: 100,
+      requires: 'focused_will',
+      damageMult: 1.1,
+    },
+    {
+      id: 'arcane_mastery',
+      name: 'Arcane Mastery',
+      description:
+        'Command of the arcane — +10% attack range and +15% damage on every burst.',
+      cost: 250,
+      requires: 'raw_power',
+      major: true,
+      rangeMult: 1.1,
+      damageMult: 1.15,
+    },
+  ],
 };
 
 /** The skill tree for a champion (empty if it has none). */

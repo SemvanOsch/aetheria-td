@@ -19,6 +19,14 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-08-26 · Magic Champion',
+    changes: [
+      'Magic proficiency: your adventurer is now playable as a staff-less spellcaster. Each attack gathers a slow-charging magic orb — visibly conjured in your character’s own colour between their raised hands — then hurls it to burst on impact, striking every enemy caught in the blast circle. Comes with three in-stage upgrades and its own mastery tree (Focused Will · Raw Power · Arcane Mastery).',
+      'New “Circle AoE” attack type with its own on-board indicator: selecting the caster now shows the blast radius around where the orb will land, just like the Line and Cone previews.',
+      'The Magic caster’s hands now rest naturally at their sides on cards and while idle, rising to cradle the orb only as it charges.',
+    ],
+  },
+  {
     version: '2026-08-26 · Your Champion',
     changes: [
       'Your adventurer is now a deployable champion of the exclusive new Champion rarity — granted the moment you finish the Journal identification (existing saves receive theirs on next launch), and drawn from the very portrait you created so it matches your character exactly. It joins your collection and, space permitting, your team automatically; editing your name or portrait in the Journal updates it without ever duplicating or replacing it.',

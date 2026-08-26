@@ -187,15 +187,15 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
       setTooltip(
         e
           ? {
-              name: e.def.name,
-              health: Math.max(0, Math.ceil(e.health)),
-              maxHealth: e.def.health,
-              boss: e.def.boss,
-              physicalResist: e.def.physicalResist ?? 0,
-              magicResist: e.def.magicResist ?? 0,
-              xPct: (e.pos.x / BOARD_WIDTH) * 100,
-              yPct: (e.pos.y / BOARD_HEIGHT) * 100,
-            }
+            name: e.def.name,
+            health: Math.max(0, Math.ceil(e.health)),
+            maxHealth: e.def.health,
+            boss: e.def.boss,
+            physicalResist: e.def.physicalResist ?? 0,
+            magicResist: e.def.magicResist ?? 0,
+            xPct: (e.pos.x / BOARD_WIDTH) * 100,
+            yPct: (e.pos.y / BOARD_HEIGHT) * 100,
+          }
           : null,
       );
     };
@@ -433,57 +433,57 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
 
       <div className="board-layout">
         <div className="board-column">
-        <div className="board-frame">
-          <canvas
-            ref={canvasRef}
-            style={{ aspectRatio: `${BOARD_WIDTH} / ${BOARD_HEIGHT}` }}
-            onPointerMove={handleMove}
-            onPointerLeave={handleLeave}
-            onPointerDown={handleClick}
-            onContextMenu={handleContextMenu}
-          />
-          {tooltip && hud?.outcome === 'playing' && (
-            <div
-              className={`enemy-tooltip ${tooltip.boss ? 'boss' : ''} ${tooltip.yPct < 22 ? 'below' : ''}`}
-              style={{ left: `${tooltip.xPct}%`, top: `${tooltip.yPct}%` }}
-            >
-              <div className="et-name">
-                {tooltip.boss && '☠ '}
-                {tooltip.name}
-                {tooltip.physicalResist > 0 && (
-                  <ResistShield
-                    kind="physical"
-                    pct={Math.round(tooltip.physicalResist * 100)}
-                  />
-                )}
-                {tooltip.magicResist > 0 && (
-                  <ResistShield kind="magic" pct={Math.round(tooltip.magicResist * 100)} />
-                )}
+          <div className="board-frame">
+            <canvas
+              ref={canvasRef}
+              style={{ aspectRatio: `${BOARD_WIDTH} / ${BOARD_HEIGHT}` }}
+              onPointerMove={handleMove}
+              onPointerLeave={handleLeave}
+              onPointerDown={handleClick}
+              onContextMenu={handleContextMenu}
+            />
+            {tooltip && hud?.outcome === 'playing' && (
+              <div
+                className={`enemy-tooltip ${tooltip.boss ? 'boss' : ''} ${tooltip.yPct < 22 ? 'below' : ''}`}
+                style={{ left: `${tooltip.xPct}%`, top: `${tooltip.yPct}%` }}
+              >
+                <div className="et-name">
+                  {tooltip.boss && '☠ '}
+                  {tooltip.name}
+                  {tooltip.physicalResist > 0 && (
+                    <ResistShield
+                      kind="physical"
+                      pct={Math.round(tooltip.physicalResist * 100)}
+                    />
+                  )}
+                  {tooltip.magicResist > 0 && (
+                    <ResistShield kind="magic" pct={Math.round(tooltip.magicResist * 100)} />
+                  )}
+                </div>
+                <div className="et-hpbar">
+                  <span style={{ width: `${(tooltip.health / tooltip.maxHealth) * 100}%` }} />
+                </div>
+                <div className="et-hp">
+                  {tooltip.health} / {tooltip.maxHealth} HP
+                </div>
               </div>
-              <div className="et-hpbar">
-                <span style={{ width: `${(tooltip.health / tooltip.maxHealth) * 100}%` }} />
-              </div>
-              <div className="et-hp">
-                {tooltip.health} / {tooltip.maxHealth} HP
-              </div>
+            )}
+            <div className="board-overlay">
+              {hud?.showBossBanner && hud.outcome === 'playing' && (
+                <div className="boss-banner">☠ A BOSS APPROACHES ☠</div>
+              )}
+              {hud && hud.outcome !== 'playing' && (
+                <ResultCard
+                  outcome={hud.outcome}
+                  gemReward={level.gemReward}
+                  firstClear={firstClearRef.current}
+                  onExit={onExit}
+                  onHome={onHome}
+                  onRetry={onRetry}
+                />
+              )}
             </div>
-          )}
-          <div className="board-overlay">
-            {hud?.showBossBanner && hud.outcome === 'playing' && (
-              <div className="boss-banner">☠ A BOSS APPROACHES ☠</div>
-            )}
-            {hud && hud.outcome !== 'playing' && (
-              <ResultCard
-                outcome={hud.outcome}
-                gemReward={level.gemReward}
-                firstClear={firstClearRef.current}
-                onExit={onExit}
-                onHome={onHome}
-                onRetry={onRetry}
-              />
-            )}
           </div>
-        </div>
 
           <div className="panel panel-pad deploy-bar">
             <div className="deploy-bar-head">
@@ -686,7 +686,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                 </button>
               ) : (
                 <p className="hint" style={{ marginTop: 12, textAlign: 'center' }}>
-                  🔒 Your champion can't be sold.
+                  🔒 Your hero cannot be sold.
                 </p>
               )}
             </div>

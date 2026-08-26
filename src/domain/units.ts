@@ -19,12 +19,18 @@ import { getPlayerChampion } from './playerChampion';
  *  - cone   : hits every enemy inside a cone (the unit's `coneAngle` wide) spread
  *             around the aim direction, out to the end of range (the Wizard's
  *             Wind Slice). Introduced by an in-stage upgrade, not a base attack.
- * Extend with new shapes (e.g. 'circle') as future units need them.
+ *  - circle : a homing projectile that detonates on impact, hitting every enemy
+ *             within a circle (`burstRadius`) of the point it lands (the Magic
+ *             adventurer's charged orb). Single-target aim, radial damage.
+ * Extend with new shapes as future units need them.
  */
-export type AoeType = 'single' | 'line' | 'cone';
+export type AoeType = 'single' | 'line' | 'cone' | 'circle';
 
 /** Fallback opening angle (degrees) for a `cone` attack that sets no `coneAngle`. */
 export const DEFAULT_CONE_ANGLE_DEG = 45;
+
+/** Fallback detonation radius (px) for a `circle` attack that sets no `burstRadius`. */
+export const DEFAULT_BURST_RADIUS = 46;
 
 /** Full opening angle (degrees) of a unit's `cone` attack (falls back to default). */
 export function coneAngleDeg(unit: UnitDef): number {
@@ -116,6 +122,13 @@ export interface UnitDef {
    * to DEFAULT_CONE_ANGLE_DEG if unset. Tune it per unit to widen/narrow the arc.
    */
   coneAngle?: number;
+  /**
+   * For `circle` AoE: the radius in pixels of the circle the projectile detonates
+   * in on impact (the Magic adventurer's orb). Every enemy within this distance of
+   * the impact point is struck. Only meaningful for a `circle` unit; falls back to
+   * DEFAULT_BURST_RADIUS if unset.
+   */
+  burstRadius?: number;
   /**
    * Arrows/shots loosed per attack as a quick burst volley (the Bow adventurer's
    * shortbow fires 3). Omitted / 1 means a single shot per attack. The unit's
@@ -453,6 +466,8 @@ export function aoeLabel(aoe: AoeType): string {
       return 'Line AoE';
     case 'cone':
       return 'Cone AoE';
+    case 'circle':
+      return 'Circle AoE';
     case 'single':
     default:
       return 'Single Target';

@@ -100,7 +100,9 @@ export function ChampionDetail({
           label: 'DPS',
           value: `${dps.toFixed(0)}${
             burst > 1 ? ` x${burst}` : ''
-          }${unit.aoe === 'line' ? ' per enemy in line' : ''}`,
+          }${unit.aoe === 'line' ? ' per enemy in line' : ''}${
+            unit.aoe === 'circle' ? ' per enemy in blast' : ''
+          }`,
         },
         { label: 'Range', value: `${range}px (${rangeLabel(range)})` },
         { divider: true },
@@ -241,6 +243,13 @@ export function ChampionDetail({
           <p className="hint" style={{ marginTop: 12 }}>
             🔱 Line AoE — the attack pierces in a straight line to the end of its
             range, striking every enemy caught along the way.
+          </p>
+        )}
+
+        {unit.aoe === 'circle' && (
+          <p className="hint" style={{ marginTop: 12 }}>
+            🔮 Circle AoE — a slow-charging orb bursts on impact, striking every
+            enemy caught in the blast.
           </p>
         )}
       </div>

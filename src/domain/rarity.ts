@@ -6,7 +6,7 @@
  * or UI changes required. For the MVP only `common` is available.
  */
 
-export type Rarity = 'common' | 'rare' | 'epic' | 'legendary' | 'champion';
+export type Rarity = 'common' | 'rare' | 'epic' | 'legendary' | 'hero';
 
 export interface RarityDef {
   id: Rarity;
@@ -73,9 +73,9 @@ export const RARITIES: Record<Rarity, RarityDef> = {
   },
   // The player's own adventurer only. Never summoned (not available, not part of
   // the summon pool), so it never drops nor shows in the summon "coming soon" list.
-  champion: {
-    id: 'champion',
-    name: 'Champion',
+  hero: {
+    id: 'hero',
+    name: 'Hero',
     weight: 0,
     available: false,
     summonable: false,

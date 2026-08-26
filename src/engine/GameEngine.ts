@@ -32,6 +32,7 @@ import {
 import { selectTarget, type TargetingType } from '../domain/targeting';
 import {
   coneAngleDeg,
+  DEFAULT_BURST_RADIUS,
   effectiveAoe,
   effectiveBounces,
   effectiveGenerate,
@@ -128,6 +129,13 @@ export const SLICE_START_FRAC = 0.12;
 // telegraph while the caster gathers wind. It is folded into the attack cadence
 // (it eats the tail of the reload) so it doesn't slow the tower's overall rate.
 export const CONE_CHARGE_TIME = 0.45;
+// Wind-up before the Magic adventurer's orb releases — deliberately longer than
+// the cone's telegraph so the caster is *visibly* charging the orb in front of
+// them before it launches. Like the cone's, it is folded into the attack cadence.
+export const ORB_CHARGE_TIME = 0.7;
+// The charged orb drifts slowly toward its target so its flight (and the coming
+// detonation) reads clearly, unlike the quick arrows/bolts.
+export const ORB_SPEED = 235;
 // Knockback (the Wizard's Gale Force). A single cooldown lives on the *enemy*
 // (not per Wizard), so its shove rate is capped however many Wizards hit it —
 // it can be slowed but never permanently stalled. At 14px per 0.65s (~21.5px/s)
@@ -168,7 +176,9 @@ export type SfxName =
   | 'windSlice'
   | 'windSliceHit'
   | 'elfShot'
-  | 'elfHit';
+  | 'elfHit'
+  | 'orbCast'
+  | 'orbBurst';
 
 // The Elf's magic arrows leap on impact: each bounce seeks the nearest living
 // enemy within BOUNCE_RANGE of the impact point that the chain hasn't hit yet.
@@ -1003,9 +1013,10 @@ export class GameEngine {
         t.targetUid = null;
       }
 
-      // Charged attack (cone) wind-up: while charging, count down and release the
-      // moment it completes — aimed at whatever is in reach then. Takes priority
-      // over acquiring/firing so the tower commits to its telegraphed slice.
+      // Charged attack (cone Wind Slice / burst orb) wind-up: while charging,
+      // count down and release the moment it completes — aimed at whatever is in
+      // reach then. Takes priority over acquiring/firing so the tower commits to
+      // its telegraphed cast.
       if (t.charge > 0) {
         t.charge = Math.max(0, t.charge - dt);
         if (t.charge > 0) continue; // still winding up
@@ -1013,7 +1024,7 @@ export class GameEngine {
           this.fire(t, chosen.enemy);
           // Reload for the remainder of the cadence (the wind-up ate the rest),
           // so charging doesn't slow the tower's overall attack rate.
-          t.cooldown = Math.max(0, 1 / t.attackSpeed - CONE_CHARGE_TIME);
+          t.cooldown = Math.max(0, 1 / t.attackSpeed - t.chargeMax);
         }
         // Target gone at release: cancel the cast and re-acquire next frame.
         continue;
@@ -1037,11 +1048,15 @@ export class GameEngine {
       // Fire only when off cooldown.
       if (t.cooldown > 0) continue;
 
-      // Cone attackers begin a wind-up instead of firing instantly; the release
-      // (and reload) is handled by the charge block above once it completes.
-      if (t.aoe === 'cone') {
-        t.charge = CONE_CHARGE_TIME;
-        t.chargeMax = CONE_CHARGE_TIME;
+      // Charged attackers begin a wind-up instead of firing instantly; the release
+      // (and reload) is handled by the charge block above once it completes. The
+      // cone (Wind Slice) and the circle orb each telegraph over their own time.
+      if (t.aoe === 'cone' || t.aoe === 'circle') {
+        const chargeTime = t.aoe === 'circle' ? ORB_CHARGE_TIME : CONE_CHARGE_TIME;
+        t.charge = chargeTime;
+        t.chargeMax = chargeTime;
+        // A soft rising cast cue as the orb begins to gather.
+        if (t.aoe === 'circle') this.sfx.push('orbCast');
         continue;
       }
 
@@ -1116,6 +1131,11 @@ export class GameEngine {
 
     if (tower.aoe === 'cone') {
       this.fireCone(tower, target, attackRange);
+      return;
+    }
+
+    if (tower.aoe === 'circle') {
+      this.fireOrb(tower, target);
       return;
     }
 
@@ -1210,6 +1230,13 @@ export class GameEngine {
       const step = p.speed * dt;
 
       if (dist <= step) {
+        // A burst orb detonates where it lands, hitting a whole circle rather than
+        // one target — so it deals its damage radially even if the homed foe has
+        // died, and skips the single-target/bounce paths below.
+        if (p.burstRadius) {
+          this.detonateOrb(dest, p);
+          continue;
+        }
         // Impact: deal the carried damage (if the target still lives) and pop a
         // small hit spark either way.
         if (target) {
@@ -1294,6 +1321,41 @@ export class GameEngine {
       baseDamage: base,
       bounceIndex: nextIndex,
       trail: [],
+    });
+  }
+
+  /**
+   * Detonate a burst orb at its impact point: deal its (pre-rolled, crit-folded)
+   * damage to every living, targetable enemy whose body overlaps the blast circle
+   * (`p.burstRadius` plus the enemy's own radius), and paint a big expanding ring
+   * in the orb's colour. One CRIT! popup if the roll crit and at least one foe was
+   * caught.
+   */
+  private detonateOrb(pos: Vec2, p: Projectile): void {
+    const radius = p.burstRadius ?? DEFAULT_BURST_RADIUS;
+    this.sfx.push('orbBurst');
+    let anyLanded = false;
+    for (const e of this.enemies) {
+      if (e.dead || e.dying || e.rise > 0 || isSpeaking(e)) continue;
+      const d = Math.hypot(e.pos.x - pos.x, e.pos.y - pos.y);
+      if (d > radius + e.def.radius) continue;
+      if (this.damageEnemy(e, p.damage, p.source)) anyLanded = true;
+    }
+    if (p.crit && anyLanded) this.critFloater(pos);
+    // A big blast ring filling the detonation circle, plus a bright inner flash.
+    this.bursts.push({
+      pos: { ...pos },
+      color: p.color,
+      ttl: 0.34,
+      maxTtl: 0.34,
+      radius,
+    });
+    this.bursts.push({
+      pos: { ...pos },
+      color: '#ffffff',
+      ttl: 0.18,
+      maxTtl: 0.18,
+      radius: radius * 0.4,
     });
   }
 
@@ -1453,6 +1515,37 @@ export class GameEngine {
       color: tower.def.visual.color,
       ttl: SLICE_SWEEP_TIME,
       maxTtl: SLICE_SWEEP_TIME,
+    });
+  }
+
+  /**
+   * Burst orb (the Magic adventurer): after the visible charge wind-up, loose a
+   * slow homing orb from the caster's raised hands. It carries a pre-rolled crit
+   * and its detonation radius; on impact (see `updateProjectiles`) it explodes,
+   * dealing that damage to every foe within `burstRadius`. The orb takes the
+   * caster's own colour so the charge, flight and blast all read as one spell.
+   */
+  private fireOrb(tower: Tower, target: Enemy): void {
+    const crit = this.rollCrit(tower);
+    const dmg = tower.damage * (crit ? tower.critMultiplier : 1);
+    // Launch from where the renderer gathers the orb — just in front of the
+    // caster's hands, on the side it faces.
+    const dir = target.pos.x >= tower.pos.x ? 1 : -1;
+    const origin = { x: tower.pos.x + dir * 11, y: tower.pos.y - 4 };
+    this.projectiles.push({
+      pos: origin,
+      targetUid: target.uid,
+      last: { ...target.pos },
+      speed: ORB_SPEED,
+      damage: dmg,
+      crit,
+      color: tower.def.visual.color,
+      scale: 1,
+      style: 'orb',
+      source: tower,
+      bounces: 0,
+      burstRadius: tower.def.burstRadius ?? DEFAULT_BURST_RADIUS,
+      trail: [],
     });
   }
 

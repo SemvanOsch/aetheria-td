@@ -13,7 +13,8 @@ interface Props {
 export function Home({ onPlay, onSummon, onCollection, onEnemyIndex, onJournal }: Props) {
   const { state } = useGame();
   const ownedCount = state.ownedUnits.length;
-  const totalKinds = summonableUnits().length;
+  // +1 for the champion rarity unit
+  const totalKinds = summonableUnits().length + 1;
   const cleared = state.completedLevels.length;
 
   return (

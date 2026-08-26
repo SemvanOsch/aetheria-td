@@ -4459,6 +4459,7 @@ export function hasSprite(shape: string): boolean {
 function playerWeaponForShape(shape: string): PlayerWeapon {
   if (shape === 'player-blade') return 'dual-swords';
   if (shape === 'player-bow') return 'bow';
+  if (shape === 'player-magic') return 'magic';
   return 'none';
 }
 
@@ -4523,9 +4524,10 @@ const PLAYER_BUILDS: Record<string, { sw: number; hw: number; leg: number; head:
  * A weapon layered onto the composed player avatar. `'none'` is the bare
  * portrait (journal / profile); the martial variants are added when the
  * adventurer is drawn as a deployable champion, one per journal proficiency.
- * Only `'dual-swords'` (the Blade path) is implemented today.
+ * `'dual-swords'` (Blade), `'bow'` (Bow) and `'magic'` (the staff-less Magic
+ * caster, who conjures the orb in raised bare hands) are the champion variants.
  */
-export type PlayerWeapon = 'none' | 'dual-swords' | 'bow';
+export type PlayerWeapon = 'none' | 'dual-swords' | 'bow' | 'magic';
 
 /**
  * Draw the player's custom adventurer described by `cfg`, in the caller's local
@@ -4610,6 +4612,13 @@ export function drawPlayerSprite(
     // arm drawing the string), so the shortbow draws its own raised arms in place
     // of the default hanging ones.
     drawPlayerShortbow(ctx, skin, sleeve, armWidth, anim);
+  } else if (weapon === 'magic') {
+    // A staff-less caster: hands rest at the sides and only rise to cradle the orb
+    // out in front as it charges (higher `anim`) — so the resting pose (cards,
+    // idle on the board) matches the other champions. The orb itself is drawn by
+    // the renderer (in front of the caster) so it can take the player's colour and
+    // animate its charge/flight/burst.
+    drawPlayerCastArms(ctx, skin, sleeve, armWidth, anim, b);
   } else {
     // Arms hanging at the sides, with hands.
     ctx.strokeStyle = sleeve;
@@ -4987,5 +4996,50 @@ function drawPlayerShortbow(
   ctx.beginPath();
   ctx.arc(gripX, gripY, 1.4, 0, Math.PI * 2);
   ctx.arc(stringX, stringY, 1.3, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/**
+ * The Magic adventurer's arms (there is no staff). At rest (`charge` = 0) both
+ * bare hands hang at the sides exactly like the other champions, so the resting
+ * pose reads normally on cards and while idle on the board. As the orb charges
+ * (`charge` → 1) the hands rise and reach forward to cup it in front of the
+ * figure. Drawn in the sprite's local space (authored facing +x). The orb itself
+ * is not drawn here — the renderer paints it between the raised hands so it can
+ * take the player's colour and animate.
+ */
+function drawPlayerCastArms(
+  ctx: CanvasRenderingContext2D,
+  skin: string,
+  sleeve: string,
+  armWidth: number,
+  charge: number,
+  b: { hw: number },
+): void {
+  const k = Math.max(0, Math.min(1, charge));
+  const reach = 1.6 * k;
+  // Each hand eases from its resting spot at the side to a forward cupping spot
+  // that frames the gap where the orb forms.
+  const lerp = (a: number, c: number) => a + (c - a) * k;
+  const frontX = lerp(b.hw - 0.5, 10 + reach); // upper/front hand
+  const frontY = lerp(4, -6);
+  const rearX = lerp(-b.hw + 1.5, 9.5 + reach); // lower/rear hand
+  const rearY = lerp(3.5, -1.5);
+
+  // Arms (sleeves) from the shoulders to the two hands.
+  ctx.strokeStyle = sleeve;
+  ctx.lineWidth = armWidth;
+  ctx.beginPath();
+  ctx.moveTo(2, -5.5);
+  ctx.lineTo(frontX, frontY);
+  ctx.moveTo(-1.5, -5.5);
+  ctx.lineTo(rearX, rearY);
+  ctx.stroke();
+
+  // Bare hands.
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.arc(frontX, frontY, 1.5, 0, Math.PI * 2);
+  ctx.arc(rearX, rearY, 1.4, 0, Math.PI * 2);
   ctx.fill();
 }

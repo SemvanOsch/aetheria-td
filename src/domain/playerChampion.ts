@@ -8,12 +8,10 @@
  * and a tiny runtime registry so `getUnit` can resolve the player champion by id
  * exactly like any catalog unit — keeping the single-resolution rule intact.
  *
- * Structure for all three journal proficiencies is laid out up front (one stable
- * id per path), but only the **Blade** path (`sword`) is implemented today; the
- * Bow and Magic builders return `null`, so no unfinished champion ever enters the
- * roster. The id encodes the path, so a champion's progression (mastery keyed by
- * id) survives a later proficiency change — an owned Blade champion is never
- * silently converted into an unfinished path.
+ * All three journal proficiencies are implemented — Blade (`sword`), Bow (`bow`)
+ * and Magic (`magic`) — each with one stable id per path. The id encodes the path,
+ * so a champion's progression (mastery keyed by id) survives a later proficiency
+ * change — an owned Blade champion is never silently converted into another path.
  */
 
 import type { UnitDef, UnitVisual } from './units';
@@ -32,7 +30,11 @@ export const PLAYER_CHAMPION_IDS: Record<Proficiency, string> = {
 };
 
 /** The proficiency paths whose champion is fully implemented and grantable. */
-const IMPLEMENTED_PATHS: ReadonlySet<Proficiency> = new Set<Proficiency>(['sword', 'bow']);
+const IMPLEMENTED_PATHS: ReadonlySet<Proficiency> = new Set<Proficiency>([
+  'sword',
+  'bow',
+  'magic',
+]);
 
 const ID_TO_PATH: Record<string, Proficiency> = {
   'player-blade': 'sword',
@@ -75,10 +77,8 @@ export function buildPlayerChampionDef(
       return buildBladeChampion(id, name, sprite);
     case 'bow':
       return buildBowChampion(id, name, sprite);
-    // The Magic champion is intentionally not implemented yet — it gets a real
-    // builder here when its sprite/stats are authored. Returning null keeps it
-    // out of the playable roster in the meantime.
     case 'magic':
+      return buildMagicChampion(id, name, sprite);
     default:
       return null;
   }
@@ -112,7 +112,7 @@ function buildBladeChampion(
       'A dual-wielding duelist with a short sword in each ' +
       'hand, swift and sure on the front line.',
     // The exclusive Champion rarity — the player's own adventurer, never summoned.
-    rarity: 'champion',
+    rarity: 'hero',
     damage: 20,
     attackSpeed: 1.1,
     range: 64,
@@ -174,7 +174,7 @@ function buildBowChampion(
     description:
       'A nimble archer with a shortbow, loosing arrows in quick bursts of three.',
     // The exclusive Champion rarity — the player's own adventurer, never summoned.
-    rarity: 'champion',
+    rarity: 'hero',
     // Per-arrow damage; a volley lands three of these in quick succession.
     damage: 8,
     // Governs how often the whole 3-arrow burst repeats (not the per-arrow rate).
@@ -207,6 +207,74 @@ function buildBowChampion(
         cost: 110,
         damage: 5,
         range: 20,
+      },
+    ],
+    visual,
+  };
+}
+
+/**
+ * The Magic adventurer: a staff-less spellcaster who conjures a magic orb in bare
+ * hands. Each attack is a slow-charging orb (a visible wind-up) that drifts toward
+ * the target and *detonates* on impact, dealing its damage to every foe within a
+ * circle (`circle` AoE / `burstRadius`). Balanced as a premium single-hero AoE
+ * caster — pricey and slow, but the only champion that clears a clustered pack in
+ * one cast. Magic damage; the orb reads in the caster's own colour.
+ */
+function buildMagicChampion(
+  id: string,
+  name: string,
+  sprite: PlayerSpriteConfig,
+): UnitDef {
+  const visual: UnitVisual = {
+    // Accent colour tints the orb, its detonation and the selection glow — the
+    // orb is drawn in the player's own colour. The board figure is drawn from
+    // `playerConfig`, not this flat colour.
+    color: sprite.outfitColor,
+    icon: '🔮',
+    shape: 'player-magic',
+    playerConfig: sprite,
+  };
+  return {
+    id,
+    name,
+    description:
+      'A staff-less mage who gathers a magic orb in bare hands and hurls it to ' +
+      'burst over a cluster of foes.',
+    // The exclusive Champion rarity — the player's own adventurer, never summoned.
+    rarity: 'hero',
+    // Damage dealt to every enemy caught in the orb's detonation.
+    damage: 22,
+    // Deliberately slow — the orb takes a moment to charge before each cast.
+    attackSpeed: 0.55,
+    range: 104,
+    targeting: 'first',
+    aoe: 'circle',
+    burstRadius: 46,
+    attackType: 'ranged',
+    damageType: 'magic',
+    cost: 55,
+    deployLimit: 1,
+    upgrades: [
+      {
+        name: 'Dense Core',
+        description: 'A tighter-wound orb detonates harder.',
+        cost: 40,
+        damage: 12,
+      },
+      {
+        name: 'Swift Casting',
+        description: 'A practised hand gathers the orb faster — quicker, harder bursts.',
+        cost: 65,
+        damage: 6,
+        attackSpeed: 0.2,
+      },
+      {
+        name: 'Arcane Overflow',
+        description: 'Overcharged castings reach farther and hit harder.',
+        cost: 110,
+        damage: 14,
+        range: 12,
       },
     ],
     visual,

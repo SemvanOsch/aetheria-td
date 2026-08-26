@@ -103,7 +103,7 @@ export function Collection() {
       <div className="team-bar">
         <div className="team-bar-head">
           <span className="team-bar-title">⚔️ Your Team</span>
-          <span className="team-bar-count">{state.team.length} / {MAX_TEAM_SIZE}</span>
+          <span className="team-bar-count">{state.team.length - 1} / {MAX_TEAM_SIZE - 1}</span>
         </div>
         <div className="team-slots">
           {Array.from({ length: MAX_TEAM_SIZE }).map((_, i) => {

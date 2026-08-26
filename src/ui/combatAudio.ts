@@ -156,6 +156,17 @@ const VOICES: Record<SfxName, (ac: AudioContext) => void> = {
     toneGlide(ac, jit(1350, 120), 1150, 0.13, 0.016, 'sine');
     noiseSweep(ac, jit(2400, 250), 1600, 0.03, 0.008, 1.2, 'highpass');
   },
+
+  // Magic adventurer — a soft rising arcane hum as the orb gathers, and a deep
+  // muffled boom when it bursts over the pack.
+  orbCast: (ac) => {
+    toneGlide(ac, jit(240, 30), 620, 0.55, 0.02, 'sine');
+    noiseSweep(ac, jit(400, 60), jit(1100, 150), 0.5, 0.01, 0.5);
+  },
+  orbBurst: (ac) => {
+    toneGlide(ac, jit(320, 40), 90, 0.28, 0.03, 'triangle');
+    noiseSweep(ac, jit(900, 120), 200, 0.24, 0.03, 0.6, 'lowpass');
+  },
 };
 
 /** Play one combat cue, throttled per type. Silent no-op if audio is unavailable. */

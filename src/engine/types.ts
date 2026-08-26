@@ -358,10 +358,17 @@ export interface Projectile {
    * renderer draws older points progressively fainter. Undefined for plain shots.
    */
   trail?: Vec2[];
+  /**
+   * Detonation radius (px) for a `burst` projectile (the Magic adventurer's orb):
+   * on impact it deals its `damage` to every living enemy within this distance of
+   * the impact point, rather than only the target. Undefined for a single-target
+   * shot, whose damage lands on its target alone.
+   */
+  burstRadius?: number;
 }
 
 /** How a projectile is drawn in flight. */
-export type ProjectileStyle = 'arrow' | 'wind' | 'magic';
+export type ProjectileStyle = 'arrow' | 'wind' | 'magic' | 'orb';
 
 export type Outcome = 'playing' | 'won' | 'lost';
 

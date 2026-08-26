@@ -14,7 +14,7 @@ import {
   type BoardTheme,
   type PropKind,
 } from '../domain/decor';
-import { coneAngleDeg, getUnit } from '../domain/units';
+import { coneAngleDeg, DEFAULT_BURST_RADIUS, getUnit } from '../domain/units';
 import { getEnemy } from '../domain/enemies';
 import { drawEnemySprite, drawUnitSprite, hasEnemySprite, hasSprite, shade } from './sprites';
 import {
@@ -1532,6 +1532,16 @@ function drawTowers(
         empowered,
         t.def.visual.playerConfig,
       );
+      // The Magic adventurer visibly gathers its orb during the wind-up: a
+      // growing ball of the caster's own colour cupped in the raised hands, in
+      // front of the figure on the side it faces. It grows with the charge, then
+      // launches as a projectile the moment the cast releases.
+      if (t.aoe === 'circle' && t.charge > 0 && t.chargeMax > 0) {
+        const grow = 1 - t.charge / t.chargeMax; // 0 at cast start → 1 at release
+        const accent = t.def.visual.playerConfig?.outfitColor ?? t.def.visual.color;
+        const cx = (faceLeft ? -1 : 1) * (12 + 1.6 * grow);
+        drawChargingOrb(ctx, cx, -4.5, 1.2 + 4.3 * grow, accent, grow);
+      }
     } else {
       // Body disc.
       ctx.fillStyle = t.def.visual.color;
@@ -1656,6 +1666,8 @@ function drawPreloadGem(ctx: CanvasRenderingContext2D, loaded: boolean): void {
  * Visualise the selected tower's AoE shape, aimed at its live target if it is
  * firing, else at its last struck point, else a default facing.
  *  - line  : the piercing corridor down the aim axis to the end of range.
+ *  - cone  : the wedge spread around the aim axis to the end of range.
+ *  - circle: the blast circle (`burstRadius`) around the point the orb detonates.
  *  - single: an 'x' marking the single point it strikes.
  */
 function drawAoeIndicator(
@@ -1735,12 +1747,46 @@ function drawAoeIndicator(
     return;
   }
 
-  // Single target: mark the strike point with an 'x'.
-  // Default point (never fired) sits partway along the facing at 60% range.
+  // Default aim point (never fired) sits partway along the facing at 60% range —
+  // shared by the circle blast preview and the single-target cross below.
   const point = aim ?? {
     x: t.pos.x + Math.cos(angle) * t.range * 0.6,
     y: t.pos.y + Math.sin(angle) * t.range * 0.6,
   };
+
+  if (t.aoe === 'circle') {
+    // The orb detonates at the aim point, so show the blast circle there (its
+    // `burstRadius`) plus a small cross marking the impact centre.
+    const radius = t.def.burstRadius ?? DEFAULT_BURST_RADIUS;
+    ctx.save();
+    ctx.translate(point.x, point.y);
+    ctx.globalAlpha = 0.2;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.9;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Impact-centre cross.
+    ctx.globalAlpha = 1;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+    ctx.lineWidth = 5;
+    drawCross(ctx, 7);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    drawCross(ctx, 7);
+    ctx.restore();
+    return;
+  }
+
+  // Single target: mark the strike point with an 'x'.
   const s = 9; // arm length of the cross
   ctx.save();
   ctx.translate(point.x, point.y);
@@ -2077,6 +2123,12 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine): voi
       drawWindBullet(ctx, p.color);
     } else if (p.style === 'magic') {
       drawMagicArrow(ctx, p.color);
+    } else if (p.style === 'orb') {
+      // The Magic adventurer's charged orb in flight — a glowing ball in the
+      // caster's colour. Drawn unrotated-looking (a sphere reads the same at any
+      // heading), so undo the travel rotation before painting it round.
+      ctx.rotate(-ang);
+      drawChargingOrb(ctx, 0, 0, 5.5, p.color, 1);
     } else {
       // Shaft.
       ctx.strokeStyle = '#6e4a26';
@@ -2113,6 +2165,46 @@ function withAlpha(hex: string, alpha: number): string {
   const full = c.length === 3 ? c.split('').map((x) => x + x).join('') : c;
   const n = parseInt(full, 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+/**
+ * The Magic adventurer's orb — a glowing ball in the caster's colour, drawn
+ * centred at (cx, cy) with the given body `radius`. Used both for the charging
+ * orb cupped in the caster's hands (radius grows with the wind-up) and for the
+ * orb in flight. `intensity` (0..1) brightens the core and adds a faint outer
+ * bloom as the charge fills, so a nearly-charged orb reads hotter.
+ */
+function drawChargingOrb(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  color: string,
+  intensity: number,
+): void {
+  const k = Math.max(0, Math.min(1, intensity));
+  ctx.save();
+  // Soft outer bloom that swells as the orb charges.
+  ctx.fillStyle = withAlpha(color, 0.18 + 0.14 * k);
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius * (1.7 + 0.3 * k), 0, Math.PI * 2);
+  ctx.fill();
+  // Main coloured body.
+  ctx.fillStyle = withAlpha(color, 0.9);
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fill();
+  // A brighter tint ring inside the body.
+  ctx.fillStyle = withAlpha(shade(color, 0.28), 0.95);
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius * 0.66, 0, Math.PI * 2);
+  ctx.fill();
+  // Hot white core, growing with intensity.
+  ctx.fillStyle = withAlpha('#ffffff', 0.6 + 0.4 * k);
+  ctx.beginPath();
+  ctx.arc(cx - radius * 0.12, cy - radius * 0.12, radius * (0.28 + 0.14 * k), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 /**
