@@ -26,7 +26,7 @@ import {
   type PlayerSpriteConfig,
 } from '../domain/playerSprite';
 import { normalizeProficiency, type Proficiency } from '../domain/proficiency';
-import { implementedPlayerChampionId } from '../domain/playerChampion';
+import { implementedPlayerChampionId, isPlayerChampionId } from '../domain/playerChampion';
 import { ENEMY_KILLS_TO_UNLOCK, type EnemyDef } from '../domain/enemies';
 import {
   activeMasteryUpgrades,
@@ -238,10 +238,9 @@ export function loadState(): GameState {
   // Pre-v9 saves have no per-enemy kill tallies (Enemy Index starts empty).
   migrated.enemyKills = { ...(raw.enemyKills ?? {}) };
   // Pre-v6 saves have no team; seed it from owned units (all were deployable
-  // before teams existed). Always normalize to a distinct, owned, capped list.
-  migrated.team = Array.from(new Set(raw.team ?? migrated.ownedUnits))
-    .filter((id) => migrated.ownedUnits.includes(id))
-    .slice(0, MAX_TEAM_SIZE);
+  // before teams existed). Always normalize to a distinct, owned, capped list
+  // with the personal champion (if owned) pinned to the first slot.
+  migrated.team = normalizeTeam(raw.team ?? migrated.ownedUnits, migrated.ownedUnits);
   // Pre-v11 saves have no UI preferences; fill missing keys with the defaults.
   migrated.prefs = { ...DEFAULT_PREFS, ...(raw.prefs ?? {}) };
   // Pre-v14 saves have no volume settings; default everything to full/unmuted.
@@ -299,19 +298,33 @@ export function addGems(state: GameState, amount: number): GameState {
   return { ...state, gems: Math.max(0, state.gems + amount) };
 }
 
-/** Append a unit to the team if it's absent and there is still room. */
-function withAutoTeam(team: string[], unitId: string): string[] {
-  if (team.includes(unitId) || team.length >= MAX_TEAM_SIZE) return team;
-  return [...team, unitId];
+/** Whether an id is the locked, always-first team champion (owned + a player id). */
+export function isLockedChampion(state: GameState, unitId: string): boolean {
+  return isPlayerChampionId(unitId) && state.ownedUnits.includes(unitId);
+}
+
+/**
+ * Enforce the team invariant: the personal champion (if owned) is always present
+ * and pinned to the first slot; every other member keeps its relative order. The
+ * list is de-duplicated, restricted to owned units, and capped at MAX_TEAM_SIZE.
+ * The champion is never displaced by the cap — it takes priority over the others.
+ */
+function normalizeTeam(team: readonly string[], ownedUnits: readonly string[]): string[] {
+  const distinct = Array.from(new Set(team)).filter((id) => ownedUnits.includes(id));
+  const championId = ownedUnits.find(isPlayerChampionId);
+  if (!championId) return distinct.slice(0, MAX_TEAM_SIZE);
+  const rest = distinct.filter((id) => id !== championId);
+  return [championId, ...rest].slice(0, MAX_TEAM_SIZE);
 }
 
 /** Add a unit type to the collection (no-op if already owned). */
 export function addUnit(state: GameState, unitId: string): GameState {
   if (state.ownedUnits.includes(unitId)) return state;
+  const ownedUnits = [...state.ownedUnits, unitId];
   return {
     ...state,
-    ownedUnits: [...state.ownedUnits, unitId],
-    team: withAutoTeam(state.team, unitId),
+    ownedUnits,
+    team: normalizeTeam([...state.team, unitId], ownedUnits),
   };
 }
 
@@ -327,9 +340,11 @@ export function isInTeam(state: GameState, unitId: string): boolean {
 /**
  * Add or remove an owned champion from the team. Adding is a no-op when the
  * team is already full (MAX_TEAM_SIZE) or the unit isn't owned; removing always
- * succeeds. Order is preserved.
+ * succeeds. Order is preserved. The personal champion is **locked** — it can
+ * never be toggled off (it is always deployed, pinned to the first slot).
  */
 export function toggleTeamMember(state: GameState, unitId: string): GameState {
+  if (isLockedChampion(state, unitId)) return state;
   if (state.team.includes(unitId)) {
     return { ...state, team: state.team.filter((id) => id !== unitId) };
   }
@@ -413,7 +428,8 @@ export function grantPlayerChampion(state: GameState): GameState {
   return {
     ...state,
     ownedUnits,
-    team: withAutoTeam(state.team, id),
+    // Pin the champion to the first team slot — it is always deployed.
+    team: normalizeTeam([id, ...state.team], ownedUnits),
     playerChampionGranted: true,
   };
 }
@@ -437,7 +453,8 @@ export function reorderTeam(state: GameState, from: number, to: number): GameSta
   const next = [...team];
   const [moved] = next.splice(from, 1);
   next.splice(to, 0, moved);
-  return { ...state, team: next };
+  // Re-pin the locked champion to the first slot — it can't be dragged out of it.
+  return { ...state, team: normalizeTeam(next, state.ownedUnits) };
 }
 
 /** Gems granted for re-clearing a stage the player has already beaten. */

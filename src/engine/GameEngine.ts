@@ -12,6 +12,7 @@
  */
 
 import { getEnemy, resistMultiplier } from '../domain/enemies';
+import { isPlayerChampionId } from '../domain/playerChampion';
 import { CASTLE_DECOR_CELLS, decorCellKeys } from '../domain/decor';
 import {
   cellCenter,
@@ -659,10 +660,18 @@ export class GameEngine {
     );
   }
 
+  /** Whether a deployed tower may be sold — the personal champion is unsellable. */
+  canSell(uid: number): boolean {
+    const t = this.towers.find((x) => x.uid === uid);
+    return t != null && !isPlayerChampionId(t.def.id);
+  }
+
   /** Sell a tower, refunding a fraction of its total invested gold. */
   sellUnit(col: number, row: number): boolean {
     const idx = this.towers.findIndex((t) => t.col === col && t.row === row);
     if (idx < 0) return false;
+    // The player's personal champion is locked to the field — it can't be sold.
+    if (isPlayerChampionId(this.towers[idx].def.id)) return false;
     const refund = Math.round(this.towers[idx].invested * SELL_REFUND);
     this.currency += refund;
     this.currencyEarned += refund;

@@ -792,6 +792,33 @@ button.stat-card.clickable:active {
   color: var(--text-faint);
   font-size: 22px;
 }
+/* The personal champion — pinned to the first slot, always deployed. A distinct
+   rose/gold look sets it apart from the swappable member slots, and it isn't
+   grabbable (no drag cursor, no remove ✕). */
+.team-slot.filled.champion-slot {
+  cursor: default;
+  background: linear-gradient(160deg, rgba(255, 84, 112, 0.22), rgba(255, 176, 92, 0.16));
+  border: 1px solid rgba(255, 84, 112, 0.7);
+  box-shadow: 0 0 0 1px rgba(255, 84, 112, 0.3), 0 0 12px rgba(255, 84, 112, 0.35);
+}
+.team-slot.filled.champion-slot:hover {
+  filter: brightness(1.05);
+}
+.team-slot-lock {
+  position: absolute;
+  bottom: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ff5470;
+  color: #fff;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
 .team-bar-hint {
   margin: 0;
 }
@@ -821,6 +848,15 @@ button.stat-card.clickable:active {
 .team-toggle:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+/* Champion card badge — locked into the team, not a toggle. Reads as its own
+   Champion-rarity rose rather than the dimmed "disabled" look. */
+.team-toggle.champion.locked {
+  opacity: 1;
+  cursor: default;
+  background: linear-gradient(160deg, rgba(255, 84, 112, 0.18), rgba(255, 176, 92, 0.12));
+  border-color: rgba(255, 84, 112, 0.6);
+  color: #ff8095;
 }
 .unit-card {
   position: relative;

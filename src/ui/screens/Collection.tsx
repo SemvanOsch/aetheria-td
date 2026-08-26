@@ -6,6 +6,7 @@ import {
   effectiveMasteryUpgradesFor,
   hasAffordableMasteryUpgrade,
   isInTeam,
+  isLockedChampion,
   isMasteryDisabled,
   masteryExp,
   masteryUpgradesFor,
@@ -108,9 +109,24 @@ export function Collection() {
           {Array.from({ length: MAX_TEAM_SIZE }).map((_, i) => {
             const id = state.team[i];
             const def = id ? getUnit(id) : undefined;
+            const locked = id != null && isLockedChampion(state, id);
             const dragging = dragIndex === i;
             const dropTarget =
               dragOverIndex === i && dragIndex !== null && dragIndex !== i;
+            // The personal champion is pinned to the first slot: it can't be
+            // dragged, reordered, or removed. Render it as a distinct locked slot.
+            if (def && locked) {
+              return (
+                <div
+                  key={def.id}
+                  className="team-slot filled champion-slot"
+                  title={`${def.name} — your champion, always deployed`}
+                >
+                  <span className="team-slot-ic"><UnitSprite unit={def} size={34} /></span>
+                  <span className="team-slot-lock">🔒</span>
+                </div>
+              );
+            }
             return def ? (
               <button
                 key={def.id}
@@ -148,8 +164,7 @@ export function Collection() {
           })}
         </div>
         <p className="hint team-bar-hint">
-          Only these champions can be deployed in a stage. Drag to reorder; tap an
-          owned card below to add or remove it.
+          Only these champions can be deployed in a stage.
         </p>
       </div>
 
@@ -175,13 +190,19 @@ export function Collection() {
                 onClick={() => setDetail(u)}
               />
               {owned && (
-                <button
-                  className={`team-toggle ${inTeam ? 'in' : ''}`}
-                  disabled={!inTeam && teamFull}
-                  onClick={() => toggleTeamMember(u.id)}
-                >
-                  {inTeam ? '✓ In Team' : teamFull ? 'Team Full' : '+ Add to Team'}
-                </button>
+                isLockedChampion(state, u.id) ? (
+                  <button className="team-toggle champion locked" disabled>
+                    🔒 Champion
+                  </button>
+                ) : (
+                  <button
+                    className={`team-toggle ${inTeam ? 'in' : ''}`}
+                    disabled={!inTeam && teamFull}
+                    onClick={() => toggleTeamMember(u.id)}
+                  >
+                    {inTeam ? '✓ In Team' : teamFull ? 'Team Full' : '+ Add to Team'}
+                  </button>
+                )
               )}
             </div>
           );

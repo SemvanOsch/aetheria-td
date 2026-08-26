@@ -676,13 +676,19 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                 </div>
               )}
 
-              <button
-                className="btn danger block"
-                style={{ marginTop: 12 }}
-                onClick={sellSelected}
-              >
-                Sell · +🪙{engineRef.current?.sellValue(selectedTower.uid) ?? 0}
-              </button>
+              {engineRef.current?.canSell(selectedTower.uid) ? (
+                <button
+                  className="btn danger block"
+                  style={{ marginTop: 12 }}
+                  onClick={sellSelected}
+                >
+                  Sell · +🪙{engineRef.current?.sellValue(selectedTower.uid) ?? 0}
+                </button>
+              ) : (
+                <p className="hint" style={{ marginTop: 12, textAlign: 'center' }}>
+                  🔒 Your champion can't be sold.
+                </p>
+              )}
             </div>
           )}
         </aside>
