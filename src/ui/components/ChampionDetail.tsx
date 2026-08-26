@@ -85,7 +85,7 @@ export function ChampionDetail({
   type DetailItem = { divider: true } | { label: string; value: string };
   const rows: DetailItem[] = unit.generator
     ? [
-        { label: 'Deploy cost', value: `🪙 ${unit.cost}` },
+        { label: 'Deploy cost', value: unit.cost > 0 ? `🪙 ${unit.cost}` : 'Free' },
         { label: 'Per-stage limit', value: `${unit.deployLimit}` },
         { divider: true },
         { label: 'Harvest', value: `🪙 ${harvest} gold` },
@@ -93,7 +93,7 @@ export function ChampionDetail({
         { label: 'Gold per wave', value: `🪙 ${harvest * unit.generator.timesPerWave}` },
       ]
     : [
-        { label: 'Deploy cost', value: `🪙 ${unit.cost}` },
+        { label: 'Deploy cost', value: unit.cost > 0 ? `🪙 ${unit.cost}` : 'Free' },
         { label: 'Per-stage limit', value: `${unit.deployLimit}` },
         { divider: true },
         { label: 'Damage', value: `${damage} / hit` },

@@ -120,7 +120,7 @@ function buildBladeChampion(
     aoe: 'single',
     attackType: 'melee',
     damageType: 'physical',
-    cost: 55,
+    cost: 0, // The player's hero deploys free — it's locked to the team and unsellable.
     deployLimit: 1,
     upgrades: [
       {
@@ -185,7 +185,7 @@ function buildBowChampion(
     attackType: 'ranged',
     damageType: 'physical',
     burst: 3,
-    cost: 55,
+    cost: 0, // The player's hero deploys free — it's locked to the team and unsellable.
     deployLimit: 1,
     upgrades: [
       {
@@ -253,7 +253,7 @@ function buildMagicChampion(
     burstRadius: 46,
     attackType: 'ranged',
     damageType: 'magic',
-    cost: 55,
+    cost: 0, // The player's hero deploys free — it's locked to the team and unsellable.
     deployLimit: 1,
     upgrades: [
       {

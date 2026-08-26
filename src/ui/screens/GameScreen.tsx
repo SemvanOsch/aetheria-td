@@ -531,7 +531,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                           {deployed}/{def.deployLimit} deployed
                         </span>
                       </span>
-                      <span className={`cost ${affordable ? '' : 'unaffordable'}`}>🪙{def.cost}</span>
+                      <span className={`cost ${affordable ? '' : 'unaffordable'}`}>{def.cost > 0 ? `🪙${def.cost}` : 'Free'}</span>
                       <span className="deploy-stats-tip" role="tooltip">
                         {def.generator ? (
                           <>
