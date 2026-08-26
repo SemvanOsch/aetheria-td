@@ -95,6 +95,15 @@ interface ScheduledSpawn {
 
 const SELL_REFUND = 0.7;
 
+/**
+ * Whether a tower is a Hero-rarity champion (the player's own adventurer). Hero
+ * champions level up from wave-clear EXP rather than gold upgrades, so both
+ * upgrade paths branch on this.
+ */
+function isHeroTower(tower: Tower): boolean {
+  return tower.def.rarity === 'hero';
+}
+
 // ─── TUNING: End-of-wave cash reward ─────────────────────────────────────────
 // Gold banked each time a wave is fully cleared, listed per wave. The first
 // entry is wave 1's reward, the second is wave 2's, and so on — just edit,
@@ -102,6 +111,16 @@ const SELL_REFUND = 0.7;
 // Any wave beyond the end of this list pays WAVE_CLEAR_GOLD_DEFAULT.
 export const WAVE_CLEAR_GOLD = [10, 10, 15, 20, 20, 20, 20, 20];
 export const WAVE_CLEAR_GOLD_DEFAULT = 30;
+// ─── TUNING: End-of-wave Hero EXP ────────────────────────────────────────────
+// In-stage EXP granted to every deployed Hero-rarity champion (the player's own
+// adventurer) each time a wave is fully cleared, listed per wave exactly like
+// WAVE_CLEAR_GOLD above — the first entry is wave 1's EXP, the second wave 2's,
+// and so on. Any wave beyond the list pays WAVE_CLEAR_HERO_EXP_DEFAULT. Hero
+// champions don't buy upgrades with gold; they pool this EXP and level up
+// automatically once it reaches the next tier's cost (its UpgradeDef.cost, read
+// as an EXP threshold). Retune the pace of hero leveling by editing these.
+export const WAVE_CLEAR_HERO_EXP = [20, 20, 25, 30, 30, 35, 35, 40];
+export const WAVE_CLEAR_HERO_EXP_DEFAULT = 40;
 // ─────────────────────────────────────────────────────────────────────────────
 // Generator (farmer) harvest pacing: first harvest after a short delay, then
 // spaced out so the `timesPerWave` harvests land across a typical wave.
@@ -493,6 +512,7 @@ export class GameEngine {
       burstCount: Math.max(1, def.burst ?? 1),
       burstLeft: 0,
       invested: def.cost,
+      heroExp: 0,
       genAmount: this.genAmountFor(def, 0),
       // If deployed mid-wave, let it harvest during the rest of this wave.
       genLeft: def.generator && this.phase === 'wave' ? def.generator.timesPerWave : 0,
@@ -630,6 +650,9 @@ export class GameEngine {
     if (this.outcome !== 'playing') return false;
     const tower = this.towers.find((t) => t.uid === uid);
     if (!tower) return false;
+    // Hero champions never buy upgrades with gold — they level up automatically
+    // from wave-clear EXP (see awardHeroExp). Reject the gold path outright.
+    if (isHeroTower(tower)) return false;
     const up = nextUpgrade(tower.def, tower.upgradeTier);
     if (!up) return false; // already maxed
     // Cost after any permanent mastery discount (e.g. Magical Bargaining). The
@@ -645,6 +668,20 @@ export class GameEngine {
     this.currencyEarned -= cost;
     tower.invested += cost;
     tower.upgradeTier += 1;
+    this.applyTierStats(tower);
+    // A higher base damage rescales this tower's adjacency aura.
+    this.recomputeAdjacency();
+    return true;
+  }
+
+  /**
+   * Refold a tower's effective combat/economy stats for its *current*
+   * `upgradeTier` (damage, attack speed, range, attack shape, bounces, harvest
+   * yield). Shared by both upgrade paths — the gold `upgradeTower` and the Hero
+   * EXP auto-level — so a tier bump resolves identically however it was earned.
+   * Does not recompute board auras; the caller does that once after any bump.
+   */
+  private applyTierStats(tower: Tower): void {
     const s = this.towerStats(tower.def, tower.upgradeTier);
     tower.damage = s.damage;
     tower.attackSpeed = s.attackSpeed;
@@ -652,9 +689,44 @@ export class GameEngine {
     tower.aoe = effectiveAoe(tower.def, tower.upgradeTier);
     tower.bounces = effectiveBounces(tower.def, tower.upgradeTier);
     tower.genAmount = this.genAmountFor(tower.def, tower.upgradeTier);
-    // A higher base damage rescales this tower's adjacency aura.
-    this.recomputeAdjacency();
-    return true;
+  }
+
+  /**
+   * Grant this stage's wave-clear EXP to every deployed Hero champion and level
+   * them up as far as the pool allows. Called once per cleared wave (right after
+   * the gold reward). The EXP amount is tuned per wave via `WAVE_CLEAR_HERO_EXP`;
+   * a hero pools it and consumes each tier's `UpgradeDef.cost` to auto-level, so a
+   * big single grant can raise it several tiers at once.
+   */
+  private awardHeroExp(): void {
+    // waveIndex is 1-based for the wave just cleared, so wave N reads entry N-1
+    // — matching the gold reward's indexing.
+    const exp = WAVE_CLEAR_HERO_EXP[this.waveIndex - 1] ?? WAVE_CLEAR_HERO_EXP_DEFAULT;
+    if (exp <= 0) return;
+    let leveled = false;
+    for (const t of this.towers) {
+      if (!isHeroTower(t)) continue;
+      t.heroExp += exp;
+      // Drain the pool into as many tiers as it now affords.
+      let up = nextUpgrade(t.def, t.upgradeTier);
+      while (up && t.heroExp >= up.cost) {
+        t.heroExp -= up.cost;
+        t.upgradeTier += 1;
+        this.applyTierStats(t);
+        this.floaters.push({
+          pos: { x: t.pos.x, y: t.pos.y - 16 },
+          text: `LEVEL ${t.upgradeTier}!`,
+          color: '#ffd76a',
+          ttl: 1.2,
+          maxTtl: 1.2,
+          size: 16,
+        });
+        leveled = true;
+        up = nextUpgrade(t.def, t.upgradeTier);
+      }
+    }
+    // A hero's higher base damage rescales adjacency auras; recompute once.
+    if (leveled) this.recomputeAdjacency();
   }
 
   /**
@@ -1748,6 +1820,8 @@ export class GameEngine {
       // End-of-wave cash (tune via WAVE_CLEAR_GOLD at top of file). waveIndex is
       // now 1-based for the wave just cleared, so wave N reads entry N-1.
       this.currency += WAVE_CLEAR_GOLD[this.waveIndex - 1] ?? WAVE_CLEAR_GOLD_DEFAULT;
+      // Hero champions earn in-stage EXP each cleared wave and auto-level.
+      this.awardHeroExp();
       if (this.waveIndex >= this.totalWaves) {
         // Every wave has been fully cleared (all enemies, boss included) — the
         // realm is won.

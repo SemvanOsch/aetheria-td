@@ -54,6 +54,8 @@ export function ChampionDetail({
 }: Props) {
   const rarity = RARITIES[unit.rarity];
   const style = { '--rarity': rarity.color } as CSSProperties;
+  // Hero champions level up in-stage with wave-clear EXP (auto), not gold.
+  const isHero = unit.rarity === 'hero';
   // Combat stats with permanent mastery multipliers (damage / speed / range).
   const damage = Math.round(unit.damage * masteryDamageMult(unit.id, purchased));
   const attackSpeed = unit.attackSpeed * masteryAttackSpeedMult(unit.id, purchased);
@@ -215,7 +217,12 @@ export function ChampionDetail({
 
         <div className="upgrade-list">
           <div className="upgrade-list-title">
-            In-stage upgrades <span>bought with gold, reset each level</span>
+            In-stage levels{' '}
+            <span>
+              {isHero
+                ? 'earned with EXP each wave, auto-levels, reset each level'
+                : 'bought with gold, reset each level'}
+            </span>
           </div>
           {unit.upgrades.map((u, i) => (
             <div key={i} className="upgrade-list-row">
@@ -224,7 +231,7 @@ export function ChampionDetail({
                 <div className="ul-name">
                   {u.name}{' '}
                   <span className="ul-cost">
-                    🪙{masteryUpgradeCost(unit, i + 1, purchased)}
+                    {isHero ? `${u.cost} EXP` : `🪙${masteryUpgradeCost(unit, i + 1, purchased)}`}
                   </span>
                 </div>
                 <div className="ul-eff">

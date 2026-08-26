@@ -622,10 +622,40 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
               )}
 
               {(() => {
+                const isHero = selectedTower.def.rarity === 'hero';
                 const up = nextUpgrade(selectedTower.def, selectedTower.upgradeTier);
                 if (!up) {
                   return (
                     <div className="upgrade-box maxed">✦ Fully upgraded (Lv {maxUpgradeTier(selectedTower.def)})</div>
+                  );
+                }
+                const effLabel = upgradeEffectLabel({
+                  ...masteryUpgradeDeltas(
+                    selectedTower.def,
+                    selectedTower.upgradeTier + 1,
+                    effectiveMasteryUpgradesFor(game.state, selectedTower.def.id),
+                  ),
+                  setAoe: up.setAoe,
+                  coneAngle: selectedTower.def.coneAngle,
+                });
+                // Hero champions never buy upgrades with gold — they pool wave-clear
+                // EXP and level up automatically once it reaches the next tier's cost.
+                if (isHero) {
+                  const need = up.cost;
+                  const have = Math.floor(selectedTower.heroExp);
+                  const pct = need > 0 ? Math.min(100, (have / need) * 100) : 0;
+                  return (
+                    <div className="upgrade-box hero-xp">
+                      <div className="up-head">
+                        <span>⬆ {up.name}</span>
+                        <span className="up-xp">✨ {have}/{need}</span>
+                      </div>
+                      <div className="hero-xp-bar">
+                        <span style={{ width: `${pct}%` }} />
+                      </div>
+                      <div className="up-eff">{effLabel}</div>
+                      <div className="hero-xp-hint">Auto-levels as it earns EXP each wave.</div>
+                    </div>
                   );
                 }
                 const upCost = masteryUpgradeCost(
@@ -644,17 +674,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                       <span>⬆ {up.name}</span>
                       <span className="up-cost">🪙{upCost}</span>
                     </div>
-                    <div className="up-eff">
-                      {upgradeEffectLabel({
-                        ...masteryUpgradeDeltas(
-                          selectedTower.def,
-                          selectedTower.upgradeTier + 1,
-                          effectiveMasteryUpgradesFor(game.state, selectedTower.def.id),
-                        ),
-                        setAoe: up.setAoe,
-                        coneAngle: selectedTower.def.coneAngle,
-                      })}
-                    </div>
+                    <div className="up-eff">{effLabel}</div>
                   </button>
                 );
               })()}

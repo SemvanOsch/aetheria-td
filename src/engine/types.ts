@@ -191,6 +191,15 @@ export interface Tower {
   burstLeft: number;
   /** Total gold spent on this tower (deploy + upgrades) for sell refunds. */
   invested: number;
+  /**
+   * In-stage EXP pool for a Hero-rarity champion (the player's adventurer).
+   * Hero champions never buy upgrades with gold — instead they earn EXP at the
+   * end of each wave (see `WAVE_CLEAR_HERO_EXP`) and level up *automatically* when
+   * this pool reaches the next tier's `UpgradeDef.cost` (read as an EXP
+   * threshold), draining that much on each level-up. Always 0 for ordinary
+   * champions, which upgrade through the gold `upgradeTower` path instead.
+   */
+  heroExp: number;
   /** Gold produced per harvest (generator units only). */
   genAmount: number;
   /** Harvests remaining this wave (generator units only). */

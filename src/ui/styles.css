@@ -936,6 +936,11 @@ button.stat-card.clickable:active {
 .unit-card .rarity-row {
   flex-direction: column;
 }
+/* In the horizontal detail row, drop the rarity tag's vertical margin so it
+   aligns with the AoE/chip tags instead of sitting lower. */
+.champion-head .rarity-row .rarity-tag {
+  margin: 0;
+}
 .aoe-tag {
   display: inline-block;
   padding: 2px 9px;
@@ -1053,6 +1058,36 @@ button.stat-card.clickable:active {
   margin-top: 3px;
   font-size: 12px;
   color: var(--text-dim);
+}
+
+/* Hero champion in-stage leveling: an EXP pool that auto-levels, shown as a
+   progress bar instead of a gold buy button. */
+.upgrade-box.hero-xp {
+  cursor: default;
+}
+.up-xp {
+  color: #ffd76a;
+  font-weight: 800;
+}
+.hero-xp-bar {
+  margin-top: 7px;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.hero-xp-bar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--green), #9be8b4);
+  transition: width 0.25s ease;
+}
+.hero-xp-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-style: italic;
 }
 
 /* targeting selector (in-stage tower panel) */
