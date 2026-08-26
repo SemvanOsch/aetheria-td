@@ -107,17 +107,12 @@ const VOICES: Record<SfxName, (ac: AudioContext) => void> = {
     noiseSweep(ac, 2600, 2000, 0.03, 0.014, 1, 'highpass');
   },
 
-  // Swordsman — a fast blade *slice*: an airy swish rising in pitch as it cuts
-  // through the arc, with a brief crisp high edge at the tail (the "t" of the
-  // slash). Short and accelerating so it reads as a cut, not a slow whoosh.
-  swordSwing: (ac) => {
-    noiseSweep(ac, jit(1100, 150), jit(3600, 300), 0.075, 0.024, 1.1);
-    noiseSweep(ac, jit(4200, 300), 6000, 0.03, 0.012, 0.9, 'highpass');
-  },
-  swordHit: (ac) => {
-    toneGlide(ac, jit(1300, 120), 700, 0.07, 0.03, 'square');
-    noiseSweep(ac, 3200, 2400, 0.035, 0.014, 1.5, 'highpass');
-  },
+  // Swordsman — the same airy descending whoosh as the Spearman's thrust, just
+  // a little longer so the cut reads as a slice rather than a quick poke.
+  swordSwing: (ac) => noiseSweep(ac, jit(900, 120), jit(320, 60), 0.16, 0.024, 0.9),
+  // Matches the Spearman's soft thud (single-target, so a touch louder than the
+  // AoE spearHit) so the whole swordsman cue reads like the spearman's.
+  swordHit: (ac) => toneGlide(ac, jit(300, 50), 170, 0.06, 0.024, 'triangle'),
 
   // Spearman — an airy thrust whoosh; the Javelin THROW is heavier and longer.
   spearThrust: (ac) => noiseSweep(ac, jit(900, 120), jit(320, 60), 0.12, 0.024, 0.9),
