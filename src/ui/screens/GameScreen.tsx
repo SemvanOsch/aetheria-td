@@ -615,7 +615,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                   <div className="s">DMG <b>{selectedTower.damage}</b></div>
                   <div className="s">SPD <b>{formatAttackSpeed(selectedTower.attackSpeed)}/s</b></div>
                   <div className="s">Range <b>{selectedTower.range}</b></div>
-                  <div className="s">DPS <b>{(selectedTower.damage * selectedTower.attackSpeed).toFixed(0)}</b></div>
+                  <div className="s">DPS <b>{(selectedTower.damage * selectedTower.attackSpeed).toFixed(0)}{selectedTower.burstCount > 1 ? ` x${selectedTower.burstCount}` : ''}</b></div>
                   <div className="s">Crit <b>{+(selectedTower.critChance * 100).toFixed(2)}%</b></div>
                   <div className="s">Crit Dmg <b>{selectedTower.critMultiplier}×</b></div>
                 </div>

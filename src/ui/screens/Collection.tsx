@@ -13,6 +13,7 @@ import {
   ownsUnit,
 } from '../../application/gameState';
 import { getUnit, summonableUnits, type UnitDef } from '../../domain/units';
+import { isPlayerChampionId } from '../../domain/playerChampion';
 import { RARITIES } from '../../domain/rarity';
 import { UnitCard } from '../components/UnitCard';
 import { UnitSprite } from '../components/UnitSprite';
@@ -50,7 +51,13 @@ export function Collection() {
     setDragOverIndex(null);
   };
 
-  const roster = summonableUnits();
+  // The player's own adventurer(s) aren't summonable, so they'd be missing from
+  // the summon-based roster — surface any owned one alongside the catalog.
+  const playerChampions = state.ownedUnits
+    .filter(isPlayerChampionId)
+    .map((id) => getUnit(id))
+    .filter((u): u is UnitDef => u != null);
+  const roster = [...playerChampions, ...summonableUnits()];
   const ownedCount = roster.filter((u) => ownsUnit(state, u.id)).length;
   const teamFull = state.team.length >= MAX_TEAM_SIZE;
 

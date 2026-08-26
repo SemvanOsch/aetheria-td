@@ -20,6 +20,11 @@ export function UnitSprite({ unit, size = 48 }: Props) {
   const shape = unit.visual.shape;
   const sprite = hasSprite(shape);
   const color = unit.visual.color;
+  // The player's own adventurer(s) are drawn from a portrait config rather than a
+  // flat colour, and sit roughly centred (blades reach both sides) — so they use
+  // their own framing below.
+  const playerConfig = unit.visual.playerConfig;
+  const isPlayer = shape.startsWith('player-');
 
   useEffect(() => {
     if (!sprite) return;
@@ -32,13 +37,24 @@ export function UnitSprite({ unit, size = 48 }: Props) {
     cv.height = Math.round(size * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, size, size);
+    if (isPlayer) {
+      // Composed avatar, a hair smaller so held weapons stay in frame. The Bow
+      // adventurer reaches forward with its shortbow, so it's anchored a little
+      // left to keep the whole pose centred; the others sit centred.
+      const s = size / 38;
+      const anchorX = shape === 'player-bow' ? 0.42 : 0.5;
+      ctx.translate(size * anchorX, size * 0.62);
+      ctx.scale(s, s);
+      drawUnitSprite(ctx, shape, color, false, 0, false, false, playerConfig);
+      return;
+    }
     // The figure spans roughly 30px tall (feet y=+11, head y=-16) and reaches to
     // ~x=+18 with the bow; centre it in the box with a little breathing room.
     const s = size / 40;
     ctx.translate(size * 0.44, size * 0.6);
     ctx.scale(s, s);
     drawUnitSprite(ctx, shape, color, false, 0);
-  }, [sprite, shape, color, size]);
+  }, [sprite, shape, color, size, isPlayer, playerConfig]);
 
   if (!sprite) return <>{unit.visual.icon}</>;
   return (

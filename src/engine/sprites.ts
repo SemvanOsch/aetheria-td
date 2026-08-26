@@ -4446,8 +4446,20 @@ export function hasSprite(shape: string): boolean {
     shape === 'crossbow' ||
     shape === 'farmer' ||
     shape === 'wizard' ||
-    shape === 'elf'
+    shape === 'elf' ||
+    // The player's own adventurer(s) — drawn from a PlayerSpriteConfig; callers
+    // must supply `playerConfig` to drawUnitSprite for these to render.
+    shape === 'player-blade' ||
+    shape === 'player-bow' ||
+    shape === 'player-magic'
   );
+}
+
+/** The held weapon a player-champion shape carries, or 'none'. */
+function playerWeaponForShape(shape: string): PlayerWeapon {
+  if (shape === 'player-blade') return 'dual-swords';
+  if (shape === 'player-bow') return 'bow';
+  return 'none';
 }
 
 /**
@@ -4458,8 +4470,10 @@ export function hasSprite(shape: string): boolean {
  * throw (the Spearman's Javelin Toss) so its sprite plays the release instead of
  * a normal strike; other shapes ignore it. `empowered` marks a unit whose attack
  * has been transformed by an upgrade (the Wizard's unlocked Wind Slice), adding
- * its ambient flourish; other shapes ignore it. No-op for shapes without a
- * sprite; callers should gate on `hasSprite` and fall back to the emoji token.
+ * its ambient flourish; other shapes ignore it. `playerConfig` supplies the
+ * composed avatar for the `player-*` shapes (the player's own adventurer); it is
+ * ignored by ordinary champions. No-op for shapes without a sprite; callers
+ * should gate on `hasSprite` and fall back to the emoji token.
  */
 export function drawUnitSprite(
   ctx: CanvasRenderingContext2D,
@@ -4469,6 +4483,7 @@ export function drawUnitSprite(
   anim: number,
   throwing = false,
   empowered = false,
+  playerConfig?: PlayerSpriteConfig,
 ): void {
   if (shape === 'archer') drawArcher(ctx, color, faceLeft, anim);
   else if (shape === 'sword') drawSwordsman(ctx, color, faceLeft, anim);
@@ -4477,6 +4492,9 @@ export function drawUnitSprite(
   else if (shape === 'farmer') drawFarmer(ctx, color, faceLeft);
   else if (shape === 'wizard') drawWizard(ctx, color, faceLeft, anim, empowered);
   else if (shape === 'elf') drawElf(ctx, color, faceLeft, anim, empowered);
+  else if (shape.startsWith('player-') && playerConfig) {
+    drawPlayerSprite(ctx, playerConfig, faceLeft, anim, playerWeaponForShape(shape));
+  }
 }
 
 // ============================================================================
@@ -4502,15 +4520,26 @@ const PLAYER_BUILDS: Record<string, { sw: number; hw: number; leg: number; head:
 };
 
 /**
+ * A weapon layered onto the composed player avatar. `'none'` is the bare
+ * portrait (journal / profile); the martial variants are added when the
+ * adventurer is drawn as a deployable champion, one per journal proficiency.
+ * Only `'dual-swords'` (the Blade path) is implemented today.
+ */
+export type PlayerWeapon = 'none' | 'dual-swords' | 'bow';
+
+/**
  * Draw the player's custom adventurer described by `cfg`, in the caller's local
- * space (same framing as `drawUnitSprite`). `faceLeft` flips it; `anim` is
- * accepted for parity with the champion sprites (idle avatar ignores it).
+ * space (same framing as `drawUnitSprite`). `faceLeft` flips it; `anim` (0..1)
+ * eases with an attack (1 just after a strike → 0 at rest) and drives any held
+ * weapon's swing — the bare portrait ignores it. `weapon` layers a champion's
+ * armament (e.g. the Blade adventurer's two short swords) over the base figure.
  */
 export function drawPlayerSprite(
   ctx: CanvasRenderingContext2D,
   cfg: PlayerSpriteConfig,
   faceLeft: boolean,
-  _anim = 0,
+  anim = 0,
+  weapon: PlayerWeapon = 'none',
 ): void {
   ctx.save();
   ctx.lineJoin = 'round';
@@ -4574,20 +4603,31 @@ export function drawPlayerSprite(
   // --- Torso / outfit ---
   drawPlayerTorso(ctx, cfg, b, oc, outfitLit);
 
-  // --- Arms hanging at the sides, with hands ---
-  ctx.strokeStyle = sleeve;
-  ctx.lineWidth = cfg.build === 'sturdy' ? 2.9 : 2.5;
-  ctx.beginPath();
-  ctx.moveTo(2, -5.5);
-  ctx.lineTo(b.hw - 0.5, 3.5);
-  ctx.moveTo(-1.5, -5.5);
-  ctx.lineTo(-b.hw + 1.5, 3);
-  ctx.stroke();
-  ctx.fillStyle = skin;
-  ctx.beginPath();
-  ctx.arc(b.hw - 0.5, 4, 1.5, 0, Math.PI * 2);
-  ctx.arc(-b.hw + 1.5, 3.5, 1.4, 0, Math.PI * 2);
-  ctx.fill();
+  // --- Arms + held weapon (over the torso, under the head) ---
+  const armWidth = cfg.build === 'sturdy' ? 2.9 : 2.5;
+  if (weapon === 'bow') {
+    // A bow shooter needs a proper archer pose (front arm out to the bow, rear
+    // arm drawing the string), so the shortbow draws its own raised arms in place
+    // of the default hanging ones.
+    drawPlayerShortbow(ctx, skin, sleeve, armWidth, anim);
+  } else {
+    // Arms hanging at the sides, with hands.
+    ctx.strokeStyle = sleeve;
+    ctx.lineWidth = armWidth;
+    ctx.beginPath();
+    ctx.moveTo(2, -5.5);
+    ctx.lineTo(b.hw - 0.5, 3.5);
+    ctx.moveTo(-1.5, -5.5);
+    ctx.lineTo(-b.hw + 1.5, 3);
+    ctx.stroke();
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.arc(b.hw - 0.5, 4, 1.5, 0, Math.PI * 2);
+    ctx.arc(-b.hw + 1.5, 3.5, 1.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (weapon === 'dual-swords') drawDualShortSwords(ctx, b, anim);
+  }
 
   // --- Head ---
   ctx.fillStyle = skin;
@@ -4730,4 +4770,222 @@ function drawPlayerHair(
     ctx.closePath();
     ctx.fill();
   }
+}
+
+/**
+ * The Blade adventurer's two short swords, one in each hand. Drawn in the base
+ * figure's local space (already flipped for `faceLeft` by the caller), pivoting
+ * about the same hand points `drawPlayerSprite` paints. At rest the pair sits in
+ * a ready guard (lead blade up-forward, off blade held back). `anim` (1 at the
+ * instant of a strike → 0 at rest) drives the cut: the lead blade snaps down and
+ * forward on a steep diagonal *through* the space ahead — where a targeted enemy
+ * stands — while the off blade sweeps in behind it, and a slash arc streaks along
+ * the cut and fades, so the strike reads as an actual slice rather than a raise.
+ * Hands: front `(b.hw - 0.5, 4)`, back `(-b.hw + 1.5, 3.5)`.
+ */
+function drawDualShortSwords(
+  ctx: CanvasRenderingContext2D,
+  b: { hw: number },
+  anim: number,
+): void {
+  const steel = '#c9d2dc';
+  const steelDark = '#8b95a3';
+  const deg = Math.PI / 180;
+  const frontHx = b.hw - 0.5;
+  const frontHy = 4;
+  const backHx = -b.hw + 1.5;
+  const backHy = 3.5;
+  // Angles from +x (y-down): the lead blade sweeps a wide diagonal from a raised
+  // guard (up-forward) down and across the target; the off blade follows a shorter
+  // counter-sweep behind it.
+  const leadRest = -28;
+  const leadStrike = 52;
+  const leadAng = (leadRest + (leadStrike - leadRest) * anim) * deg;
+  const offRest = 146;
+  const offStrike = 100;
+  const offAng = (offRest + (offStrike - offRest) * anim) * deg;
+  // Slash streak tracing the lead blade's cut, brightest at the strike and gone
+  // by rest — the visual cue that it just sliced through the enemy.
+  if (anim > 0.05) {
+    drawSlashArc(ctx, frontHx, frontHy, leadRest * deg, leadStrike * deg, anim);
+  }
+  // Off-hand blade first so the lead blade overlaps it when they cross.
+  drawShortSword(ctx, backHx, backHy, offAng, 9, steel, steelDark);
+  drawShortSword(ctx, frontHx, frontHy, leadAng, 10, steel, steelDark);
+}
+
+/**
+ * A quick crescent slash streak sweeping the arc the lead blade cuts through —
+ * centred on the lead hand `(cx, cy)`, spanning `a0`→`a1` (radians, the blade's
+ * rest→strike sweep) just past the blade's reach. A soft wide glow under a bright
+ * thin core, its opacity scaled by `anim` so it flashes on the strike and fades
+ * out as the blade recovers. Drawn in the figure's already-flipped local space.
+ */
+function drawSlashArc(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  a0: number,
+  a1: number,
+  anim: number,
+): void {
+  const a = Math.max(0, Math.min(1, anim));
+  const r = 11.5;
+  ctx.save();
+  ctx.lineCap = 'round';
+  // Soft outer glow.
+  ctx.strokeStyle = `rgba(233,240,248,${0.16 * a})`;
+  ctx.lineWidth = 3.4;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, a0, a1);
+  ctx.stroke();
+  // Bright thin core.
+  ctx.strokeStyle = `rgba(255,255,255,${0.55 * a})`;
+  ctx.lineWidth = 1.1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, a0, a1);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * One short sword pivoted at a hand `(hx, hy)`, its blade laid along `angle`
+ * (radians, from +x, y-down) reaching `len` px: a wrapped grip and pommel, a
+ * steel crossguard, and a tapered steel blade with a bright edge. Shared by both
+ * of the Blade adventurer's hands.
+ */
+function drawShortSword(
+  ctx: CanvasRenderingContext2D,
+  hx: number,
+  hy: number,
+  angle: number,
+  len: number,
+  steel: string,
+  steelDark: string,
+): void {
+  ctx.save();
+  ctx.translate(hx, hy);
+  ctx.rotate(angle);
+  // Grip + pommel behind the hand.
+  ctx.strokeStyle = '#4a3a2a';
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(-2.4, 0);
+  ctx.lineTo(0, 0);
+  ctx.stroke();
+  ctx.fillStyle = steelDark;
+  ctx.beginPath();
+  ctx.arc(-2.8, 0, 1, 0, Math.PI * 2);
+  ctx.fill();
+  // Crossguard.
+  ctx.strokeStyle = steelDark;
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(0, -2.2);
+  ctx.lineTo(0, 2.2);
+  ctx.stroke();
+  // Tapered blade + edge highlight.
+  ctx.fillStyle = steel;
+  ctx.beginPath();
+  ctx.moveTo(0.4, -1.5);
+  ctx.lineTo(len, -0.6);
+  ctx.lineTo(len + 1.4, 0);
+  ctx.lineTo(len, 0.6);
+  ctx.lineTo(0.4, 1.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#eef3f8';
+  ctx.lineWidth = 0.7;
+  ctx.beginPath();
+  ctx.moveTo(1, -0.3);
+  ctx.lineTo(len - 0.6, -0.1);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * The Bow adventurer's shortbow and firing arms, in the base figure's local space
+ * (already flipped for `faceLeft`). A compact bow held out front in the lead hand,
+ * the rear hand drawing the string; `release` (0 = full draw at rest → 1 just
+ * after loosing) snaps the string forward and empties the nock, mirroring the
+ * Archer's bow so a burst reads as three quick draws. Draws its own raised arms
+ * (the caller skips the default hanging ones for this pose). The nocked-arrow tip
+ * sits at ~(13, -3.5), matching the engine's arrow muzzle.
+ */
+function drawPlayerShortbow(
+  ctx: CanvasRenderingContext2D,
+  skin: string,
+  sleeve: string,
+  armWidth: number,
+  release: number,
+): void {
+  const gripX = 9;
+  const gripY = -4;
+  const bowCx = gripX - 1;
+  const bowCy = gripY + 2;
+  const bowR = 6.8; // short — a compact bow, unlike the Archer's longbow (8.5)
+  const a0 = -1.3;
+  const a1 = 1.3;
+  const drawBack = 4.5 * (1 - release);
+  const stringX = gripX - 6 - drawBack;
+  const stringY = gripY + 2.5;
+
+  // Bow limb (compact brown arc, belly forward) with a thin lit edge.
+  ctx.strokeStyle = '#6e4a26';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(bowCx, bowCy, bowR, a0, a1);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,240,210,0.5)';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.arc(bowCx, bowCy, bowR, a0, a1);
+  ctx.stroke();
+
+  // Bowstring from top limb to the draw hand to the bottom limb.
+  const topX = bowCx + Math.cos(a0) * bowR;
+  const topY = bowCy + Math.sin(a0) * bowR;
+  const botX = bowCx + Math.cos(a1) * bowR;
+  const botY = bowCy + Math.sin(a1) * bowR;
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(topX, topY);
+  ctx.lineTo(stringX, stringY);
+  ctx.lineTo(botX, botY);
+  ctx.stroke();
+
+  // Nocked arrow (only while still drawn) — shaft to a small steel head out front.
+  if (release < 0.5) {
+    ctx.strokeStyle = '#d8d2c0';
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.moveTo(stringX, stringY);
+    ctx.lineTo(gripX + 4, gripY + 0.5);
+    ctx.stroke();
+    ctx.fillStyle = '#c9d2dc';
+    ctx.beginPath();
+    ctx.moveTo(gripX + 4, gripY - 1);
+    ctx.lineTo(gripX + 6.4, gripY + 0.5);
+    ctx.lineTo(gripX + 4, gripY + 2);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Arms (sleeves): front (bow arm) to the grip, rear (draw arm) to the string hand.
+  ctx.strokeStyle = sleeve;
+  ctx.lineWidth = armWidth;
+  ctx.beginPath();
+  ctx.moveTo(1.5, -5);
+  ctx.lineTo(gripX, gripY);
+  ctx.moveTo(-1, -4.5);
+  ctx.lineTo(stringX, stringY);
+  ctx.stroke();
+
+  // Hands over the grip and the string.
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.arc(gripX, gripY, 1.4, 0, Math.PI * 2);
+  ctx.arc(stringX, stringY, 1.3, 0, Math.PI * 2);
+  ctx.fill();
 }

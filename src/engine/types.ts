@@ -179,6 +179,16 @@ export interface Tower {
   preloaded: number;
   /** Countdown to cranking the next spare shot while idle (seconds). */
   preloadTimer: number;
+  /**
+   * Arrows loosed per burst volley (the Bow adventurer's shortbow); 1 = no burst.
+   * From `UnitDef.burst`; fixed for the tower's lifetime.
+   */
+  burstCount: number;
+  /**
+   * Arrows still to loose in the current burst after the one just fired. Counts
+   * down to 0 across quick `BURST_SHOT_DELAY` follow-ups, then a full reload runs.
+   */
+  burstLeft: number;
   /** Total gold spent on this tower (deploy + upgrades) for sell refunds. */
   invested: number;
   /** Gold produced per harvest (generator units only). */

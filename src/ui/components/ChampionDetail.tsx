@@ -58,6 +58,9 @@ export function ChampionDetail({
   const damage = Math.round(unit.damage * masteryDamageMult(unit.id, purchased));
   const attackSpeed = unit.attackSpeed * masteryAttackSpeedMult(unit.id, purchased);
   const range = Math.round(unit.range * masteryRangeMult(unit.id, purchased));
+  // Per-arrow DPS; a burst shooter (the Bow adventurer) shows the volley size as
+  // an "×N" multiplier beside it rather than folding it into the number.
+  const burst = unit.burst ?? 1;
   const dps = damage * attackSpeed;
   const thrown = masteryThrow(unit.id, purchased);
   // Generator yields with permanent mastery bonuses (e.g. Better Soil) applied.
@@ -93,7 +96,12 @@ export function ChampionDetail({
         { divider: true },
         { label: 'Damage', value: `${damage} / hit` },
         { label: 'Attack speed', value: `${formatAttackSpeed(attackSpeed)} / s` },
-        { label: 'DPS', value: `${dps.toFixed(0)}${unit.aoe === 'line' ? ' per enemy in line' : ''}` },
+        {
+          label: 'DPS',
+          value: `${dps.toFixed(0)}${
+            burst > 1 ? ` x${burst}` : ''
+          }${unit.aoe === 'line' ? ' per enemy in line' : ''}`,
+        },
         { label: 'Range', value: `${range}px (${rangeLabel(range)})` },
         { divider: true },
         { label: 'Crit chance', value: critChanceLabel(critChanceFor(unit, purchased)) },

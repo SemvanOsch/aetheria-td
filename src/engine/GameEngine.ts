@@ -109,6 +109,10 @@ const GEN_INTERVAL = 3;
 // read as a distinct second shot (the bolt streak itself lasts ~0.13s), but
 // still a quick double-tap, independent of the tower's normal reload.
 const PRELOAD_SHOT_DELAY = 0.28;
+// Gap between the arrows of a burst-fire volley (the Bow adventurer's shortbow,
+// `UnitDef.burst`). Short enough to read as a quick 3-arrow burst, then a full
+// reload follows the last arrow — so the burst repeats at the unit's attack rate.
+const BURST_SHOT_DELAY = 0.09;
 // How long a thrown-javelin (Spearman's Javelin Toss) animation plays — long
 // enough for the spear to fly across the board and linger. Shared with the
 // renderer so the sprite's flight is timed to this exact window.
@@ -475,6 +479,8 @@ export class GameEngine {
       preloadMax,
       preloaded: 0,
       preloadTimer: stats.attackSpeed > 0 ? 1 / stats.attackSpeed : 0,
+      burstCount: Math.max(1, def.burst ?? 1),
+      burstLeft: 0,
       invested: def.cost,
       genAmount: this.genAmountFor(def, 0),
       // If deployed mid-wave, let it harvest during the rest of this wave.
@@ -1005,8 +1011,10 @@ export class GameEngine {
       }
 
       // Idle (no target in reach): a champion with the Quick Loader trait cranks
-      // spare bolts, one per attack interval, up to its preload cap.
+      // spare bolts, one per attack interval, up to its preload cap. A burst
+      // shooter abandons any half-fired volley so it starts fresh on re-acquire.
       if (!chosen) {
+        t.burstLeft = 0;
         if (t.preloadMax > 0 && t.preloaded < t.preloadMax && t.attackSpeed > 0) {
           t.preloadTimer -= dt;
           if (t.preloadTimer <= 0) {
@@ -1029,10 +1037,23 @@ export class GameEngine {
       }
 
       this.fire(t, chosen.enemy);
-      // A preloaded spare looses right after the ready shot (short cooldown);
-      // otherwise reload at the normal rate. Reloading a fresh spare needs a
-      // full idle interval, so the timer resets on every shot.
-      if (t.preloaded > 0) {
+      // Reload cadence:
+      //  - Burst shooter (burstCount > 1): loose the volley's arrows one per short
+      //    BURST_SHOT_DELAY, then a full reload after the last so the burst repeats
+      //    at the unit's attack rate.
+      //  - Quick Loader: a preloaded spare looses right after the ready shot.
+      //  - Otherwise: reload at the normal rate.
+      if (t.burstCount > 1) {
+        if (t.burstLeft > 0) {
+          // Fired a follow-up arrow; short gap unless that was the volley's last.
+          t.burstLeft -= 1;
+          t.cooldown = t.burstLeft > 0 ? BURST_SHOT_DELAY : 1 / t.attackSpeed;
+        } else {
+          // Fired the first arrow of a fresh volley — queue the remaining arrows.
+          t.burstLeft = t.burstCount - 1;
+          t.cooldown = BURST_SHOT_DELAY;
+        }
+      } else if (t.preloaded > 0) {
         t.preloaded -= 1;
         t.cooldown = Math.min(PRELOAD_SHOT_DELAY, 1 / t.attackSpeed);
       } else {
@@ -1100,26 +1121,29 @@ export class GameEngine {
       shape === 'archer' ||
       shape === 'crossbow' ||
       shape === 'wizard' ||
-      shape === 'elf'
+      shape === 'elf' ||
+      shape === 'player-bow'
     ) {
-      // The Archer/Elf loose from a bow and the Wizard from a raised staff, not
-      // the chest. Mirror the renderer's muzzle (local tip ~ (12.5, -3.5),
-      // flipped to face the target).
+      // The Archer/Elf/Bow adventurer loose from a bow and the Wizard from a
+      // raised staff, not the chest. Mirror the renderer's muzzle (local tip ~
+      // (12.5, -3.5), flipped to face the target).
       let origin = tower.pos;
-      if (shape === 'archer' || shape === 'wizard' || shape === 'elf') {
+      if (shape === 'archer' || shape === 'wizard' || shape === 'elf' || shape === 'player-bow') {
         const dir = target.pos.x >= tower.pos.x ? 1 : -1;
         const offY = shape === 'wizard' ? -6 : -3.5;
         origin = { x: tower.pos.x + dir * 12.5, y: tower.pos.y + offY };
       }
       // The Crossbow's bolt flies a bit faster and reads slightly heavier; the
       // Wizard's gust is a swirling bullet rather than a fletched shaft; the Elf's
-      // enchanted shaft glows and leaps once to a nearby foe on impact.
+      // enchanted shaft glows and leaps once to a nearby foe on impact. The Bow
+      // adventurer's shortbow looses a plain (fast, light) fletched arrow.
       const crossbow = shape === 'crossbow';
       const wind = shape === 'wizard';
       const magic = shape === 'elf';
       // A soft release cue per shooter (crossbow snap, airy wizard gust, the
       // Elf's enchanted twang) — the audio layer keeps them quiet and throttled.
-      if (shape === 'archer') this.sfx.push('archerShot');
+      // The Bow adventurer reuses the Archer's bow twang.
+      if (shape === 'archer' || shape === 'player-bow') this.sfx.push('archerShot');
       else if (crossbow) this.sfx.push('crossbowShot');
       else if (wind) this.sfx.push('windCast');
       else if (magic) this.sfx.push('elfShot');
@@ -1186,7 +1210,7 @@ export class GameEngine {
           // shooter (arrow thud, bolt thunk, airy gust, the Elf's chime tick).
           if (landed) {
             const sh = p.source.def.visual.shape;
-            if (sh === 'archer') this.sfx.push('archerHit');
+            if (sh === 'archer' || sh === 'player-bow') this.sfx.push('archerHit');
             else if (sh === 'crossbow') this.sfx.push('crossbowHit');
             else if (sh === 'wizard') this.sfx.push('windHit');
             else if (sh === 'elf') this.sfx.push('elfHit');

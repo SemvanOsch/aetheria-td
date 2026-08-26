@@ -377,6 +377,65 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
       startingGoldBonus: 50,
     },
   ],
+  // The player's Blade adventurer. Keyed by the stable path id (not the player's
+  // name), so mastery survives a name / portrait change like any champion's.
+  'player-blade': [
+    {
+      id: 'dual_discipline',
+      name: 'Dual Discipline',
+      description: 'Drilled to fight with a blade in each hand — +10% attack speed.',
+      cost: 100,
+      attackSpeedMult: 1.1,
+    },
+    {
+      id: 'keen_edges',
+      name: 'Keen Edges',
+      description: 'Both short swords are kept razor-honed — +10% damage.',
+      cost: 100,
+      requires: 'dual_discipline',
+      damageMult: 1.1,
+    },
+    {
+      id: 'perfect_balance',
+      name: 'Perfect Balance',
+      description:
+        'A duelist’s eye for the opening — +12% critical hit chance, and criticals now strike for 2× instead of 1.5×.',
+      cost: 250,
+      requires: 'keen_edges',
+      major: true,
+      critChanceBonus: 0.12,
+      critMultiplier: 2,
+    },
+  ],
+  // The player's Bow adventurer. Keyed by the stable path id like the Blade tree.
+  'player-bow': [
+    {
+      id: 'keen_sight',
+      name: 'Keen Sight',
+      description: 'A hunter’s eye for the vital gap — +7.5% critical hit chance.',
+      cost: 100,
+      critChanceBonus: 0.075,
+    },
+    {
+      id: 'fleet_fingers',
+      name: 'Fleet Fingers',
+      description: 'Nimble hands nock and loose faster — +10% attack speed (quicker volleys).',
+      cost: 100,
+      requires: 'keen_sight',
+      attackSpeedMult: 1.1,
+    },
+    {
+      id: 'eagle_eye',
+      name: 'Eagle Eye',
+      description:
+        'A steady, far-seeing aim — +10% attack range and +10% damage on every arrow.',
+      cost: 250,
+      requires: 'fleet_fingers',
+      major: true,
+      rangeMult: 1.1,
+      damageMult: 1.1,
+    },
+  ],
 };
 
 /** The skill tree for a champion (empty if it has none). */

@@ -20,13 +20,14 @@ export function Summon() {
 
   // Drop rates read straight from the rarity table: each available rarity's
   // share of the total available weight, so this stays honest as new rarities
-  // are switched on. Unavailable rarities are listed as "coming soon".
+  // are switched on. Summonable-but-not-yet-available rarities are "coming soon";
+  // non-summonable ranks (Champion — the player's own adventurer) are omitted.
   const available = ALL_RARITIES.filter((r) => r.available);
   const totalWeight = available.reduce((sum, r) => sum + r.weight, 0);
   const dropRates = available
     .map((r) => `${r.name} ${Math.round((r.weight / totalWeight) * 100)}%`)
     .join(' · ');
-  const comingSoon = ALL_RARITIES.filter((r) => !r.available).map((r) => r.name);
+  const comingSoon = ALL_RARITIES.filter((r) => !r.available && r.summonable).map((r) => r.name);
 
   const doSummon = () => {
     if (stage === 'charging' || !affordable) return;

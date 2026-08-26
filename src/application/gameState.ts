@@ -26,6 +26,7 @@ import {
   type PlayerSpriteConfig,
 } from '../domain/playerSprite';
 import { normalizeProficiency, type Proficiency } from '../domain/proficiency';
+import { implementedPlayerChampionId } from '../domain/playerChampion';
 import { ENEMY_KILLS_TO_UNLOCK, type EnemyDef } from '../domain/enemies';
 import {
   activeMasteryUpgrades,
@@ -60,6 +61,14 @@ export interface GameState {
   gems: number;
   /** Unique unit type ids the player owns. */
   ownedUnits: string[];
+  /**
+   * Whether the player's personal champion (created from the Journal identity)
+   * has been granted. A one-way latch that makes the grant happen *exactly once*:
+   * completing the intro or migrating a save flips it true, and every later
+   * journal edit / reload sees it set and grants nothing more. See
+   * `grantPlayerChampion`.
+   */
+  playerChampionGranted: boolean;
   /** Level ids the player has completed. */
   completedLevels: number[];
   /** Whether the one-time free starter has been claimed. */
@@ -161,7 +170,7 @@ function normalizeAudio(raw: Partial<AudioSettings> | undefined | null): AudioSe
 
 const STORAGE_KEY = 'state';
 const STARTING_GEMS = 300;
-const CURRENT_VERSION = 14;
+const CURRENT_VERSION = 15;
 
 /** Maximum distinct champions the player may bring into a stage. */
 export const MAX_TEAM_SIZE = 6;
@@ -174,6 +183,8 @@ export function createInitialState(): GameState {
     player: null,
     gems: STARTING_GEMS,
     ownedUnits: starters,
+    // The personal champion is granted only when the journal intro completes.
+    playerChampionGranted: false,
     completedLevels: [],
     hasSelectedStarter: true,
     mastery: {},
@@ -249,7 +260,13 @@ export function loadState(): GameState {
       (n): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 0,
     )),
   );
-  return migrated;
+  // Pre-v15 saves predate the personal champion. `playerChampionGranted` defaults
+  // to false (from `base`), so a save that ALREADY finished the journal in an
+  // older version is granted its champion here, once. A pre-intro save (player
+  // null) grants nothing now — it will when the intro is completed. The flag then
+  // makes every later load a no-op.
+  migrated.playerChampionGranted = raw.playerChampionGranted === true;
+  return grantPlayerChampion(migrated);
 }
 
 /**
@@ -361,13 +378,43 @@ export function setPlayerProfile(
   proficiency: Proficiency,
 ): GameState {
   if (!isValidPlayerName(name)) return state;
-  return {
+  const withProfile: GameState = {
     ...state,
     player: {
       name: sanitizePlayerName(name),
       sprite: normalizePlayerSprite(sprite),
       proficiency: normalizeProficiency(proficiency),
     },
+  };
+  // Grant the personal champion the first time identification completes. On every
+  // later journal edit (name / portrait / proficiency) the grant is a no-op — the
+  // profile still updates (so the champion's appearance follows the portrait), but
+  // the champion itself is never duplicated, removed, or converted.
+  return grantPlayerChampion(withProfile);
+}
+
+/**
+ * Grant the player's personal champion for their chosen path — **exactly once**.
+ * No-op when: the one-way `playerChampionGranted` latch is already set (guards
+ * repeated journal saves and reloads), there is no profile yet, or the chosen
+ * path has no champion implemented (Bow / Magic — nothing is granted for those
+ * for now). Otherwise the champion joins the collection and, if a slot is free,
+ * the active team — mirroring normal acquisition. The granted id encodes the
+ * path, so a later proficiency change never converts or removes it.
+ */
+export function grantPlayerChampion(state: GameState): GameState {
+  if (state.playerChampionGranted) return state;
+  if (!state.player) return state;
+  const id = implementedPlayerChampionId(state.player.proficiency);
+  if (!id) return state;
+  const ownedUnits = state.ownedUnits.includes(id)
+    ? state.ownedUnits
+    : [...state.ownedUnits, id];
+  return {
+    ...state,
+    ownedUnits,
+    team: withAutoTeam(state.team, id),
+    playerChampionGranted: true,
   };
 }
 

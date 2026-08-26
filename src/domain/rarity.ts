@@ -6,7 +6,7 @@
  * or UI changes required. For the MVP only `common` is available.
  */
 
-export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';
+export type Rarity = 'common' | 'rare' | 'epic' | 'legendary' | 'champion';
 
 export interface RarityDef {
   id: Rarity;
@@ -15,6 +15,13 @@ export interface RarityDef {
   weight: number;
   /** Whether units of this rarity currently exist / can drop. */
   available: boolean;
+  /**
+   * Whether this rarity belongs to the summon pool *at all*. Ordinary ranks are
+   * summonable (some just aren't `available` yet — they show as "coming soon");
+   * `Champion` is exclusive to the player's own adventurer and is never summoned,
+   * so it stays out of the summon odds and the "coming soon" list.
+   */
+  summonable: boolean;
   /** Accent color used across cards, borders and glows. */
   color: string;
   /** Ordering used for sorting collections (higher = rarer). */
@@ -29,6 +36,7 @@ export const RARITIES: Record<Rarity, RarityDef> = {
     name: 'Common',
     weight: 80,
     available: true,
+    summonable: true,
     color: '#9fb2c8',
     order: 0,
     duplicateExp: 20,
@@ -38,6 +46,7 @@ export const RARITIES: Record<Rarity, RarityDef> = {
     name: 'Rare',
     weight: 20,
     available: true,
+    summonable: true,
     color: '#4aa3ff',
     order: 1,
     duplicateExp: 30,
@@ -47,6 +56,7 @@ export const RARITIES: Record<Rarity, RarityDef> = {
     name: 'Epic',
     weight: 4,
     available: false,
+    summonable: true,
     color: '#b455ff',
     order: 2,
     duplicateExp: 45,
@@ -56,9 +66,22 @@ export const RARITIES: Record<Rarity, RarityDef> = {
     name: 'Legendary',
     weight: 1,
     available: false,
+    summonable: true,
     color: '#ffb020',
     order: 3,
     duplicateExp: 60,
+  },
+  // The player's own adventurer only. Never summoned (not available, not part of
+  // the summon pool), so it never drops nor shows in the summon "coming soon" list.
+  champion: {
+    id: 'champion',
+    name: 'Champion',
+    weight: 0,
+    available: false,
+    summonable: false,
+    color: '#ff5470',
+    order: 4,
+    duplicateExp: 80,
   },
 };
 

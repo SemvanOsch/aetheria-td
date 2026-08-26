@@ -40,6 +40,7 @@ import {
 } from './gameState';
 import type { PlayerSpriteConfig } from '../domain/playerSprite';
 import type { Proficiency } from '../domain/proficiency';
+import { syncPlayerChampions } from '../domain/playerChampion';
 import {
   canAffordSummon,
   DUPLICATE_REFUND,
@@ -50,12 +51,22 @@ import {
 import { GameContext, type GameStore } from './gameContext';
 
 export function GameProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<GameState>(() => loadState());
+  const [state, setState] = useState<GameState>(() => {
+    const initial = loadState();
+    // Register the player's champion(s) so getUnit resolves them from the very
+    // first render (Collection, deploy list, board) — before any commit runs.
+    syncPlayerChampions(initial.player, initial.ownedUnits);
+    return initial;
+  });
   // Keep a ref in sync so actions can read the latest state without stale
   // closures, and persist on every update in one place.
   const stateRef = useRef(state);
 
   const commit = useCallback((next: GameState) => {
+    // Keep the player-champion registry matched to committed state (profile edits
+    // change the avatar; a grant adds the champion). Cheap and idempotent, so it
+    // rides every commit rather than being threaded through each action.
+    syncPlayerChampions(next.player, next.ownedUnits);
     stateRef.current = next;
     saveState(next);
     setState(next);

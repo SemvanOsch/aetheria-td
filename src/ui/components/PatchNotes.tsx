@@ -19,6 +19,15 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-08-26 · Your Champion',
+    changes: [
+      'Your adventurer is now a deployable champion of the exclusive new Champion rarity — granted the moment you finish the Journal identification (existing saves receive theirs on next launch), and drawn from the very portrait you created so it matches your character exactly. It joins your collection and, space permitting, your team automatically; editing your name or portrait in the Journal updates it without ever duplicating or replacing it.',
+      'Blade proficiency: a dual-wielding melee duelist who fights with two short swords, with a quick slicing strike, three in-stage upgrades and its own mastery tree.',
+      'Bow proficiency: a nimble shortbow archer who looses arrows in quick bursts of three, with three in-stage upgrades and its own mastery tree.',
+      'Your champion’s foot shadow now carries a subtle outline in your outfit colour on the board, marking it as your own hero. Burst shooters show their volley size in the stats (e.g. “DPS 6 x3”).',
+    ],
+  },
+  {
     version: '2026-08-25 · Sound & Settings',
     changes: [
       'Champions now have battle sounds: every champion has its own attack and impact cue — the Archer’s bow, the Swordsman’s slice, the Spearman’s thrust (with a heavier Javelin Toss), the Crossbow’s bolt, the Wizard’s gust and sweeping Wind Slice, and the Elf’s enchanted arrows. They’re kept soft and layered so a full board never turns into a wall of noise.',

@@ -16,7 +16,7 @@ import {
 } from '../domain/decor';
 import { coneAngleDeg, getUnit } from '../domain/units';
 import { getEnemy } from '../domain/enemies';
-import { drawEnemySprite, drawUnitSprite, hasEnemySprite, hasSprite } from './sprites';
+import { drawEnemySprite, drawUnitSprite, hasEnemySprite, hasSprite, shade } from './sprites';
 import {
   THROW_ANIM_TIME,
   RISE_LIFT,
@@ -1483,6 +1483,22 @@ function drawTowers(
     ctx.beginPath();
     ctx.ellipse(0, 10, 15, 6, 0, 0, Math.PI * 2);
     ctx.fill();
+    // The player's own champion gets a thin outline around its foot shadow, tinted
+    // from its portrait's outfit colour — a subtle "this hero is yours" marker that
+    // sets it apart from the summoned roster. Lightened so it reads against the
+    // dark pad, with a soft same-colour glow.
+    if (t.def.visual.shape.startsWith('player-')) {
+      const accent = t.def.visual.playerConfig?.outfitColor ?? t.def.visual.color;
+      ctx.save();
+      ctx.strokeStyle = shade(accent, 0.2);
+      ctx.lineWidth = 1.6;
+      ctx.shadowColor = accent;
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.ellipse(0, 10, 15, 6, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     if (hasSprite(t.def.visual.shape)) {
       // Procedural figure in place of the flat disc + emoji token. `anim` eases
@@ -1506,7 +1522,16 @@ function drawTowers(
       const empowered =
         t.aoe === 'cone' ||
         (t.def.visual.shape === 'elf' && t.bounces > (t.def.bounces ?? 0));
-      drawUnitSprite(ctx, t.def.visual.shape, t.def.visual.color, faceLeft, anim, throwing, empowered);
+      drawUnitSprite(
+        ctx,
+        t.def.visual.shape,
+        t.def.visual.color,
+        faceLeft,
+        anim,
+        throwing,
+        empowered,
+        t.def.visual.playerConfig,
+      );
     } else {
       // Body disc.
       ctx.fillStyle = t.def.visual.color;

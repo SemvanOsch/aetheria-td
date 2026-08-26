@@ -8,6 +8,8 @@
 
 import { RARITIES, type Rarity } from './rarity';
 import type { TargetingType } from './targeting';
+import type { PlayerSpriteConfig } from './playerSprite';
+import { getPlayerChampion } from './playerChampion';
 
 /**
  * Area-of-effect behaviour of a unit's attack.
@@ -114,6 +116,12 @@ export interface UnitDef {
    * to DEFAULT_CONE_ANGLE_DEG if unset. Tune it per unit to widen/narrow the arc.
    */
   coneAngle?: number;
+  /**
+   * Arrows/shots loosed per attack as a quick burst volley (the Bow adventurer's
+   * shortbow fires 3). Omitted / 1 means a single shot per attack. The unit's
+   * `attackSpeed` then governs how often the whole burst repeats.
+   */
+  burst?: number;
   /** Gold cost to deploy the unit during a level. */
   cost: number;
   /** Max number of this unit that may be deployed per stage. */
@@ -133,8 +141,28 @@ export interface UnitVisual {
   color: string;
   /** Single-glyph placeholder icon (emoji) used in cards & board. */
   icon: string;
-  /** Rough archetype used to pick a board silhouette. */
-  shape: 'archer' | 'crossbow' | 'sword' | 'spear' | 'farmer' | 'wizard' | 'elf';
+  /**
+   * Rough archetype used to pick a board silhouette. The `player-*` shapes are
+   * the player's composed adventurer (one per journal proficiency), drawn from
+   * `playerConfig` via `drawPlayerSprite` instead of a monolithic champion `drawX`.
+   */
+  shape:
+    | 'archer'
+    | 'crossbow'
+    | 'sword'
+    | 'spear'
+    | 'farmer'
+    | 'wizard'
+    | 'elf'
+    | 'player-blade'
+    | 'player-bow'
+    | 'player-magic';
+  /**
+   * For the `player-*` shapes: the composed avatar config to render, so the board
+   * token and every card match the portrait made in the Adventurer's Journal.
+   * Omitted for ordinary champions (they use the flat `color` silhouette).
+   */
+  playerConfig?: PlayerSpriteConfig;
 }
 
 export interface UnitSpecial {
@@ -407,7 +435,10 @@ export const DEFAULT_OWNED_UNIT_IDS = ['swordsman', 'archer'] as const;
 export const ALL_UNITS: UnitDef[] = Object.values(UNITS);
 
 export function getUnit(id: string): UnitDef | undefined {
-  return UNITS[id];
+  // Catalog units first; fall back to the player's own champion(s), which are
+  // built from the live PlayerProfile and registered at runtime (see
+  // domain/playerChampion). This keeps getUnit the single resolution point.
+  return UNITS[id] ?? getPlayerChampion(id);
 }
 
 /** Units eligible to be summoned — any whose rarity is currently available. */
@@ -450,7 +481,11 @@ export function damageTypeLabel(type: DamageType): string {
   }
 }
 
-/** Single-target damage per second (damage × attack speed). */
+/**
+ * Per-attack single-target damage per second (damage × attack speed). For a burst
+ * shooter this is the DPS of one arrow at the volley-repeat rate; the `burst`
+ * volley size is surfaced separately (shown as an "×N" multiplier), not folded in.
+ */
 export function unitDps(unit: UnitDef): number {
   return unit.damage * unit.attackSpeed;
 }
