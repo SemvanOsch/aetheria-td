@@ -33,6 +33,14 @@ const PATCH_NOTES: PatchEntry[] = [
       'Blade proficiency: a dual-wielding melee duelist who fights with two short swords, with a quick slicing strike, three in-stage upgrades and its own mastery tree.',
       'Bow proficiency: a nimble shortbow archer who looses arrows in quick bursts of three, with three in-stage upgrades and its own mastery tree.',
       'Your champion’s foot shadow now carries a subtle outline in your outfit colour on the board, marking it as your own hero. Burst shooters show their volley size in the stats (e.g. “DPS 6 x3”).',
+      'Your champion is always with you: it’s pinned to the first team slot — it can’t be removed, reordered, or dragged out of place — and it can’t be sold during a stage. It wears a distinct rose-and-gold locked look in the team bar and on its card.',
+    ],
+  },
+  {
+    version: '2026-08-26 · Polish',
+    changes: [
+      'The Swordsman’s attack now has an airier whoosh that matches the Spearman’s, replacing the old laser-like sweep.',
+      'Closing the Adventurer’s Journal now fades out smoothly to the home screen, mirroring the open animation, instead of cutting instantly.',
     ],
   },
   {
