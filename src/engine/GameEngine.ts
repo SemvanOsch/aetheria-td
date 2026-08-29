@@ -34,6 +34,7 @@ import {
   coneAngleDeg,
   DEFAULT_BURST_RADIUS,
   effectiveAoe,
+  effectiveBard,
   effectiveBounces,
   effectiveGenerate,
   getUnit,
@@ -126,6 +127,12 @@ export const WAVE_CLEAR_HERO_EXP_DEFAULT = 40;
 // spaced out so the `timesPerWave` harvests land across a typical wave.
 const GEN_INITIAL_DELAY = 1.5;
 const GEN_INTERVAL = 3;
+// A Bard's first tune plays soon after deploy (rather than a full `every` wait)
+// so allies get hastened quickly; subsequent performances follow the `every`
+// cadence. If no ally is in reach when a performance comes due, the Bard waits
+// this short spell and tries again so it buffs the moment allies arrive.
+const BARD_INITIAL_DELAY = 1.5;
+const BARD_RETRY_DELAY = 1;
 // Gap before a preloaded spare shot looses after the ready shot — long enough to
 // read as a distinct second shot (the bolt streak itself lasts ~0.13s), but
 // still a quick double-tap, independent of the tower's normal reload.
@@ -197,7 +204,8 @@ export type SfxName =
   | 'elfShot'
   | 'elfHit'
   | 'orbCast'
-  | 'orbBurst';
+  | 'orbBurst'
+  | 'bardPlay';
 
 // The Elf's magic arrows leap on impact: each bounce seeks the nearest living
 // enemy within BOUNCE_RANGE of the impact point that the chain hasn't hit yet.
@@ -482,6 +490,7 @@ export class GameEngine {
     const stats = this.towerStats(def, 0);
     const thrown = masteryThrow(def.id, purchased);
     const preloadMax = masteryPreload(def.id, purchased);
+    const bard = effectiveBard(def, 0);
     this.towers.push({
       uid: this.uidCounter++,
       def,
@@ -502,6 +511,7 @@ export class GameEngine {
       adjacentAllies: 0,
       rangeAuraMult: masteryRangeAura(def.id, purchased),
       rangeBuffed: false,
+      rangeBuffMult: 1,
       knockback: masteryKnockback(def.id, purchased),
       bounces: effectiveBounces(def, 0),
       bounceDamageMult: masteryBounceDamageMult(def.id, purchased),
@@ -513,6 +523,14 @@ export class GameEngine {
       burstLeft: 0,
       invested: def.cost,
       heroExp: 0,
+      bardEvery: bard?.every ?? 0,
+      bardTimer: bard ? BARD_INITIAL_DELAY : 0,
+      bardTargets: bard?.targets ?? 0,
+      bardSpeedMult: bard?.attackSpeedMult ?? 1,
+      bardDuration: bard?.duration ?? 0,
+      attackSpeedBuffMult: 1,
+      attackSpeedBuffTimer: 0,
+      attackSpeedBuffColor: '',
       genAmount: this.genAmountFor(def, 0),
       // If deployed mid-wave, let it harvest during the rest of this wave.
       genLeft: def.generator && this.phase === 'wave' ? def.generator.timesPerWave : 0,
@@ -591,6 +609,7 @@ export class GameEngine {
       const base = this.towerStats(t.def, t.upgradeTier).range;
       baseRange.set(t.uid, base);
       t.rangeBuffed = false;
+      t.rangeBuffMult = 1;
       t.range = base;
     }
     let changed = true;
@@ -611,6 +630,7 @@ export class GameEngine {
         }
         if (mult > 1) {
           t.rangeBuffed = true;
+          t.rangeBuffMult = mult;
           t.range = Math.round(baseRange.get(t.uid)! * mult);
           changed = true; // a newly-buffed emitter may now reach further
         }
@@ -689,6 +709,14 @@ export class GameEngine {
     tower.aoe = effectiveAoe(tower.def, tower.upgradeTier);
     tower.bounces = effectiveBounces(tower.def, tower.upgradeTier);
     tower.genAmount = this.genAmountFor(tower.def, tower.upgradeTier);
+    // A Bard's performance widens/strengthens with its upgrades (its reach
+    // already refolded above via `range`); keep the cadence timer running.
+    const bard = effectiveBard(tower.def, tower.upgradeTier);
+    if (bard) {
+      tower.bardTargets = bard.targets;
+      tower.bardSpeedMult = bard.attackSpeedMult;
+      tower.bardDuration = bard.duration;
+    }
   }
 
   /**
@@ -1052,13 +1080,29 @@ export class GameEngine {
       if (t.attackAnim > 0) t.attackAnim = Math.max(0, t.attackAnim - dt);
       if (t.throwAnim > 0) t.throwAnim = Math.max(0, t.throwAnim - dt);
 
+      // Decay any attack-speed buff this tower is receiving (the Bard's tune).
+      if (t.attackSpeedBuffTimer > 0) {
+        t.attackSpeedBuffTimer -= dt;
+        if (t.attackSpeedBuffTimer <= 0) t.attackSpeedBuffMult = 1;
+      }
+
       // Economy units harvest gold instead of attacking.
       if (t.def.generator) {
         this.updateGenerator(t, dt);
         continue;
       }
 
+      // Support units (the Bard) play periodic buffs instead of attacking.
+      if (t.bardEvery > 0) {
+        this.updateBard(t, dt);
+        continue;
+      }
+
       if (t.cooldown > 0) t.cooldown -= dt;
+
+      // Effective firing rate, hastened while a Bard's buff is active. Every
+      // reload/preload cadence below reads this instead of the raw attack speed.
+      const rate = t.attackSpeed * t.attackSpeedBuffMult;
 
       // Acquire the aim target EVERY frame (not just when firing) so the
       // beam / marker tracks the enemy smoothly between shots as well.
@@ -1096,7 +1140,7 @@ export class GameEngine {
           this.fire(t, chosen.enemy);
           // Reload for the remainder of the cadence (the wind-up ate the rest),
           // so charging doesn't slow the tower's overall attack rate.
-          t.cooldown = Math.max(0, 1 / t.attackSpeed - t.chargeMax);
+          t.cooldown = Math.max(0, 1 / rate - t.chargeMax);
         }
         // Target gone at release: cancel the cast and re-acquire next frame.
         continue;
@@ -1107,11 +1151,11 @@ export class GameEngine {
       // shooter abandons any half-fired volley so it starts fresh on re-acquire.
       if (!chosen) {
         t.burstLeft = 0;
-        if (t.preloadMax > 0 && t.preloaded < t.preloadMax && t.attackSpeed > 0) {
+        if (t.preloadMax > 0 && t.preloaded < t.preloadMax && rate > 0) {
           t.preloadTimer -= dt;
           if (t.preloadTimer <= 0) {
             t.preloaded += 1;
-            t.preloadTimer = 1 / t.attackSpeed;
+            t.preloadTimer = 1 / rate;
           }
         }
         continue;
@@ -1143,7 +1187,7 @@ export class GameEngine {
         if (t.burstLeft > 0) {
           // Fired a follow-up arrow; short gap unless that was the volley's last.
           t.burstLeft -= 1;
-          t.cooldown = t.burstLeft > 0 ? BURST_SHOT_DELAY : 1 / t.attackSpeed;
+          t.cooldown = t.burstLeft > 0 ? BURST_SHOT_DELAY : 1 / rate;
         } else {
           // Fired the first arrow of a fresh volley — queue the remaining arrows.
           t.burstLeft = t.burstCount - 1;
@@ -1151,11 +1195,11 @@ export class GameEngine {
         }
       } else if (t.preloaded > 0) {
         t.preloaded -= 1;
-        t.cooldown = Math.min(PRELOAD_SHOT_DELAY, 1 / t.attackSpeed);
+        t.cooldown = Math.min(PRELOAD_SHOT_DELAY, 1 / rate);
       } else {
-        t.cooldown = 1 / t.attackSpeed;
+        t.cooldown = 1 / rate;
       }
-      t.preloadTimer = t.attackSpeed > 0 ? 1 / t.attackSpeed : 0;
+      t.preloadTimer = rate > 0 ? 1 / rate : 0;
     }
   }
 
@@ -1177,6 +1221,75 @@ export class GameEngine {
       color: '#ffd76a',
       ttl: 0.9,
       maxTtl: 0.9,
+    });
+  }
+
+  /**
+   * A Bard's periodic performance: every `bardEvery` seconds, pick up to
+   * `bardTargets` random allied *combat* champions within range (never itself,
+   * never another non-attacker) and hasten their attacks by `bardSpeedMult` for
+   * `bardDuration` seconds. If no ally is in reach it waits a short spell and
+   * retries so the buff lands the moment allies arrive.
+   */
+  private updateBard(t: Tower, dt: number): void {
+    t.bardTimer -= dt;
+    if (t.bardTimer > 0) return;
+
+    // Eligible audience: other towers that actually attack, within earshot.
+    const r2 = t.range * t.range;
+    const audience: Tower[] = [];
+    for (const o of this.towers) {
+      if (o === t || o.attackSpeed <= 0) continue; // skip self & non-attackers
+      const dx = o.pos.x - t.pos.x;
+      const dy = o.pos.y - t.pos.y;
+      if (dx * dx + dy * dy <= r2) audience.push(o);
+    }
+    if (audience.length === 0) {
+      // Nobody to play for yet — try again soon rather than after a full cadence.
+      t.bardTimer = BARD_RETRY_DELAY;
+      return;
+    }
+
+    // Fisher–Yates shuffle (via the injectable rng) so ties break randomly.
+    for (let i = audience.length - 1; i > 0; i--) {
+      const j = Math.floor(this.rng() * (i + 1));
+      [audience[i], audience[j]] = [audience[j], audience[i]];
+    }
+    // Buff-aware target selection: the strongest buff always wins, so a Bard
+    // never wastes a slot on an ally already carrying an equal-or-stronger tune.
+    // Prefer allies it genuinely *upgrades* (unbuffed or weaker-buffed), then
+    // fall back to *refreshing* allies at an equal buff; skip stronger-buffed
+    // ones entirely. An expired buff counts as unbuffed (mult 1).
+    const currentMult = (a: Tower) => (a.attackSpeedBuffTimer > 0 ? a.attackSpeedBuffMult : 1);
+    const upgradable = audience.filter((a) => currentMult(a) < t.bardSpeedMult);
+    const refreshable = audience.filter((a) => currentMult(a) === t.bardSpeedMult);
+    const chosen = [...upgradable, ...refreshable].slice(0, t.bardTargets);
+
+    // Nobody left to help (every ally in reach already has a stronger tune) —
+    // try again shortly rather than burning the full cadence on a silent play.
+    if (chosen.length === 0) {
+      t.bardTimer = BARD_RETRY_DELAY;
+      return;
+    }
+
+    t.bardTimer = t.bardEvery;
+    for (const ally of chosen) {
+      ally.attackSpeedBuffMult = t.bardSpeedMult;
+      ally.attackSpeedBuffTimer = t.bardDuration;
+      ally.attackSpeedBuffColor = t.def.visual.color; // notes take the Bard's colour
+    }
+
+    // Performance flourish: a strum animation, a soft tune cue, and a little
+    // note that floats up from the minstrel.
+    t.attackAnim = 0.4;
+    this.sfx.push('bardPlay');
+    this.floaters.push({
+      pos: { x: t.pos.x, y: t.pos.y - 16 },
+      text: '♪',
+      color: t.def.visual.color,
+      ttl: 0.9,
+      maxTtl: 0.9,
+      size: 18,
     });
   }
 

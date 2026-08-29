@@ -113,7 +113,7 @@ function buildBladeChampion(
       'hand, swift and sure on the front line.',
     // The exclusive Champion rarity — the player's own adventurer, never summoned.
     rarity: 'hero',
-    damage: 20,
+    damage: 18,
     attackSpeed: 1.1,
     range: 64,
     targeting: 'first',
@@ -127,14 +127,14 @@ function buildBladeChampion(
         name: 'Honed Twin Blades',
         description: 'Both short swords take a keener edge.',
         cost: 40,
-        damage: 12,
+        damage: 9,
       },
       {
         name: 'Dual Flourish',
         description: 'A faster two-blade rhythm — quicker, harder strikes.',
-        cost: 65,
+        cost: 55,
         damage: 6,
-        attackSpeed: 0.4,
+        attackSpeed: 0.2,
       },
       {
         name: 'Bladestorm',
@@ -176,7 +176,7 @@ function buildBowChampion(
     // The exclusive Champion rarity — the player's own adventurer, never summoned.
     rarity: 'hero',
     // Per-arrow damage; a volley lands three of these in quick succession.
-    damage: 8,
+    damage: 7,
     // Governs how often the whole 3-arrow burst repeats (not the per-arrow rate).
     attackSpeed: 0.8,
     range: 112,
@@ -191,15 +191,14 @@ function buildBowChampion(
       {
         name: 'Keen Broadheads',
         description: 'Sharper arrowheads bite deeper — every arrow of the volley.',
-        cost: 40,
-        damage: 4,
+        cost: 30,
+        damage: 3,
       },
       {
         name: 'Rapid Nock',
         description: 'A quicker draw looses volleys faster, and a little harder.',
-        cost: 65,
-        damage: 2,
-        attackSpeed: 0.3,
+        cost: 35,
+        range: 22,
       },
       {
         name: "Hunter's Focus",
@@ -244,7 +243,7 @@ function buildMagicChampion(
     // The exclusive Champion rarity — the player's own adventurer, never summoned.
     rarity: 'hero',
     // Damage dealt to every enemy caught in the orb's detonation.
-    damage: 22,
+    damage: 16,
     // Deliberately slow — the orb takes a moment to charge before each cast.
     attackSpeed: 0.55,
     range: 104,
@@ -260,13 +259,12 @@ function buildMagicChampion(
         name: 'Dense Core',
         description: 'A tighter-wound orb detonates harder.',
         cost: 40,
-        damage: 12,
+        damage: 9,
       },
       {
         name: 'Swift Casting',
-        description: 'A practised hand gathers the orb faster — quicker, harder bursts.',
+        description: 'A practised hand gathers the orb faster — quicker bursts.',
         cost: 65,
-        damage: 6,
         attackSpeed: 0.2,
       },
       {

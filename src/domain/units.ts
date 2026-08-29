@@ -78,6 +78,30 @@ export interface UpgradeDef {
    * into a `cone`). Overrides `UnitDef.aoe` for that tower.
    */
   setAoe?: AoeType;
+  /** Additive extra allies a Bard buffs per performance (see `BardDef`). */
+  bardTargets?: number;
+  /**
+   * Additive bonus to the Bard's attack-speed buff multiplier — e.g. 0.15 turns
+   * a 1.4× buff into 1.55× (see `BardDef.attackSpeedMult`).
+   */
+  bardSpeedBonus?: number;
+}
+
+/**
+ * Support behaviour: instead of attacking, the unit periodically plays a tune
+ * that buffs nearby allied champions. The Bard picks `targets` random allies
+ * within its range (never itself), speeding their attacks by `attackSpeedMult`
+ * for `duration` seconds, and repeats every `every` seconds.
+ */
+export interface BardDef {
+  /** Seconds between performances. */
+  every: number;
+  /** How many random allies in range each performance buffs. */
+  targets: number;
+  /** Attack-speed multiplier granted to a buffed ally (1.4 = +40% faster). */
+  attackSpeedMult: number;
+  /** How long a buff lasts on an ally, in seconds. */
+  duration: number;
 }
 
 /**
@@ -143,6 +167,8 @@ export interface UnitDef {
   upgrades: UpgradeDef[];
   /** If set, the unit is a non-combat economy unit (see GeneratorDef). */
   generator?: GeneratorDef;
+  /** If set, the unit is a non-combat support unit that buffs allies (see BardDef). */
+  bard?: BardDef;
   /** Simple vector visual descriptor used by the renderer & cards. */
   visual: UnitVisual;
   /** Optional special properties for future expansion (slow, etc.). */
@@ -160,16 +186,17 @@ export interface UnitVisual {
    * `playerConfig` via `drawPlayerSprite` instead of a monolithic champion `drawX`.
    */
   shape:
-    | 'archer'
-    | 'crossbow'
-    | 'sword'
-    | 'spear'
-    | 'farmer'
-    | 'wizard'
-    | 'elf'
-    | 'player-blade'
-    | 'player-bow'
-    | 'player-magic';
+  | 'archer'
+  | 'crossbow'
+  | 'sword'
+  | 'spear'
+  | 'farmer'
+  | 'wizard'
+  | 'elf'
+  | 'bard'
+  | 'player-blade'
+  | 'player-bow'
+  | 'player-magic';
   /**
    * For the `player-*` shapes: the composed avatar config to render, so the board
    * token and every card match the portrait made in the Adventurer's Journal.
@@ -440,6 +467,40 @@ export const UNITS: Record<string, UnitDef> = {
     ],
     visual: { color: '#c9a24a', icon: '🌾', shape: 'farmer' },
   },
+  bard: {
+    id: 'bard',
+    name: 'Bard',
+    description:
+      'A wandering minstrel who never draws a blade. Every few beats he strikes up a rousing tune, spurring two nearby champions to strike faster for a while.',
+    rarity: 'common',
+    // Non-combat: plays buffs rather than attacking.
+    damage: 0,
+    attackSpeed: 0,
+    range: 115,
+    targeting: 'first',
+    aoe: 'single',
+    attackType: 'support',
+    bard: { every: 10, targets: 2, attackSpeedMult: 1.2, duration: 8 },
+    cost: 60,
+    deployLimit: 2,
+    upgrades: [
+      {
+        name: 'Lively Melody',
+        description: 'A brighter tune carries farther and lifts the spirits higher.',
+        cost: 80,
+        range: 25,
+        bardSpeedBonus: 0.15,
+      },
+      {
+        name: 'Rousing Anthem',
+        description: 'A stirring anthem rallies one more champion, and rouses them all the more.',
+        cost: 140,
+        bardTargets: 1,
+        bardSpeedBonus: 0.15,
+      },
+    ],
+    visual: { color: '#e08fd0', icon: '🎵', shape: 'bard' },
+  },
 };
 
 /** Champions every player owns from the start (no selection screen). */
@@ -552,6 +613,22 @@ export function effectiveStats(unit: UnitDef, tier: number): EffectiveStats {
   return { damage, attackSpeed, range };
 }
 
+/**
+ * A Bard's effective performance config after applying the first `tier`
+ * upgrades: its base `bard`, plus each purchased upgrade's additive `bardTargets`
+ * / `bardSpeedBonus` deltas. Returns null for a non-Bard unit. The engine and
+ * every display read this so the numbers always agree.
+ */
+export function effectiveBard(unit: UnitDef, tier: number): BardDef | null {
+  if (!unit.bard) return null;
+  const b = { ...unit.bard };
+  for (let i = 0; i < tier && i < unit.upgrades.length; i++) {
+    b.targets += unit.upgrades[i].bardTargets ?? 0;
+    b.attackSpeedMult += unit.upgrades[i].bardSpeedBonus ?? 0;
+  }
+  return b;
+}
+
 /** The next upgrade a tower at `tier` could buy, or null if maxed. */
 export function nextUpgrade(unit: UnitDef, tier: number): UpgradeDef | null {
   return tier < unit.upgrades.length ? unit.upgrades[tier] : null;
@@ -592,6 +669,10 @@ export interface UpgradeEffect {
   setAoe?: AoeType;
   /** Opening angle (degrees) to show for a `cone` transform. */
   coneAngle?: number;
+  /** Extra allies a Bard's performance buffs (see `UpgradeDef.bardTargets`). */
+  bardTargets?: number;
+  /** Bonus to a Bard's attack-speed buff (see `UpgradeDef.bardSpeedBonus`). */
+  bardSpeedBonus?: number;
 }
 
 /**
@@ -610,6 +691,8 @@ export function upgradeEffectLabel(e: UpgradeEffect): string {
   if (e.range) parts.push(`${sign(e.range)}${Math.abs(e.range)} Range`);
   if (e.generate) parts.push(`${sign(e.generate)}${Math.abs(e.generate)} gold/harvest`);
   if (e.bounces) parts.push(`${sign(e.bounces)}${Math.abs(e.bounces)} Bounce`);
+  if (e.bardTargets) parts.push(`${sign(e.bardTargets)}${Math.abs(e.bardTargets)} Target`);
+  if (e.bardSpeedBonus) parts.push(`${sign(e.bardSpeedBonus)}${Math.abs(Math.round(e.bardSpeedBonus * 100))}% Tempo`);
   if (e.setAoe === 'cone') {
     parts.push(`⟶ Wind Slice${e.coneAngle ? ` (${e.coneAngle}° cone)` : ' (cone)'}`);
   }

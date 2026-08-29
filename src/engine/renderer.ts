@@ -1476,9 +1476,6 @@ function drawTowers(
     // Base pad — its shadow glows gold while the Better Morale aura is active
     // (drawn under the pad so the glow reads as a warm pool at the unit's feet).
     if (moraleStacks > 0) drawMoraleGlow(ctx, moraleStacks);
-    // An arcane cyan pool marks a unit whose range is being lifted by a Wizard's
-    // Guiding Gale (drawn beneath the pad, same as the morale glow).
-    if (t.rangeBuffed) drawRangeAuraGlow(ctx);
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.beginPath();
     ctx.ellipse(0, 10, 15, 6, 0, 0, Math.PI * 2);
@@ -1560,8 +1557,52 @@ function drawTowers(
     // Preload status gem (Crossbow's Quick Loader): a small diamond tucked at
     // the tower's foot — black when empty, blue-green when a spare is ready.
     if (t.preloadMax > 0) drawPreloadGem(ctx, t.preloaded > 0);
+    // A Wizard's Guiding Gale wraps the champion in a small swirling wind —
+    // drawn over the figure so it reads as enveloping the unit, not a foot pool.
+    if (t.rangeBuffed) drawWindShroud(ctx);
     ctx.restore();
+
+    // Music notes orbiting a champion currently hastened by a Bard's tune —
+    // drawn in world space (outside the tower's lunge/scale transform) so they
+    // circle steadily around its head. Tinted the Bard's colour, not the buffed
+    // unit's, so every buffed ally floats the same minstrel-pink notes.
+    if (t.attackSpeedBuffTimer > 0) {
+      drawBuffNotes(ctx, x, y, t.attackSpeedBuffColor || t.def.visual.color);
+    }
   }
+}
+
+/** Small palette of note glyphs cycled around a buffed champion. */
+const BUFF_NOTE_GLYPHS = ['♪', '♫', '♬'];
+
+/**
+ * Music notes circling a champion buffed by the Bard's tune. Three glyphs orbit
+ * the figure's head at a steady clip, each bobbing on its own phase, tinted the
+ * Bard's colour with a soft glow so the buff reads at a glance.
+ */
+function drawBuffNotes(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  color: string,
+): void {
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const t = now / 620;
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 5;
+  for (let i = 0; i < BUFF_NOTE_GLYPHS.length; i++) {
+    const a = t + (i * Math.PI * 2) / BUFF_NOTE_GLYPHS.length;
+    const nx = x + Math.cos(a) * 17;
+    const ny = y - 14 + Math.sin(a * 1.3) * 4;
+    ctx.globalAlpha = 0.65 + 0.35 * (0.5 + 0.5 * Math.sin(a));
+    ctx.font = `${11 + (i % 2)}px serif`;
+    ctx.fillText(BUFF_NOTE_GLYPHS[i], nx, ny);
+  }
+  ctx.restore();
 }
 
 /** Shared 0..1 pulse oscillator for the Better Morale effect. */
@@ -1619,16 +1660,44 @@ function drawWardGlow(ctx: CanvasRenderingContext2D, r: number): void {
  * read apart. Non-stacking, so it has a single fixed intensity. Drawn in the
  * tower's local space (origin at the tower centre), beneath the base pad.
  */
-function drawRangeAuraGlow(ctx: CanvasRenderingContext2D): void {
-  const osc = moralePulse(); // 0..1 — share the morale oscillator for a matched pulse
+/**
+ * A small swirling wind wrapping a champion whose range is being lifted by a
+ * Wizard's Guiding Gale. Drawn over the figure (origin at the tower centre) as a
+ * few faint cyan crescent gusts orbiting the body at different radii/phases,
+ * plus a couple of drifting motes — so the unit looks caught in a light breeze
+ * rather than standing over a glowing pool. Animated from wall-clock time so the
+ * gusts rotate continuously.
+ */
+function drawWindShroud(ctx: CanvasRenderingContext2D): void {
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const t = now / 1000;
   ctx.save();
-  ctx.globalAlpha = 0.4 + 0.4 * osc;
-  ctx.fillStyle = '#6fe3e0';
-  ctx.shadowColor = '#6fe3e0';
-  ctx.shadowBlur = (9 + 11 * osc);
-  ctx.beginPath();
-  ctx.ellipse(0, 10, 14, 5.5, 0, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.strokeStyle = '#bfeef0';
+  ctx.lineCap = 'round';
+  // Three curved gusts circling the figure — each at its own radius, vertical
+  // squash (so they hug the body as ellipses), speed and starting phase.
+  const gusts = [
+    { rx: 15, ry: 17, spin: 1.7, phase: 0, span: 0.8, width: 1.6 },
+    { rx: 12, ry: 20, spin: -2.2, phase: 2.1, span: 0.6, width: 1.3 },
+    { rx: 17, ry: 13, spin: 2.7, phase: 4.2, span: 0.55, width: 1.1 },
+  ];
+  for (const g of gusts) {
+    const a = t * g.spin + g.phase;
+    // A soft flicker so each gust breathes in and out of view.
+    ctx.globalAlpha = 0.28 + 0.22 * (0.5 + 0.5 * Math.sin(t * 2 + g.phase));
+    ctx.lineWidth = g.width;
+    ctx.beginPath();
+    ctx.ellipse(0, -3, g.rx, g.ry, 0, a, a + g.span);
+    ctx.stroke();
+    // A little tail-mote flung off the leading edge of the gust.
+    const ex = Math.cos(a + g.span) * g.rx;
+    const ey = -3 + Math.sin(a + g.span) * g.ry;
+    ctx.globalAlpha *= 0.9;
+    ctx.beginPath();
+    ctx.arc(ex, ey, 0.9, 0, Math.PI * 2);
+    ctx.fillStyle = '#dff7f8';
+    ctx.fill();
+  }
   ctx.restore();
 }
 

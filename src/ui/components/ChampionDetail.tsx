@@ -92,6 +92,17 @@ export function ChampionDetail({
         { label: 'Harvests per wave', value: `${unit.generator.timesPerWave}×` },
         { label: 'Gold per wave', value: `🪙 ${harvest * unit.generator.timesPerWave}` },
       ]
+    : unit.bard
+    ? [
+        { label: 'Deploy cost', value: unit.cost > 0 ? `🪙 ${unit.cost}` : 'Free' },
+        { label: 'Per-stage limit', value: `${unit.deployLimit}` },
+        { divider: true },
+        { label: 'Attack-speed buff', value: `+${Math.round((unit.bard.attackSpeedMult - 1) * 100)}%` },
+        { label: 'Allies buffed', value: `${unit.bard.targets} in range` },
+        { label: 'Buff duration', value: `${unit.bard.duration}s` },
+        { label: 'Plays every', value: `${unit.bard.every}s` },
+        { label: 'Range', value: `${range}px (${rangeLabel(range)})` },
+      ]
     : [
         { label: 'Deploy cost', value: unit.cost > 0 ? `🪙 ${unit.cost}` : 'Free' },
         { label: 'Per-stage limit', value: `${unit.deployLimit}` },
@@ -133,8 +144,8 @@ export function ChampionDetail({
             <h2 style={{ textAlign: 'left', color: 'var(--text)' }}>{unit.name}</h2>
             <div className="rarity-row" style={{ textAlign: 'left', marginTop: 4 }}>
               <span className="rarity-tag">{rarity.name}</span>
-              <span className={`aoe-tag ${unit.generator ? 'economy' : unit.aoe}`}>
-                {unit.generator ? 'Economy' : aoeLabel(unit.aoe)}
+              <span className={`aoe-tag ${unit.generator || unit.bard ? 'economy' : unit.aoe}`}>
+                {unit.generator ? 'Economy' : unit.bard ? 'Support' : aoeLabel(unit.aoe)}
               </span>
               {unit.attackType && (
                 <span className={`aoe-tag ${unit.attackType}`}>
@@ -172,6 +183,8 @@ export function ChampionDetail({
             <div className="mastery-sub">
               {unit.generator
                 ? 'Earned permanently — 1 EXP per 20 gold generated, win or lose.'
+                : unit.bard
+                ? 'Earned permanently — from duplicate summons of this champion.'
                 : 'Earned permanently — from every enemy slain, win or lose.'}
             </div>
             <div className="mastery-cta">Open skill tree →</div>
@@ -185,6 +198,8 @@ export function ChampionDetail({
             <div className="mastery-sub">
               {unit.generator
                 ? 'Recruit this champion to start earning mastery EXP from the gold it generates.'
+                : unit.bard
+                ? 'Recruit this champion to start earning mastery EXP from duplicate summons.'
                 : 'Recruit this champion to start earning mastery EXP from its kills.'}
             </div>
           </div>
@@ -239,6 +254,9 @@ export function ChampionDetail({
                     ...masteryUpgradeDeltas(unit, i + 1, purchased),
                     setAoe: u.setAoe,
                     coneAngle: unit.coneAngle,
+                    // Bard tune deltas aren't stat-scaled — pass them straight through.
+                    bardTargets: u.bardTargets,
+                    bardSpeedBonus: u.bardSpeedBonus,
                   })}
                 </div>
               </div>

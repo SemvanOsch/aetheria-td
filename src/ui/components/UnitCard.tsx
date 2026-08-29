@@ -45,8 +45,8 @@ export function UnitCard({
       <div className="unit-name">{unit.name}</div>
       <div className="rarity-row">
         <span className="rarity-tag">{rarity.name}</span>
-        <span className={`aoe-tag ${unit.generator ? 'economy' : unit.aoe}`}>
-          {unit.generator ? 'Economy' : aoeLabel(unit.aoe)}
+        <span className={`aoe-tag ${unit.generator || unit.bard ? 'economy' : unit.aoe}`}>
+          {unit.generator ? 'Economy' : unit.bard ? 'Support' : aoeLabel(unit.aoe)}
         </span>
       </div>
       <p className="unit-desc">{unit.description}</p>
@@ -62,6 +62,21 @@ export function UnitCard({
               </div>
               <div className="s">
                 Yield <b>🪙{harvest * unit.generator.timesPerWave}</b>
+              </div>
+              <div className="s">
+                Cost <b>🪙{unit.cost}</b>
+              </div>
+            </>
+          ) : unit.bard ? (
+            <>
+              <div className="s">
+                Buff <b>+{Math.round((unit.bard.attackSpeedMult - 1) * 100)}% SPD</b>
+              </div>
+              <div className="s">
+                Targets <b>{unit.bard.targets}</b>
+              </div>
+              <div className="s">
+                Range <b>{rangeLabel(unit.range)}</b>
               </div>
               <div className="s">
                 Cost <b>🪙{unit.cost}</b>

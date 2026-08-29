@@ -167,6 +167,15 @@ const VOICES: Record<SfxName, (ac: AudioContext) => void> = {
     toneGlide(ac, jit(320, 40), 90, 0.28, 0.03, 'triangle');
     noiseSweep(ac, jit(900, 120), 200, 0.24, 0.03, 0.6, 'lowpass');
   },
+
+  // Bard — a gentle plucked arpeggio (three rising notes) as the minstrel
+  // strikes up his tune. Soft triangle tones staggered a beat apart.
+  bardPlay: (ac) => {
+    const notes = [523.25, 659.25, 783.99]; // C5–E5–G5 major chord, rolled
+    notes.forEach((f, i) =>
+      toneGlide(ac, jit(f, 6), jit(f, 6), 0.22, 0.028, 'triangle', i * 0.09),
+    );
+  },
 };
 
 /** Play one combat cue, throttled per type. Silent no-op if audio is unavailable. */

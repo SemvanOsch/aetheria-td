@@ -935,6 +935,153 @@ export function drawFarmer(
 }
 
 /**
+ * Procedural Bard silhouette — a wandering minstrel in a feathered cap and short
+ * tunic, cradling a round-bellied lute he strums. Painted in the caller's local
+ * space (origin at the figure's centre; feet near y=+11, cap feather near
+ * y=-19). Authored facing +x and flipped when `faceLeft`. `strum` (0..1) drives
+ * the picking hand across the strings during a performance (1 just after a tune
+ * strikes up, easing to 0 at rest). Replaces the emoji token for `shape: 'bard'`.
+ */
+export function drawBard(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  faceLeft: boolean,
+  strum = 0,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (faceLeft) ctx.scale(-1, 1);
+
+  const bodyLit = shade(color, 0.2);
+  const bodyDark = shade(color, -0.28);
+  const skin = '#e8c39c';
+  const wood = '#a4682f';
+  const woodLit = shade(wood, 0.22);
+  const woodDark = shade(wood, -0.3);
+  const feather = shade(color, 0.34);
+
+  // Legs — a jaunty, weight-on-one-hip stance.
+  ctx.strokeStyle = '#3a2f43';
+  ctx.lineWidth = 3.5;
+  ctx.beginPath();
+  ctx.moveTo(-2, 4);
+  ctx.lineTo(-3, 11);
+  ctx.moveTo(2.5, 4);
+  ctx.lineTo(3.5, 11);
+  ctx.stroke();
+
+  // Tunic — a short belted jerkin with a lit front edge.
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, -8);
+  ctx.quadraticCurveTo(7, -4.5, 5.6, 5.5);
+  ctx.quadraticCurveTo(0, 7.5, -5.6, 5.5);
+  ctx.quadraticCurveTo(-7, -4.5, 0, -8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = bodyLit;
+  ctx.beginPath();
+  ctx.moveTo(0, -8);
+  ctx.quadraticCurveTo(7, -4.5, 5.6, 5.5);
+  ctx.quadraticCurveTo(2.6, 6.5, 2.2, 5.5);
+  ctx.quadraticCurveTo(3.2, -3.5, 0, -8);
+  ctx.closePath();
+  ctx.fill();
+  // Belt.
+  ctx.strokeStyle = '#6a4a2a';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(-5.4, 3.4);
+  ctx.quadraticCurveTo(0, 5.2, 5.4, 3.4);
+  ctx.stroke();
+
+  // Lute — a round wooden belly held across the body, its neck angling up over
+  // the off shoulder. Drawn before the arms so the picking hand sits over it.
+  const bellyX = -3.5;
+  const bellyY = 1.5;
+  ctx.save();
+  ctx.translate(bellyX, bellyY);
+  ctx.rotate(-0.35);
+  ctx.fillStyle = wood;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 5.6, 6.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = woodLit; // lit belly edge
+  ctx.beginPath();
+  ctx.ellipse(1.6, -1.2, 3.2, 4.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = woodDark; // sound hole
+  ctx.beginPath();
+  ctx.arc(0, 0.5, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  // Neck + a couple of pegs, rising toward the off shoulder.
+  const neckTipX = -12;
+  const neckTipY = -8.5;
+  ctx.strokeStyle = woodDark;
+  ctx.lineWidth = 2.1;
+  ctx.beginPath();
+  ctx.moveTo(bellyX - 1.5, bellyY - 3.5);
+  ctx.lineTo(neckTipX, neckTipY);
+  ctx.stroke();
+  ctx.strokeStyle = '#e7d9b0'; // strings, a pale glint
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(bellyX - 0.5, bellyY - 2.5);
+  ctx.lineTo(neckTipX + 1, neckTipY + 0.5);
+  ctx.stroke();
+  ctx.fillStyle = feather;
+  ctx.beginPath();
+  ctx.arc(neckTipX, neckTipY, 1.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Arms: rear arm frets the neck; front (picking) arm sweeps across the strings
+  // with the strum, kicking a touch outward on the pluck.
+  const pluck = -1 + strum * 4;
+  ctx.strokeStyle = bodyDark;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(-1.5, -4);
+  ctx.lineTo(neckTipX + 3.5, neckTipY + 2); // fretting hand up the neck
+  ctx.moveTo(1.5, -4);
+  ctx.lineTo(1 + pluck, bellyY - 0.5); // picking hand over the belly
+  ctx.stroke();
+  ctx.fillStyle = skin; // picking hand
+  ctx.beginPath();
+  ctx.arc(1 + pluck, bellyY - 0.5, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Head.
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.arc(1, -10.5, 3.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Feathered cap — a soft slouch hat with a jaunty plume.
+  ctx.fillStyle = bodyDark;
+  ctx.beginPath();
+  ctx.moveTo(-3, -12);
+  ctx.quadraticCurveTo(1, -16.5, 5, -12.5);
+  ctx.quadraticCurveTo(2, -12, -3, -12);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = bodyLit; // brim glint
+  ctx.beginPath();
+  ctx.ellipse(0.6, -12, 4.6, 1.2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Plume sweeping back off the cap.
+  ctx.strokeStyle = feather;
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(3.5, -14);
+  ctx.quadraticCurveTo(-2, -19, -6.5, -17.5);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+/**
  * Procedural Wizard silhouette — a storm-caller in a peaked hat and long robe,
  * levelling a gnarled staff toward the foe — painted in the caller's local space
  * (origin at the figure's centre; robe hem near y=+11, hat tip near y=-20, staff
@@ -4447,6 +4594,7 @@ export function hasSprite(shape: string): boolean {
     shape === 'farmer' ||
     shape === 'wizard' ||
     shape === 'elf' ||
+    shape === 'bard' ||
     // The player's own adventurer(s) — drawn from a PlayerSpriteConfig; callers
     // must supply `playerConfig` to drawUnitSprite for these to render.
     shape === 'player-blade' ||
@@ -4493,6 +4641,7 @@ export function drawUnitSprite(
   else if (shape === 'farmer') drawFarmer(ctx, color, faceLeft);
   else if (shape === 'wizard') drawWizard(ctx, color, faceLeft, anim, empowered);
   else if (shape === 'elf') drawElf(ctx, color, faceLeft, anim, empowered);
+  else if (shape === 'bard') drawBard(ctx, color, faceLeft, anim);
   else if (shape.startsWith('player-') && playerConfig) {
     drawPlayerSprite(ctx, playerConfig, faceLeft, anim, playerWeaponForShape(shape));
   }

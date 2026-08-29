@@ -50,8 +50,12 @@ export function UnitSprite({ unit, size = 48 }: Props) {
     }
     // The figure spans roughly 30px tall (feet y=+11, head y=-16) and reaches to
     // ~x=+18 with the bow; centre it in the box with a little breathing room.
+    // Most champions lean right (bow/staff reaches forward), so the origin sits a
+    // touch left of centre; the Bard instead carries a lute out to his left, so
+    // his silhouette centres with the origin nudged right.
     const s = size / 40;
-    ctx.translate(size * 0.44, size * 0.6);
+    const anchorX = shape === 'bard' ? 0.56 : 0.44;
+    ctx.translate(size * anchorX, size * 0.6);
     ctx.scale(s, s);
     drawUnitSprite(ctx, shape, color, false, 0);
   }, [sprite, shape, color, size, isPlayer, playerConfig]);

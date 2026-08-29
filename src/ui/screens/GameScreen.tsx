@@ -25,7 +25,7 @@ import { BOARD_HEIGHT, BOARD_WIDTH } from '../../domain/grid';
 import { RARITIES } from '../../domain/rarity';
 import { GameEngine } from '../../engine/GameEngine';
 import { drawBoard, type RenderUiState } from '../../engine/renderer';
-import type { Outcome } from '../../engine/types';
+import type { Outcome, Tower } from '../../engine/types';
 import { playCombatSound } from '../combatAudio';
 import { UnitSprite } from '../components/UnitSprite';
 
@@ -102,6 +102,8 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
   const [selectedTowerUid, setSelectedTowerUid] = useState<number | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  // Whether the selected champion's "Active Buffs" list is expanded.
+  const [showBuffs, setShowBuffs] = useState(false);
   const [hud, setHud] = useState<Hud | null>(null);
   const [tooltip, setTooltip] = useState<EnemyTooltip | null>(null);
   // Fast-forward: run the simulation at 3× by sub-stepping the engine. Mirrored
@@ -538,6 +540,12 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                             <span className="dst-row"><span>Harvest</span><b>🪙{def.generator.amount}</b></span>
                             <span className="dst-row"><span>Harvests</span><b>{def.generator.timesPerWave}/wave</b></span>
                           </>
+                        ) : def.bard ? (
+                          <>
+                            <span className="dst-row"><span>Buff</span><b>+{Math.round((def.bard.attackSpeedMult - 1) * 100)}% SPD</b></span>
+                            <span className="dst-row"><span>Targets</span><b>{def.bard.targets} · {def.bard.duration}s</b></span>
+                            <span className="dst-row"><span>Range</span><b>{rng}</b></span>
+                          </>
                         ) : (
                           <>
                             <span className="dst-row"><span>Attack</span><b>{dmg}</b></span>
@@ -610,16 +618,70 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                   <div className="s">Left <b>{selectedTower.genLeft} this wave</b></div>
                   <div className="s">Total <b>🪙{selectedTower.genAmount * selectedTower.def.generator.timesPerWave}/wave</b></div>
                 </div>
-              ) : (
+              ) : selectedTower.bardEvery > 0 ? (
                 <div className="stat-row" style={{ marginTop: 4 }}>
-                  <div className="s">DMG <b>{selectedTower.damage}</b></div>
-                  <div className="s">SPD <b>{formatAttackSpeed(selectedTower.attackSpeed)}/s</b></div>
+                  <div className="s">Buff <b>+{Math.round((selectedTower.bardSpeedMult - 1) * 100)}% SPD</b></div>
+                  <div className="s">Targets <b>{selectedTower.bardTargets}</b></div>
+                  <div className="s">Lasts <b>{selectedTower.bardDuration}s</b></div>
+                  <div className="s">Every <b>{selectedTower.bardEvery}s</b></div>
                   <div className="s">Range <b>{selectedTower.range}</b></div>
-                  <div className="s">DPS <b>{(selectedTower.damage * selectedTower.attackSpeed).toFixed(0)}{selectedTower.burstCount > 1 ? ` x${selectedTower.burstCount}` : ''}</b></div>
+                </div>
+              ) : (() => {
+                // Reflect the live buffs on the exact stat each one lifts: a
+                // Bard's tune → SPD/DPS, Better Morale → DMG, Guiding Gale → Range.
+                const spd = selectedTower.attackSpeed * (selectedTower.attackSpeedBuffMult ?? 1);
+                const spdBuffed = (selectedTower.attackSpeedBuffMult ?? 1) > 1;
+                const dmgBuffed = selectedTower.adjacentDamageMult > 0 && selectedTower.adjacentAllies > 0;
+                const rangeBuffed = selectedTower.rangeBuffed;
+                return (
+                <div className="stat-row" style={{ marginTop: 4 }}>
+                  <div className={`s${dmgBuffed ? ' buffed morale' : ''}`}>DMG <b>{selectedTower.damage}{dmgBuffed ? ' ⚔' : ''}</b></div>
+                  <div className={`s${spdBuffed ? ' buffed' : ''}`}>SPD <b>{formatAttackSpeed(spd)}/s{spdBuffed ? ' ♪' : ''}</b></div>
+                  <div className={`s${rangeBuffed ? ' buffed gale' : ''}`}>Range <b>{selectedTower.range}{rangeBuffed ? ' 🌬' : ''}</b></div>
+                  <div className={`s${spdBuffed ? ' buffed' : ''}`}>DPS <b>{(selectedTower.damage * spd).toFixed(0)}{selectedTower.burstCount > 1 ? ` x${selectedTower.burstCount}` : ''}</b></div>
                   <div className="s">Crit <b>{+(selectedTower.critChance * 100).toFixed(2)}%</b></div>
                   <div className="s">Crit Dmg <b>{selectedTower.critMultiplier}×</b></div>
                 </div>
-              )}
+                );
+              })()}
+
+              {(() => {
+                const buffs = activeBuffsFor(selectedTower);
+                return (
+                  <div className="buffs-box">
+                    <button
+                      className="buffs-toggle"
+                      onClick={() => setShowBuffs((v) => !v)}
+                      aria-expanded={showBuffs}
+                    >
+                      <span>
+                        ✨ Active Buffs
+                        <span className={`buffs-count ${buffs.length ? 'has' : ''}`}>
+                          {buffs.length}
+                        </span>
+                      </span>
+                      <span className="buffs-chev">{showBuffs ? '▲' : '▼'}</span>
+                    </button>
+                    {showBuffs && (
+                      <div className="buffs-list">
+                        {buffs.length === 0 ? (
+                          <div className="buffs-empty">No active buffs right now.</div>
+                        ) : (
+                          buffs.map((b, i) => (
+                            <div key={i} className="buff-row">
+                              <span className="buff-ic">{b.icon}</span>
+                              <span className="buff-info">
+                                <b>{b.name}</b>
+                                <span>{b.detail}</span>
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {(() => {
                 const isHero = selectedTower.def.rarity === 'hero';
@@ -637,6 +699,9 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                   ),
                   setAoe: up.setAoe,
                   coneAngle: selectedTower.def.coneAngle,
+                  // Bard upgrades aren't stat-scaled — pass their tune deltas straight through.
+                  bardTargets: up.bardTargets,
+                  bardSpeedBonus: up.bardSpeedBonus,
                 });
                 // Hero champions never buy upgrades with gold — they pool wave-clear
                 // EXP and level up automatically once it reaches the next tier's cost.
@@ -717,6 +782,50 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
       {flash && <div className="flash-msg">{flash}</div>}
     </main>
   );
+}
+
+/** A temporary/aura effect currently modifying a deployed champion. */
+interface ActiveBuff {
+  icon: string;
+  name: string;
+  detail: string;
+}
+
+/**
+ * Every buff presently boosting a deployed champion, for the in-stage "Active
+ * Buffs" panel. Reads only live tower fields, so the list (and any countdown)
+ * refreshes each frame as the HUD re-renders. Covers the Bard's attack-speed
+ * tune (timed), the Swordsman's Better Morale (adjacency), and the Wizard's
+ * Guiding Gale range aura. New buffs slot in here as they're added.
+ */
+function activeBuffsFor(t: Tower): ActiveBuff[] {
+  const buffs: ActiveBuff[] = [];
+  if ((t.attackSpeedBuffMult ?? 1) > 1) {
+    buffs.push({
+      icon: '🎵',
+      name: 'Hastened',
+      detail: `+${Math.round((t.attackSpeedBuffMult - 1) * 100)}% attack speed · ${Math.ceil(
+        t.attackSpeedBuffTimer,
+      )}s left`,
+    });
+  }
+  if (t.adjacentDamageMult > 0 && t.adjacentAllies > 0) {
+    buffs.push({
+      icon: '⚔️',
+      name: 'Better Morale',
+      detail: `+${Math.round(t.adjacentDamageMult * t.adjacentAllies * 100)}% damage · ${
+        t.adjacentAllies
+      } ${t.adjacentAllies === 1 ? 'ally' : 'allies'}`,
+    });
+  }
+  if (t.rangeBuffed) {
+    buffs.push({
+      icon: '🌬️',
+      name: 'Guiding Gale',
+      detail: `+${Math.round(((t.rangeBuffMult ?? 1) - 1) * 100)}% attack range · from a nearby Wizard`,
+    });
+  }
+  return buffs;
 }
 
 function ResultCard({

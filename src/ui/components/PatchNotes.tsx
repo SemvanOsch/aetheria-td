@@ -19,6 +19,19 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-08-29 · The Bard & Buffs',
+    changes: [
+      'New champion: the Bard, a Rare support minstrel who never draws a blade. Every few beats he strikes up a tune that hastens the attack speed of a couple of random nearby champions for a while (never himself) — with his own lute-strumming sprite, a jaunty performance jingle, and in-stage upgrades that widen his reach and add a rousing anthem to rally one more ally.',
+      'Buffed champions now float music notes in the Bard’s colour, and the exact stat each buff lifts is highlighted in the in-stage panel — attack speed for the Bard’s tune, damage for the Swordsman’s Better Morale, and range for the Wizard’s Guiding Gale.',
+      'New “Active Buffs” button in the in-stage champion panel: expand it to see every buff currently on that champion — the Bard’s haste (with a live countdown), Better Morale, and Guiding Gale (now showing its exact +% range).',
+      'The strongest buff always wins — a weaker Bard’s tune never overwrites a stronger one — and Bards now spend each performance on allies they can actually help instead of re-buffing the already well-buffed.',
+      'The Wizard’s Guiding Gale now wraps affected champions in a small swirling wind rather than a glow pooled at their feet.',
+      'Your adventurer (all three proficiencies) now levels up from in-stage EXP instead of buying upgrades with gold — it earns EXP each cleared wave and levels automatically, shown as an EXP progress bar on its panel.',
+      'Your adventurer is now free to deploy — it’s locked to your team and unsellable anyway.',
+      'Rebalanced all three of your adventurer’s proficiencies (Blade, Bow, Magic): lower starting damage and retuned, cheaper upgrade tiers.',
+    ],
+  },
+  {
     version: '2026-08-26 · Magic Champion',
     changes: [
       'Magic proficiency: your adventurer is now playable as a staff-less spellcaster. Each attack gathers a slow-charging magic orb — visibly conjured in your character’s own colour between their raised hands — then hurls it to burst on impact, striking every enemy caught in the blast circle. Comes with three in-stage upgrades and its own mastery tree (Focused Will · Raw Power · Arcane Mastery).',

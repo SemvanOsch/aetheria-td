@@ -150,6 +150,12 @@ export interface Tower {
    */
   rangeBuffed: boolean;
   /**
+   * The range-aura multiplier currently lifting this tower's range (1 = none;
+   * e.g. 1.1 for the Wizard's Guiding Gale). Stored so the buff panel can show
+   * the exact percentage; set alongside `rangeBuffed` on the board recompute.
+   */
+  rangeBuffMult: number;
+  /**
    * Pixels each hit shoves an enemy back along its path (0 = none; see the
    * Wizard's Gale Force). A fixed deploy-time property read in `damageEnemy`.
    */
@@ -200,6 +206,33 @@ export interface Tower {
    * champions, which upgrade through the gold `upgradeTower` path instead.
    */
   heroExp: number;
+  /**
+   * Seconds between a Bard's performances (0 = not a Bard). A support unit; the
+   * engine ticks `bardTimer` and plays a buff when it reaches 0 (see `updateBard`).
+   */
+  bardEvery: number;
+  /** Countdown to this Bard's next performance (Bard units only). */
+  bardTimer: number;
+  /** How many random allies in range each performance buffs (Bard units only). */
+  bardTargets: number;
+  /** Attack-speed multiplier a buffed ally receives from this Bard. */
+  bardSpeedMult: number;
+  /** How long (seconds) a buff this Bard grants lasts on an ally. */
+  bardDuration: number;
+  /**
+   * Attack-speed buff multiplier this tower is currently *receiving* (1 = none;
+   * see the Bard). Folded into the firing cadence while `attackSpeedBuffTimer`
+   * runs; the renderer floats music notes around a buffed tower.
+   */
+  attackSpeedBuffMult: number;
+  /** Seconds of attack-speed buff left on this tower (0 = unbuffed). */
+  attackSpeedBuffTimer: number;
+  /**
+   * Colour of the Bard that granted the current attack-speed buff, so the
+   * renderer floats notes in the Bard's colour (not the buffed unit's). Empty
+   * when unbuffed.
+   */
+  attackSpeedBuffColor: string;
   /** Gold produced per harvest (generator units only). */
   genAmount: number;
   /** Harvests remaining this wave (generator units only). */
