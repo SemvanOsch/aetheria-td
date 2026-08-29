@@ -122,7 +122,7 @@ export const WAVE_CLEAR_GOLD_DEFAULT = 30;
 // champions don't buy upgrades with gold; they pool this EXP and level up
 // automatically once it reaches the next tier's cost (its UpgradeDef.cost, read
 // as an EXP threshold). Retune the pace of hero leveling by editing these.
-export const WAVE_CLEAR_HERO_EXP = [220, 20, 25, 30, 30, 35, 35, 40];
+export const WAVE_CLEAR_HERO_EXP = [20, 20, 25, 30, 30, 35, 35, 40];
 export const WAVE_CLEAR_HERO_EXP_DEFAULT = 40;
 // ─────────────────────────────────────────────────────────────────────────────
 // Generator (farmer) harvest pacing: first harvest after a short delay, then

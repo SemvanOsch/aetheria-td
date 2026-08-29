@@ -317,7 +317,7 @@ function buildMagicChampion(
           'Unlocks Mana Ray — channels a continuous beam of raw mana, locked ' +
           'where it is first aimed, searing every foe that walks through it. ' +
           'The mage cannot cast orbs while the beam burns.',
-        cost: 110,
+        cost: 125,
         ability: {
           id: 'mana-ray',
           name: 'Mana Ray',
