@@ -257,6 +257,8 @@ export function ChampionDetail({
                     // Bard tune deltas aren't stat-scaled — pass them straight through.
                     bardTargets: u.bardTargets,
                     bardSpeedBonus: u.bardSpeedBonus,
+                    // A tier may unlock an activated ability (Cyclone Slash).
+                    ability: u.ability?.name,
                   })}
                 </div>
               </div>

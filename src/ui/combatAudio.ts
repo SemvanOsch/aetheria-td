@@ -168,6 +168,34 @@ const VOICES: Record<SfxName, (ac: AudioContext) => void> = {
     noiseSweep(ac, jit(900, 120), 200, 0.24, 0.03, 0.6, 'lowpass');
   },
 
+  // Cyclone Slash (the Blade's ability) — a big whirling steel roar: two broad
+  // noise sweeps whipping up in pitch for the whirlwind, plus a low metallic
+  // ring underneath for the heft of the spinning blades. Louder than a normal
+  // swing since it's a deliberate, one-off activated cast.
+  cycloneSlash: (ac) => {
+    noiseSweep(ac, jit(360, 60), jit(1700, 200), 0.4, 0.05, 0.5);
+    noiseSweep(ac, jit(900, 120), jit(2400, 250), 0.3, 0.03, 0.4);
+    toneGlide(ac, jit(180, 20), 90, 0.34, 0.04, 'triangle');
+  },
+
+  // Quickdraw (the Bow's ability) — a taut bowstring pull snapping up in pitch
+  // with a bright rising shimmer, reading as a sudden surge of speed. A one-off
+  // activated cast, so a touch louder than a normal shot.
+  quickdraw: (ac) => {
+    noiseSweep(ac, jit(700, 100), jit(2200, 250), 0.22, 0.038, 1.2);
+    toneGlide(ac, jit(500, 40), 1500, 0.24, 0.03, 'sawtooth');
+  },
+
+  // Mana Ray (the Mage's beam) — a bright arcane surge as the beam ignites: a
+  // rising tone with an airy sweep. A one-off activated cast, so a touch fuller.
+  manaRay: (ac) => {
+    toneGlide(ac, jit(300, 30), 1200, 0.35, 0.035, 'sawtooth');
+    noiseSweep(ac, jit(500, 80), jit(2000, 220), 0.3, 0.02, 0.5);
+  },
+  // Mana Ray tick — a soft, steady zap each 0.5s the beam sears, so the channel
+  // reads as a continuous hum rather than silence. Kept very quiet.
+  manaRayTick: (ac) => toneGlide(ac, jit(900, 80), 640, 0.09, 0.016, 'sine'),
+
   // Bard — a gentle plucked arpeggio (three rising notes) as the minstrel
   // strikes up his tune. Soft triangle tones staggered a beat apart.
   bardPlay: (ac) => {

@@ -59,6 +59,8 @@ export function drawBoard(
   drawShots(ctx, engine);
   // Wind Slices (the Wizard's cone attack) sweep over enemies.
   drawSlices(ctx, engine);
+  // Mana Ray beams (the Mage's channelled ability) sear over enemies.
+  drawBeams(ctx, engine);
   // Homing arrows/bolts fly in world space, on top of enemies.
   drawProjectiles(ctx, engine);
   // Thrown javelins fly in world space, on top of the (faint) throw beam, so
@@ -72,6 +74,8 @@ export function drawBoard(
   drawSelectedAoe(ctx, engine, ui);
   drawPuffs(ctx, engine);
   drawBursts(ctx, engine);
+  // Cyclone Slash whirlwinds (the Blade's ability) spin over the field.
+  drawCyclones(ctx, engine);
   drawFloaters(ctx, engine);
   // Big boss health bar(s) pinned to the top of the board, over everything.
   drawBossBars(ctx, engine);
@@ -1486,14 +1490,27 @@ function drawTowers(
     // dark pad, with a soft same-colour glow.
     if (t.def.visual.shape.startsWith('player-')) {
       const accent = t.def.visual.playerConfig?.outfitColor ?? t.def.visual.color;
+      // While the champion's own ability haste is active (the Bow's Quickdraw)
+      // the outline *flares*: brighter, thicker, glowing and pulsing, with an
+      // extra outer ring — a unique tell distinct from the Bard's floating notes.
+      const flaring = t.abilitySpeedBuffTimer > 0;
+      const pulse = flaring ? moralePulse() : 0; // 0..1 shared board clock
       ctx.save();
-      ctx.strokeStyle = shade(accent, 0.2);
-      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = shade(accent, flaring ? 0.5 : 0.2);
+      ctx.lineWidth = flaring ? 2.4 + pulse * 1.6 : 1.6;
       ctx.shadowColor = accent;
-      ctx.shadowBlur = 6;
+      ctx.shadowBlur = flaring ? 14 + pulse * 12 : 6;
       ctx.beginPath();
-      ctx.ellipse(0, 10, 15, 6, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 10, 15 + (flaring ? 2 + pulse * 2 : 0), 6 + (flaring ? 1 + pulse : 0), 0, 0, Math.PI * 2);
       ctx.stroke();
+      if (flaring) {
+        // A fainter, wider outer halo pulsing in the champion's colour.
+        ctx.globalAlpha = 0.3 + 0.3 * pulse;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.ellipse(0, 10, 20 + pulse * 5, 8.5 + pulse * 2.5, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       ctx.restore();
     }
 
@@ -2641,6 +2658,143 @@ function drawBursts(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
     ctx.beginPath();
     ctx.arc(b.pos.x, b.pos.y, b.radius + p * 18, 0, Math.PI * 2);
     ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/**
+ * Cyclone Slash (the Blade adventurer's ability): a spinning whirlwind of steel
+ * centred on the champion, filling its attack radius. Expanding, rotating
+ * blade-arcs in the champion's colour with white leading edges, an inner sweep
+ * disc and an expanding shock ring — all fading over the whirlwind's short life.
+ */
+function drawCyclones(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
+  for (const c of engine.cyclones) {
+    const p = 1 - c.ttl / c.maxTtl; // 0 -> 1 over its life
+    const alpha = Math.max(0, 1 - p);
+    // Reach full radius quickly (by ~45% of the life), then hold and fade.
+    const grow = Math.min(1, p / 0.45);
+    const R = c.radius * (0.3 + 0.7 * grow);
+    const spin = p * Math.PI * 3; // several turns across the life
+
+    ctx.save();
+    ctx.translate(c.pos.x, c.pos.y);
+
+    // Faint swept disc suggesting the cut area.
+    ctx.globalAlpha = alpha * 0.14;
+    ctx.fillStyle = c.color;
+    ctx.beginPath();
+    ctx.arc(0, 0, R, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Spinning blade-arcs, each a tapered sweep at its own radius. Drawn twice:
+    // a coloured glow underneath and a bright white leading edge on top.
+    ctx.rotate(spin);
+    const arcs = 4;
+    for (let i = 0; i < arcs; i++) {
+      const rr = R * (0.5 + 0.13 * i);
+      const a0 = (i / arcs) * Math.PI * 2;
+      const sweep = Math.PI * 0.9;
+      // Coloured glow.
+      ctx.globalAlpha = alpha * 0.85;
+      ctx.strokeStyle = c.color;
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      ctx.shadowColor = c.color;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(0, 0, rr, a0, a0 + sweep);
+      ctx.stroke();
+      // Bright white core along the leading part of the arc.
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, rr, a0 + sweep * 0.55, a0 + sweep);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Expanding shock ring at the whirlwind's edge (un-rotated).
+    ctx.save();
+    ctx.globalAlpha = alpha * 0.8;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2.5 * alpha + 0.5;
+    ctx.beginPath();
+    ctx.arc(c.pos.x, c.pos.y, R, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/**
+ * Mana Ray beams (the Mage adventurer's channelled ability): a fixed, glowing
+ * line of mana from each channelling champion out to its locked reach, in the
+ * champion's colour. Drawn in layers — a soft wide outer glow, a solid core and a
+ * bright white centre line — with a flowing dashed shimmer and a pulsing muzzle
+ * flare at the origin. Fades over the last stretch of the channel.
+ */
+function drawBeams(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  for (const t of engine.towers) {
+    if (t.beamTimer <= 0) continue;
+    const accent = t.def.visual.playerConfig?.outfitColor ?? t.def.visual.color;
+    const ux = Math.cos(t.beamAngle);
+    const uy = Math.sin(t.beamAngle);
+    // A slim visual beam (thinner than the wider hit corridor) that emerges from
+    // the mage's raised hands — offset forward along the beam and lifted to hand
+    // height — rather than from a big orb over his body.
+    const coreW = 6; // slim core; the hit corridor stays BEAM_HALF_WIDTH wide
+    const handDist = 12;
+    const x0 = t.pos.x + ux * handDist;
+    const y0 = t.pos.y + uy * handDist - 4;
+    const x1 = t.pos.x + ux * t.beamRange;
+    const y1 = t.pos.y + uy * t.beamRange;
+    // Ease the beam out over the last 0.3s of the channel.
+    const fade = Math.min(1, t.beamTimer / 0.3);
+    const pulse = 0.5 - 0.5 * Math.cos(now / 70);
+
+    ctx.save();
+    ctx.lineCap = 'round';
+    // Soft outer glow.
+    ctx.globalAlpha = 0.25 * fade;
+    ctx.strokeStyle = accent;
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 9;
+    ctx.lineWidth = coreW * 1.9;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+    // Solid core.
+    ctx.globalAlpha = 0.85 * fade;
+    ctx.shadowBlur = 5;
+    ctx.lineWidth = coreW * (0.9 + pulse * 0.2);
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+    // Bright white centre with a flowing dash shimmer.
+    ctx.globalAlpha = fade;
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.lineWidth = Math.max(1.4, coreW * 0.35);
+    ctx.setLineDash([9, 7]);
+    ctx.lineDashOffset = -(now / 12) % 16;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // A small spark at the hands where the beam is loosed (not a body-covering orb).
+    ctx.globalAlpha = fade;
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc(x0, y0, coreW * (0.5 + pulse * 0.25), 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
 }

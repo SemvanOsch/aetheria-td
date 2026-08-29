@@ -6,7 +6,7 @@
  */
 
 import type { EnemyDef } from '../domain/enemies';
-import type { AoeType, UnitDef } from '../domain/units';
+import type { AbilityDef, AoeType, UnitDef } from '../domain/units';
 import type { Vec2 } from '../domain/grid';
 import type { TargetingType } from '../domain/targeting';
 
@@ -233,6 +233,16 @@ export interface Tower {
    * when unbuffed.
    */
   attackSpeedBuffColor: string;
+  /**
+   * Attack-speed buff from this champion's OWN activated ability (the Bow's
+   * Quickdraw), kept in a *separate* slot from the Bard's tune above so the two
+   * **stack multiplicatively** rather than overwriting each other. 1 = none;
+   * folded into the firing cadence while `abilitySpeedBuffTimer` runs, and shown
+   * by its own flaring foot-outline (not the Bard's floating notes).
+   */
+  abilitySpeedBuffMult: number;
+  /** Seconds of ability attack-speed buff left (0 = none). */
+  abilitySpeedBuffTimer: number;
   /** Gold produced per harvest (generator units only). */
   genAmount: number;
   /** Harvests remaining this wave (generator units only). */
@@ -263,6 +273,42 @@ export interface Tower {
   charge: number;
   /** Full duration of the current charge, for the wind-up animation ramp. */
   chargeMax: number;
+  /**
+   * Channelled beam (the Mage's Mana Ray): seconds of channel left (0 = not
+   * firing a beam). While > 0 the champion fires *only* the beam — its normal
+   * attacks (and orb charge) are suppressed — and the renderer draws the beam.
+   */
+  beamTimer: number;
+  /**
+   * Locked aim direction of the beam in radians, captured the instant it is cast.
+   * The beam does not re-aim — it sears a fixed line, hitting whatever walks
+   * through it. Meaningful only while `beamTimer > 0`.
+   */
+  beamAngle: number;
+  /** Reach of the beam in pixels (the champion's range captured at cast). */
+  beamRange: number;
+  /** Countdown to the beam's next damage tick, in seconds (see `tickInterval`). */
+  beamTickTimer: number;
+  /**
+   * Player-activated ability this tower has unlocked (the Blade's Cyclone Slash),
+   * or null. Set from the unit's upgrade tiers (see `effectiveAbility`) on deploy
+   * and refolded on every tier bump, so a hero auto-levelling into the ability's
+   * tier gains it mid-battle. Its presence is what makes the HUD show an ability
+   * icon for this tower.
+   */
+  ability: AbilityDef | null;
+  /** Seconds until the ability may be triggered again (0 = ready). */
+  abilityCooldown: number;
+  /** Full cooldown duration, for the icon's radial countdown. */
+  abilityCooldownMax: number;
+  /**
+   * Current mana pool for a hero champion (0 for units without one). Abilities
+   * are paid for in mana; casting drains it and killing enemies refills it, up to
+   * `maxMana`. Shown as the mana bar in the in-stage champion panel.
+   */
+  mana: number;
+  /** Mana capacity (from `UnitDef.maxMana`; 0 for units with no mana pool). */
+  maxMana: number;
 }
 
 export type ShotStyle = 'bolt' | 'slash' | 'line';
@@ -338,6 +384,23 @@ export interface Slice {
   hit: number[];
   /** Tower that cast it, credited with EXP on a killing cut. */
   source: Tower;
+  color: string;
+  ttl: number;
+  maxTtl: number;
+}
+
+/**
+ * The Blade adventurer's Cyclone Slash — a whirling ring of steel centred on the
+ * champion that fills its whole attack radius. Purely cosmetic (the damage is
+ * dealt instantly on cast in the engine): the renderer spins expanding blade-arcs
+ * out to `radius` and fades them over `ttl`.
+ */
+export interface Cyclone {
+  /** Centre of the whirlwind (the champion's position). */
+  pos: Vec2;
+  /** Reach of the whirlwind in pixels (the tower's range at cast time). */
+  radius: number;
+  /** Whirl tint (the champion's colour). */
   color: string;
   ttl: number;
   maxTtl: number;

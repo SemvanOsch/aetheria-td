@@ -21,6 +21,12 @@ export interface EnemyDef {
   speed: number;
   /** Currency granted to the player when this enemy dies. */
   reward: number;
+  /**
+   * Mana a hero champion recovers when it lands the killing blow on this enemy.
+   * Hero abilities are paid for in mana, and killing enemies is the only way to
+   * refill it (see `Tower.mana`). Omitted / 0 means killing it grants no mana.
+   */
+  mana?: number;
   /** Base health removed when this enemy reaches the base. */
   damageToBase: number;
   /** Simple vector visual descriptor. */
@@ -119,22 +125,22 @@ export interface EnemyVisual {
 // Stats scale up section by section so later realms hit harder.
 const REGULAR: Record<string, EnemyDef> = {
   // Castle — disciplined rebels and siege beasts.
-  cas_grunt: { id: 'cas_grunt', name: 'Footman', health: 60, speed: 46, reward: 2, damageToBase: 1, visual: { color: '#b3bccb', icon: '🛡️' }, boss: false, radius: 13 },
-  cas_grunt2: { id: 'cas_grunt2', name: 'Sergeant', health: 140, speed: 42, reward: 5, damageToBase: 2, visual: { color: '#9aa6be', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2 },
-  cas_grunt3: { id: 'cas_grunt3', name: 'Man-at-Arms', health: 185, speed: 46, reward: 6, damageToBase: 2, visual: { color: '#7d8697', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2 },
-  cas_runner: { id: 'cas_runner', name: 'Outrider', health: 65, speed: 94, reward: 3, damageToBase: 1, visual: { color: '#d7a94a', icon: '🐎' }, boss: false, radius: 14 },
-  cas_mage: { id: 'cas_mage', name: 'Royal Wizard', health: 110, speed: 50, reward: 4, damageToBase: 1, visual: { color: '#530a69', icon: '🧙' }, boss: false, radius: 12, magicResist: 0.2 },
-  cas_brute: { id: 'cas_brute', name: 'Siege Ram', health: 245, speed: 30, reward: 8, damageToBase: 3, visual: { color: '#8a93a8', icon: '🐏' }, boss: false, radius: 17, physicalResist: 0.2 },
+  cas_grunt: { id: 'cas_grunt', name: 'Footman', health: 60, speed: 46, reward: 2, mana: 1, damageToBase: 1, visual: { color: '#b3bccb', icon: '🛡️' }, boss: false, radius: 13 },
+  cas_grunt2: { id: 'cas_grunt2', name: 'Sergeant', health: 140, speed: 42, reward: 5, mana: 2, damageToBase: 2, visual: { color: '#9aa6be', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2 },
+  cas_grunt3: { id: 'cas_grunt3', name: 'Man-at-Arms', health: 185, speed: 46, reward: 6, mana: 2, damageToBase: 2, visual: { color: '#7d8697', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2 },
+  cas_runner: { id: 'cas_runner', name: 'Outrider', health: 65, speed: 94, reward: 3, mana: 2, damageToBase: 1, visual: { color: '#d7a94a', icon: '🐎' }, boss: false, radius: 14 },
+  cas_mage: { id: 'cas_mage', name: 'Royal Wizard', health: 110, speed: 50, reward: 4, mana: 2, damageToBase: 1, visual: { color: '#530a69', icon: '🧙' }, boss: false, radius: 12, magicResist: 0.2 },
+  cas_brute: { id: 'cas_brute', name: 'Siege Ram', health: 245, speed: 30, reward: 8, mana: 3, damageToBase: 3, visual: { color: '#8a93a8', icon: '🐏' }, boss: false, radius: 17, physicalResist: 0.2 },
 
   // Forest — wild beasts and ancient growth.
-  for_grunt: { id: 'for_grunt', name: 'Goblin Forager', health: 96, speed: 48, reward: 6, damageToBase: 1, visual: { color: '#7bb86f', icon: '👺' }, boss: false, radius: 13 },
-  for_runner: { id: 'for_runner', name: 'Dire Wolf', health: 66, speed: 100, reward: 8, damageToBase: 1, visual: { color: '#a7b3c2', icon: '🐺' }, boss: false, radius: 12 },
-  for_brute: { id: 'for_brute', name: 'Elder Treant', health: 380, speed: 27, reward: 18, damageToBase: 2, visual: { color: '#6a9a5a', icon: '🌲' }, boss: false, radius: 18 },
+  for_grunt: { id: 'for_grunt', name: 'Goblin Forager', health: 96, speed: 48, reward: 6, mana: 6, damageToBase: 1, visual: { color: '#7bb86f', icon: '👺' }, boss: false, radius: 13 },
+  for_runner: { id: 'for_runner', name: 'Dire Wolf', health: 66, speed: 100, reward: 8, mana: 6, damageToBase: 1, visual: { color: '#a7b3c2', icon: '🐺' }, boss: false, radius: 12 },
+  for_brute: { id: 'for_brute', name: 'Elder Treant', health: 380, speed: 27, reward: 18, mana: 14, damageToBase: 2, visual: { color: '#6a9a5a', icon: '🌲' }, boss: false, radius: 18 },
 
   // Inn — rowdy patrons and cellar horrors.
-  inn_grunt: { id: 'inn_grunt', name: 'Cellar Rat', health: 112, speed: 50, reward: 6, damageToBase: 1, visual: { color: '#9a86c4', icon: '🐀' }, boss: false, radius: 13 },
-  inn_runner: { id: 'inn_runner', name: 'Drunken Brawler', health: 80, speed: 104, reward: 8, damageToBase: 1, visual: { color: '#e0a040', icon: '🍺' }, boss: false, radius: 13 },
-  inn_brute: { id: 'inn_brute', name: 'Cask Golem', health: 410, speed: 28, reward: 18, damageToBase: 2, visual: { color: '#8a6a4a', icon: '🛢️' }, boss: false, radius: 18 },
+  inn_grunt: { id: 'inn_grunt', name: 'Cellar Rat', health: 112, speed: 50, reward: 6, mana: 7, damageToBase: 1, visual: { color: '#9a86c4', icon: '🐀' }, boss: false, radius: 13 },
+  inn_runner: { id: 'inn_runner', name: 'Drunken Brawler', health: 80, speed: 104, reward: 8, mana: 7, damageToBase: 1, visual: { color: '#e0a040', icon: '🍺' }, boss: false, radius: 13 },
+  inn_brute: { id: 'inn_brute', name: 'Cask Golem', health: 410, speed: 28, reward: 18, mana: 14, damageToBase: 2, visual: { color: '#8a6a4a', icon: '🛢️' }, boss: false, radius: 18 },
 };
 
 // --- Bosses, one per level (15 total) ---------------------------------------
@@ -155,6 +161,8 @@ interface BossMeta {
   speed?: number;
   /** Currency dropped on death (default: escalating curve). */
   reward?: number;
+  /** Mana a hero recovers for the kill (default: 30). See `EnemyDef.mana`. */
+  mana?: number;
   /** Base health removed if it reaches the base (default: 4 + tier/3). */
   damageToBase?: number;
   /** Board radius in px (default: grows with tier, capped at 32). */
@@ -217,6 +225,7 @@ function buildBosses(): Record<string, EnemyDef> {
       health: m.health ?? Math.round(650 * Math.pow(1.135, i)),
       speed: m.speed ?? 28 + (i % 4) * 2,
       reward: m.reward ?? Math.round(30 * Math.pow(1.12, i)),
+      mana: m.mana ?? 20,
       damageToBase: m.damageToBase ?? 4 + Math.floor(i / 3),
       visual: { color: m.color, icon: m.icon },
       boss: true,

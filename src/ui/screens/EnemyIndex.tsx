@@ -113,6 +113,8 @@ function EnemyDetail({ def, onClose }: { def: EnemyDef; onClose: () => void }) {
     { label: 'Speed', value: `${def.speed} px/s (${speedLabel(def.speed)})` },
     // Bosses omit the castle-damage row (it's an instant loss if they break through).
     ...(def.boss ? [] : [{ label: 'Damage to castle', value: `${def.damageToBase}` }]),
+    // Mana a hero recovers for killing it (see the heroes' ability mana pools).
+    ...(def.mana ? [{ label: 'Mana granted', value: `✦ ${def.mana}` }] : []),
   ];
   if (def.dodgeChance) {
     rows.push({ label: 'Evasion', value: `${Math.round(def.dodgeChance * 100)}% dodge` });

@@ -1090,6 +1090,44 @@ button.stat-card.clickable:active {
   font-style: italic;
 }
 
+/* Hero mana pool (in-stage champion panel) — blue, fed by kills. */
+.mana-box {
+  margin-top: 12px;
+}
+.mana-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  font-weight: 700;
+  color: #6ab8ff;
+}
+.mana-val {
+  color: #cfe6ff;
+  font-variant-numeric: tabular-nums;
+}
+.mana-bar {
+  margin-top: 5px;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.mana-bar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #2f7fd0, #6cc6ff);
+  box-shadow: 0 0 8px rgba(90, 178, 255, 0.5);
+  transition: width 0.2s ease;
+}
+.mana-hint {
+  margin-top: 5px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
 /* targeting selector (in-stage tower panel) */
 .target-select {
   margin-top: 12px;
@@ -1641,20 +1679,28 @@ button.mastery-box.as-button:hover {
 .stat-row .s b {
   color: var(--text);
 }
-/* A stat lifted by an in-stage buff — highlighted while the buff is active.
-   The base colour is the Bard's pink; per-buff modifiers retint it to match
-   each aura (gold for Better Morale, cyan for the Wizard's Guiding Gale). */
-.stat-row .s.buffed b {
-  color: #f0a6df;
-  text-shadow: 0 0 6px rgba(224, 143, 208, 0.6);
+/* A stat lifted by an in-stage buff — highlighted while the buff is active, by
+   category rather than by which effect caused it: attack speed → blue, damage →
+   red, range → green, crit → yellow, and DPS its own violet. */
+.stat-row .s.buff-spd b {
+  color: #6ab8ff;
+  text-shadow: 0 0 6px rgba(90, 160, 255, 0.6);
 }
-.stat-row .s.buffed.morale b {
-  color: #ffd76a;
-  text-shadow: 0 0 6px rgba(255, 200, 80, 0.6);
+.stat-row .s.buff-dmg b {
+  color: #ff6a6a;
+  text-shadow: 0 0 6px rgba(255, 90, 90, 0.6);
 }
-.stat-row .s.buffed.gale b {
-  color: #7fe3e0;
-  text-shadow: 0 0 6px rgba(110, 227, 224, 0.6);
+.stat-row .s.buff-range b {
+  color: #6fd98a;
+  text-shadow: 0 0 6px rgba(95, 211, 138, 0.6);
+}
+.stat-row .s.buff-crit b {
+  color: #ffd452;
+  text-shadow: 0 0 6px rgba(255, 200, 60, 0.6);
+}
+.stat-row .s.buff-dps b {
+  color: #c08cff;
+  text-shadow: 0 0 6px rgba(176, 120, 255, 0.6);
 }
 
 /* Active-buffs inspector in the selected-champion panel. */
@@ -2452,6 +2498,148 @@ button.mastery-box.as-button:hover {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
   }
+}
+
+/* --- Activated ability panel (battle side panel) ------------------------- */
+.ability-panel-head {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--gold);
+  margin-bottom: 8px;
+}
+.ability-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* Each ability is a card: a square art icon on the left, name + status on the right. */
+.ability-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px;
+  text-align: left;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(12, 16, 30, 0.5);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.ability-icon {
+  position: relative;
+  flex: 0 0 auto;
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 2px solid var(--gold);
+  background: radial-gradient(circle at 50% 38%, #2a2033, #12101f);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.ability-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.ability-emoji {
+  font-size: 30px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+.ability-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ability-name {
+  font-size: 13px;
+  color: var(--text);
+}
+.ability-status {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.ability-status.is-ready {
+  color: var(--gold);
+}
+/* Ready: a warm gold border/glow and a gentle breathing pulse to invite a click. */
+.ability-btn.ready {
+  border-color: var(--gold);
+  animation: ability-pulse 1.8s ease-in-out infinite;
+}
+.ability-btn.ready:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45), 0 0 14px rgba(242, 193, 78, 0.5);
+}
+.ability-btn.ready:active {
+  transform: scale(0.98);
+}
+@keyframes ability-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 rgba(242, 193, 78, 0);
+  }
+  50% {
+    box-shadow: 0 0 14px rgba(242, 193, 78, 0.45);
+  }
+}
+/* Cooling down: desaturated, non-interactive, with a radial countdown wedge. */
+.ability-btn.cooling {
+  cursor: default;
+}
+.ability-btn.cooling .ability-icon {
+  border-color: var(--gold-deep);
+  filter: grayscale(0.35) brightness(0.82);
+}
+/* Off cooldown but not enough mana — a cool blue-tinted "starved" state. */
+.ability-btn.starved {
+  cursor: default;
+}
+.ability-btn.starved .ability-icon {
+  border-color: #3a6a9a;
+  filter: grayscale(0.5) brightness(0.75);
+}
+/* Mana-cost badge tucked in the icon corner. */
+.ability-mana-cost {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  padding: 1px 4px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.3;
+  color: #cfe6ff;
+  background: rgba(10, 24, 46, 0.85);
+  border: 1px solid rgba(90, 178, 255, 0.5);
+  pointer-events: none;
+}
+.ability-mana-cost.short {
+  color: #ff9a9a;
+  border-color: rgba(255, 120, 120, 0.6);
+}
+.ability-cooldown-sweep {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.ability-cooldown-num {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 22px;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
 }
 
 @media (max-width: 860px) {

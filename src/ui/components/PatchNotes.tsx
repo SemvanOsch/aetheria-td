@@ -19,9 +19,19 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-08-29 · Hero Abilities & Mana',
+    changes: [
+      'Each of your three heroes now unlocks a signature activated ability at their level-3 upgrade (in place of a stat boost): the Blade’s Cyclone Slash — a whirlwind of steel that cuts every foe in range at once; the Bow’s Quickdraw — a burst of blistering attack speed for a few seconds; and the Magic hero’s Mana Ray — a channelled beam, locked where it’s first aimed, that sears everything walking through it while the mage holds it (no orb-casting meanwhile).',
+      'Abilities appear as clickable icons in the in-stage champion panel, each with its own art, a radial cooldown countdown, and a mana cost.',
+      'New mana system: heroes have a 50 mana pool shown as a bar in their in-stage panel. Casting an ability costs mana, and the only way to refill it is by landing killing blows — every enemy now grants mana on death (shown in the Enemy Index).',
+      'Quickdraw stacks with the Bard’s tune (multiplying attack speed) and flares your hero’s coloured foot-outline while active, with its own buff entry.',
+      'In-stage stat panel: buffed stats are now colour-coded by category — attack speed blue, damage red, range green, crit yellow, DPS violet — and the little trailing buff icons behind the numbers are gone.',
+    ],
+  },
+  {
     version: '2026-08-29 · The Bard & Buffs',
     changes: [
-      'New champion: the Bard, a Rare support minstrel who never draws a blade. Every few beats he strikes up a tune that hastens the attack speed of a couple of random nearby champions for a while (never himself) — with his own lute-strumming sprite, a jaunty performance jingle, and in-stage upgrades that widen his reach and add a rousing anthem to rally one more ally.',
+      'New champion: the Bard, a Common support minstrel who never draws a blade. Every few beats he strikes up a tune that hastens the attack speed of a couple of random nearby champions for a while (never himself) — with his own lute-strumming sprite, a jaunty performance jingle, and in-stage upgrades that widen his reach and add a rousing anthem to rally one more ally.',
       'Buffed champions now float music notes in the Bard’s colour, and the exact stat each buff lifts is highlighted in the in-stage panel — attack speed for the Bard’s tune, damage for the Swordsman’s Better Morale, and range for the Wizard’s Guiding Gale.',
       'New “Active Buffs” button in the in-stage champion panel: expand it to see every buff currently on that champion — the Bard’s haste (with a live countdown), Better Morale, and Guiding Gale (now showing its exact +% range).',
       'The strongest buff always wins — a weaker Bard’s tune never overwrites a stronger one — and Bards now spend each performance on allies they can actually help instead of re-buffing the already well-buffed.',
@@ -76,7 +86,7 @@ const PATCH_NOTES: PatchEntry[] = [
     version: '2026-08-25 · Adventurer Intro',
     changes: [
       'First-launch cinematic: a new player now opens an Adventurer’s Journal, sketches their own custom character portrait, and signs their name onto the Identification Page before entering the game.',
-'New preset-based sprite creator (body, skin, hair + colour, headwear, outfit + colour) with a live preview, per-part steppers, colour swatches, a free custom-colour picker on every colour, and a Randomize button — drawn in the same procedural style as the champions.',
+      'New preset-based sprite creator (body, skin, hair + colour, headwear, outfit + colour) with a live preview, per-part steppers, colour swatches, a free custom-colour picker on every colour, and a Randomize button — drawn in the same procedural style as the champions.',
       'Your adventurer (name + look) is saved and reused across sessions, ready for future features. Returning players skip the intro; existing saves keep all their progress and simply create an identity on next launch.',
     ],
   },

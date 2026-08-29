@@ -33,6 +33,7 @@ import { selectTarget, type TargetingType } from '../domain/targeting';
 import {
   coneAngleDeg,
   DEFAULT_BURST_RADIUS,
+  effectiveAbility,
   effectiveAoe,
   effectiveBard,
   effectiveBounces,
@@ -60,6 +61,7 @@ import { critChanceFor, critMultiplierFor } from '../domain/combat';
 import { isSpeaking } from './types';
 import type {
   Burst,
+  Cyclone,
   Enemy,
   FloatingText,
   Outcome,
@@ -120,7 +122,7 @@ export const WAVE_CLEAR_GOLD_DEFAULT = 30;
 // champions don't buy upgrades with gold; they pool this EXP and level up
 // automatically once it reaches the next tier's cost (its UpgradeDef.cost, read
 // as an EXP threshold). Retune the pace of hero leveling by editing these.
-export const WAVE_CLEAR_HERO_EXP = [20, 20, 25, 30, 30, 35, 35, 40];
+export const WAVE_CLEAR_HERO_EXP = [220, 20, 25, 30, 30, 35, 35, 40];
 export const WAVE_CLEAR_HERO_EXP_DEFAULT = 40;
 // ─────────────────────────────────────────────────────────────────────────────
 // Generator (farmer) harvest pacing: first harvest after a short delay, then
@@ -181,6 +183,15 @@ export const LANE_REVEAL_TIME = 1.3;
 // figure and the risen boss occupy the same spot with no jump.
 export const RISE_TIME = 0.9;
 export const RISE_LIFT = 40;
+// How long a Cyclone Slash whirlwind (the Blade's activated ability) plays out —
+// the damage lands instantly on cast; this only governs the cosmetic spin/fade.
+// Shared with the renderer so the expanding blade-arcs are timed to this window.
+export const CYCLONE_TIME = 0.6;
+// Mana Ray (the Mage's channelled beam ability): default corridor half-width and
+// tick spacing when the ability def leaves them unset. Half-width is shared with
+// the renderer so the drawn beam matches the hit corridor exactly.
+export const BEAM_HALF_WIDTH = 18;
+export const BEAM_TICK_INTERVAL = 0.5;
 
 /**
  * Semantic sound-cue names the engine emits into `GameEngine.sfx` for the UI to
@@ -205,6 +216,10 @@ export type SfxName =
   | 'elfHit'
   | 'orbCast'
   | 'orbBurst'
+  | 'cycloneSlash'
+  | 'quickdraw'
+  | 'manaRay'
+  | 'manaRayTick'
   | 'bardPlay';
 
 // The Elf's magic arrows leap on impact: each bounce seeks the nearest living
@@ -281,6 +296,8 @@ export class GameEngine {
   bursts: Burst[] = [];
   puffs: Puff[] = [];
   slices: Slice[] = [];
+  /** Active Cyclone Slash whirlwinds (the Blade's activated ability); cosmetic. */
+  cyclones: Cyclone[] = [];
   /** Net currency earned/spent during this battle (for end-screen summary). */
   currencyEarned = 0;
   /**
@@ -491,6 +508,9 @@ export class GameEngine {
     const thrown = masteryThrow(def.id, purchased);
     const preloadMax = masteryPreload(def.id, purchased);
     const bard = effectiveBard(def, 0);
+    // An activated ability is normally unlocked by a later tier, so tier 0 has
+    // none; refolded on each tier bump (a hero auto-levelling into it gains it).
+    const ability = effectiveAbility(def, 0);
     this.towers.push({
       uid: this.uidCounter++,
       def,
@@ -531,6 +551,8 @@ export class GameEngine {
       attackSpeedBuffMult: 1,
       attackSpeedBuffTimer: 0,
       attackSpeedBuffColor: '',
+      abilitySpeedBuffMult: 1,
+      abilitySpeedBuffTimer: 0,
       genAmount: this.genAmountFor(def, 0),
       // If deployed mid-wave, let it harvest during the rest of this wave.
       genLeft: def.generator && this.phase === 'wave' ? def.generator.timesPerWave : 0,
@@ -543,6 +565,16 @@ export class GameEngine {
       throwAnim: 0,
       charge: 0,
       chargeMax: 0,
+      beamTimer: 0,
+      beamAngle: 0,
+      beamRange: 0,
+      beamTickTimer: 0,
+      ability,
+      abilityCooldown: 0,
+      abilityCooldownMax: ability?.cooldown ?? 0,
+      // Heroes start each stage with a full mana pool; others have none.
+      mana: def.maxMana ?? 0,
+      maxMana: def.maxMana ?? 0,
     });
     // A new tower can grant/receive adjacency bonuses (Better Morale).
     this.recomputeAdjacency();
@@ -663,6 +695,202 @@ export class GameEngine {
   }
 
   /**
+   * Fire a deployed tower's player-activated ability (the Blade's Cyclone Slash).
+   * Returns true if it fired. Fails when the battle isn't in progress, the tower
+   * has no ability unlocked, or it's still recharging. On success the ability
+   * resolves immediately and its cooldown is armed.
+   */
+  activateAbility(uid: number): boolean {
+    if (this.outcome !== 'playing') return false;
+    const t = this.towers.find((x) => x.uid === uid);
+    if (!t || !t.ability) return false;
+    if (t.abilityCooldown > 0) return false;
+    // Abilities are paid for in mana; can't cast without enough in the pool.
+    const manaCost = t.ability.manaCost ?? 0;
+    if (t.mana < manaCost) return false;
+    switch (t.ability.id) {
+      case 'cyclone-slash':
+        this.castCycloneSlash(t);
+        break;
+      case 'quickdraw':
+        this.castQuickdraw(t);
+        break;
+      case 'mana-ray':
+        this.castManaRay(t);
+        break;
+      default:
+        return false; // unknown ability id — nothing to fire
+    }
+    t.abilityCooldown = t.abilityCooldownMax;
+    t.mana = Math.max(0, t.mana - manaCost); // spend the mana on a successful cast
+    return true;
+  }
+
+  /**
+   * Cyclone Slash: a whirlwind cut striking every living, targetable enemy within
+   * the champion's range for `damageMult`× its current damage (one crit roll for
+   * the whole spin). Paints an expanding whirlwind and a spark on each foe caught.
+   */
+  private castCycloneSlash(t: Tower): void {
+    const ability = t.ability!;
+    const crit = this.rollCrit(t);
+    const dmg = t.damage * (ability.damageMult ?? 1) * (crit ? t.critMultiplier : 1);
+    // The whirlwind spins its arcs, and the figure winds up a big swing.
+    this.cyclones.push({
+      pos: { ...t.pos },
+      radius: t.range,
+      color: t.def.visual.color,
+      ttl: CYCLONE_TIME,
+      maxTtl: CYCLONE_TIME,
+    });
+    t.attackAnim = 0.3;
+    this.sfx.push('cycloneSlash');
+    let anyLanded = false;
+    for (const e of this.enemies) {
+      if (e.dead || e.dying || e.rise > 0 || isSpeaking(e)) continue;
+      const d = Math.hypot(e.pos.x - t.pos.x, e.pos.y - t.pos.y);
+      if (d > t.range + e.def.radius) continue;
+      if (this.damageEnemy(e, dmg, t)) {
+        anyLanded = true;
+        this.bursts.push({
+          pos: { ...e.pos },
+          color: t.def.visual.color,
+          ttl: 0.28,
+          maxTtl: 0.28,
+          radius: 5,
+        });
+      }
+    }
+    if (crit && anyLanded) this.critFloater(t.pos);
+  }
+
+  /**
+   * Quickdraw (the Bow adventurer): a timed self-buff that severely hastens the
+   * champion's fire rate for a short spell. Reuses the same attack-speed buff
+   * slot as the Bard's tune (the firing cadence and the buff panel already read
+   * it), so the hero looses volleys far faster until the buff decays.
+   */
+  private castQuickdraw(t: Tower): void {
+    const ability = t.ability!;
+    // Its own buff slot (not the Bard's), so Quickdraw stacks on top of a tune.
+    t.abilitySpeedBuffMult = ability.speedMult ?? 1;
+    t.abilitySpeedBuffTimer = ability.duration ?? 0;
+    t.attackAnim = 0.2;
+    this.sfx.push('quickdraw');
+    this.floaters.push({
+      pos: { x: t.pos.x, y: t.pos.y - 16 },
+      text: 'QUICKDRAW!',
+      color: t.def.visual.color,
+      ttl: 0.9,
+      maxTtl: 0.9,
+      size: 15,
+    });
+  }
+
+  /**
+   * Mana Ray (the Mage adventurer): begin channelling a fixed beam. The aim is
+   * *locked* the instant it is cast — toward the current/last target, else the
+   * nearest foe, else straight ahead — and stays put for the whole channel,
+   * searing every enemy that walks through its line (see `updateBeam`). While it
+   * burns the champion casts no orbs. Any in-progress orb charge is dropped.
+   */
+  private castManaRay(t: Tower): void {
+    const ability = t.ability!;
+    // Resolve a locked aim point: the live target, then the last aim, then the
+    // nearest living enemy anywhere, then straight to the right.
+    const live = t.targetUid != null
+      ? this.enemies.find((e) => e.uid === t.targetUid && !e.dead)
+      : undefined;
+    let aim = live?.pos ?? t.aimTarget ?? null;
+    if (!aim) {
+      let best: Enemy | undefined;
+      let bestD = Infinity;
+      for (const e of this.enemies) {
+        if (e.dead || e.dying || e.rise > 0 || isSpeaking(e)) continue;
+        const d = Math.hypot(e.pos.x - t.pos.x, e.pos.y - t.pos.y);
+        if (d < bestD) { best = e; bestD = d; }
+      }
+      aim = best?.pos ?? { x: t.pos.x + 1, y: t.pos.y };
+    }
+    t.beamAngle = Math.atan2(aim.y - t.pos.y, aim.x - t.pos.x);
+    t.beamRange = t.range;
+    t.beamTimer = ability.duration ?? 0;
+    t.beamTickTimer = 0; // first sear lands on the first frame of the channel
+    // Drop any orb wind-up so nothing releases when the beam ends, and face the
+    // beam (the acquisition code is skipped while channelling).
+    t.charge = 0;
+    t.chargeMax = 0;
+    t.aimTarget = {
+      x: t.pos.x + Math.cos(t.beamAngle) * t.beamRange,
+      y: t.pos.y + Math.sin(t.beamAngle) * t.beamRange,
+    };
+    t.attackAnim = 0.2;
+    this.sfx.push('manaRay');
+    this.floaters.push({
+      pos: { x: t.pos.x, y: t.pos.y - 16 },
+      text: 'MANA RAY!',
+      color: t.def.visual.color,
+      ttl: 0.9,
+      maxTtl: 0.9,
+      size: 15,
+    });
+  }
+
+  /**
+   * Advance a channelling Mana Ray: run down its timer and, every `tickInterval`,
+   * sear every living, targetable enemy inside the locked beam corridor. Called
+   * from `updateTowers` in place of all normal firing while `beamTimer > 0`.
+   */
+  private updateBeam(t: Tower, dt: number): void {
+    t.beamTimer = Math.max(0, t.beamTimer - dt);
+    t.beamTickTimer -= dt;
+    if (t.beamTickTimer <= 0) {
+      this.beamTick(t);
+      const interval = t.ability?.tickInterval ?? BEAM_TICK_INTERVAL;
+      t.beamTickTimer += interval;
+    }
+  }
+
+  /**
+   * One damage tick of the Mana Ray: strike every living, targetable enemy whose
+   * body overlaps the locked beam corridor (forward of the champion, within the
+   * beam's reach and half-width). One crit roll for the whole tick.
+   */
+  private beamTick(t: Tower): void {
+    const ability = t.ability!;
+    const crit = this.rollCrit(t);
+    const dmg = t.damage * (ability.damageMult ?? 1) * (crit ? t.critMultiplier : 1);
+    const ux = Math.cos(t.beamAngle);
+    const uy = Math.sin(t.beamAngle);
+    const halfWidth = ability.aoeWidth ?? BEAM_HALF_WIDTH;
+    let anyLanded = false;
+    let lastHit: Vec2 | null = null;
+    for (const e of this.enemies) {
+      if (e.dead || e.dying || e.rise > 0 || isSpeaking(e)) continue;
+      const ex = e.pos.x - t.pos.x;
+      const ey = e.pos.y - t.pos.y;
+      const proj = ex * ux + ey * uy; // distance along the beam axis
+      if (proj < 0 || proj > t.beamRange) continue;
+      const perp = Math.abs(ex * uy - ey * ux); // distance from the axis
+      if (perp <= halfWidth + e.def.radius) {
+        if (this.damageEnemy(e, dmg, t)) {
+          anyLanded = true;
+          lastHit = e.pos;
+          this.bursts.push({
+            pos: { ...e.pos },
+            color: t.def.visual.color,
+            ttl: 0.2,
+            maxTtl: 0.2,
+            radius: 4,
+          });
+        }
+      }
+    }
+    if (crit && anyLanded && lastHit) this.critFloater(lastHit);
+    this.sfx.push('manaRayTick');
+  }
+
+  /**
    * Buy the next upgrade tier for a deployed tower. Upgrades are per-stage and
    * paid in gold. Returns true on success.
    */
@@ -716,6 +944,14 @@ export class GameEngine {
       tower.bardTargets = bard.targets;
       tower.bardSpeedMult = bard.attackSpeedMult;
       tower.bardDuration = bard.duration;
+    }
+    // A tier may unlock an activated ability (the Blade's Cyclone Slash). Grant it
+    // once, ready to use — don't re-arm the cooldown if it was already unlocked.
+    const ability = effectiveAbility(tower.def, tower.upgradeTier);
+    if (ability && !tower.ability) {
+      tower.ability = ability;
+      tower.abilityCooldownMax = ability.cooldown;
+      tower.abilityCooldown = 0;
     }
   }
 
@@ -1079,11 +1315,25 @@ export class GameEngine {
     for (const t of this.towers) {
       if (t.attackAnim > 0) t.attackAnim = Math.max(0, t.attackAnim - dt);
       if (t.throwAnim > 0) t.throwAnim = Math.max(0, t.throwAnim - dt);
+      // Recharge an activated ability (Cyclone Slash) for every tower that has one.
+      if (t.abilityCooldown > 0) t.abilityCooldown = Math.max(0, t.abilityCooldown - dt);
 
       // Decay any attack-speed buff this tower is receiving (the Bard's tune).
       if (t.attackSpeedBuffTimer > 0) {
         t.attackSpeedBuffTimer -= dt;
         if (t.attackSpeedBuffTimer <= 0) t.attackSpeedBuffMult = 1;
+      }
+      // Decay this champion's own ability haste (the Bow's Quickdraw), separately.
+      if (t.abilitySpeedBuffTimer > 0) {
+        t.abilitySpeedBuffTimer -= dt;
+        if (t.abilitySpeedBuffTimer <= 0) t.abilitySpeedBuffMult = 1;
+      }
+
+      // Channelling a Mana Ray (the Mage's beam): fire only the beam and suppress
+      // every normal attack, generator harvest and bard tune for its duration.
+      if (t.beamTimer > 0) {
+        this.updateBeam(t, dt);
+        continue;
       }
 
       // Economy units harvest gold instead of attacking.
@@ -1100,9 +1350,10 @@ export class GameEngine {
 
       if (t.cooldown > 0) t.cooldown -= dt;
 
-      // Effective firing rate, hastened while a Bard's buff is active. Every
+      // Effective firing rate, hastened by a Bard's tune *and* this champion's
+      // own ability haste (Quickdraw) — the two stack multiplicatively. Every
       // reload/preload cadence below reads this instead of the raw attack speed.
-      const rate = t.attackSpeed * t.attackSpeedBuffMult;
+      const rate = t.attackSpeed * t.attackSpeedBuffMult * t.abilitySpeedBuffMult;
 
       // Acquire the aim target EVERY frame (not just when firing) so the
       // beam / marker tracks the enemy smoothly between shots as well.
@@ -1833,6 +2084,23 @@ export class GameEngine {
       // Tally the kill for the Enemy Index (regardless of which unit landed it).
       this.enemyKills[enemy.def.id] = (this.enemyKills[enemy.def.id] ?? 0) + 1;
       if (source) this.creditKill(source, enemy);
+      // A hero that lands the killing blow drinks in the enemy's mana, refilling
+      // its pool (the only way to recover mana) up to its cap.
+      if (source && source.maxMana > 0 && (enemy.def.mana ?? 0) > 0) {
+        const before = source.mana;
+        source.mana = Math.min(source.maxMana, source.mana + (enemy.def.mana ?? 0));
+        const gained = Math.round(source.mana - before);
+        if (gained > 0) {
+          this.floaters.push({
+            pos: { x: source.pos.x, y: source.pos.y - 18 },
+            text: `+${gained} MP`,
+            color: '#5fb2ff',
+            ttl: 0.8,
+            maxTtl: 0.8,
+            size: 11,
+          });
+        }
+      }
       this.currency += enemy.def.reward;
       this.currencyEarned += enemy.def.reward;
       this.floaters.push({
@@ -1910,6 +2178,7 @@ export class GameEngine {
     this.shots = this.shots.filter((s) => (s.ttl -= dt) > 0);
     this.bursts = this.bursts.filter((b) => (b.ttl -= dt) > 0);
     this.slices = this.slices.filter((s) => (s.ttl -= dt) > 0);
+    this.cyclones = this.cyclones.filter((c) => (c.ttl -= dt) > 0);
     this.puffs = this.puffs.filter((p) => {
       p.pos.x += p.vel.x * dt;
       p.pos.y += p.vel.y * dt;

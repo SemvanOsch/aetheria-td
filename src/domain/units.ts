@@ -85,6 +85,70 @@ export interface UpgradeDef {
    * a 1.4× buff into 1.55× (see `BardDef.attackSpeedMult`).
    */
   bardSpeedBonus?: number;
+  /**
+   * If set, this tier unlocks a player-activated ability (the Blade's Cyclone
+   * Slash) instead of a passive stat change. The ability stays available from
+   * this tier onward. A tier carrying an ability typically has no stat deltas.
+   */
+  ability?: AbilityDef;
+}
+
+/**
+ * An activated ability an upgrade tier can unlock (the Blade adventurer's Cyclone
+ * Slash). Unlike passive stat upgrades, an ability is *player-triggered* from an
+ * icon in the battle HUD and then recharges. It is pure data — the engine reads
+ * these fields to resolve the cast, and the HUD reads them for the icon/tooltip.
+ */
+export interface AbilityDef {
+  /** Stable id the engine switches on to resolve the cast (e.g. 'cyclone-slash'). */
+  id: string;
+  /** Display name shown on the ability icon's tooltip. */
+  name: string;
+  /** One-line tooltip description. */
+  description: string;
+  /**
+   * Damaging abilities (the Blade's Cyclone Slash): damage dealt to every foe in
+   * range, as a multiple of the tower's *current* (upgraded, mastery-adjusted)
+   * damage — so the ability scales with the hero. Omitted for non-damaging ones.
+   */
+  damageMult?: number;
+  /**
+   * Timed self-buff abilities (the Bow's Quickdraw): the attack-speed multiplier
+   * granted to the caster while active. Omitted for abilities that aren't a buff.
+   */
+  speedMult?: number;
+  /**
+   * How long a timed ability lasts, in seconds — the buff window for a self-buff
+   * (Quickdraw), or the channel time for a beam (the Mage's Mana Ray).
+   */
+  duration?: number;
+  /**
+   * For a channelled beam ability (the Mage's Mana Ray): half-width of the beam
+   * corridor in pixels (the reach is the champion's range at cast). Falls back to
+   * a default if unset.
+   */
+  aoeWidth?: number;
+  /**
+   * For a channelled beam ability: seconds between damage ticks (the Mana Ray
+   * strikes everything in the beam once every `tickInterval`). Falls back to a
+   * default if unset.
+   */
+  tickInterval?: number;
+  /** Recharge time in seconds after each use. */
+  cooldown: number;
+  /**
+   * Mana the champion spends to cast this ability (see `UnitDef.maxMana` and
+   * `Tower.mana`). The ability can't fire without at least this much mana, and
+   * casting drains it. Omitted / 0 means the ability is free.
+   */
+  manaCost?: number;
+  /** Emoji shown on the icon when no image asset is available (fallback). */
+  icon: string;
+  /**
+   * Optional path (under `public/`) to a raster icon for the ability. When the
+   * file is present the HUD shows it; otherwise it falls back to `icon`.
+   */
+  image?: string;
 }
 
 /**
@@ -163,6 +227,13 @@ export interface UnitDef {
   cost: number;
   /** Max number of this unit that may be deployed per stage. */
   deployLimit: number;
+  /**
+   * Mana capacity for a champion with activated abilities (the three heroes). A
+   * deployed hero starts each stage with a full pool, spends it to cast abilities
+   * and refills it only by killing enemies (see `EnemyDef.mana`). Omitted / 0 for
+   * champions without a mana pool.
+   */
+  maxMana?: number;
   /** Sequential in-stage upgrade tiers (bought in order; most units have 2). */
   upgrades: UpgradeDef[];
   /** If set, the unit is a non-combat economy unit (see GeneratorDef). */
@@ -593,6 +664,19 @@ export function effectiveAoe(unit: UnitDef, tier: number): AoeType {
   return aoe;
 }
 
+/**
+ * The activated ability a tower has after buying the first `tier` upgrades: the
+ * ability granted by the most recent purchased tier that carries one (the Blade's
+ * Cyclone Slash unlocks at its tier 3), or null if none is unlocked yet.
+ */
+export function effectiveAbility(unit: UnitDef, tier: number): AbilityDef | null {
+  let ability: AbilityDef | null = null;
+  for (let i = 0; i < tier && i < unit.upgrades.length; i++) {
+    if (unit.upgrades[i].ability) ability = unit.upgrades[i].ability!;
+  }
+  return ability;
+}
+
 export interface EffectiveStats {
   damage: number;
   attackSpeed: number;
@@ -673,6 +757,8 @@ export interface UpgradeEffect {
   bardTargets?: number;
   /** Bonus to a Bard's attack-speed buff (see `UpgradeDef.bardSpeedBonus`). */
   bardSpeedBonus?: number;
+  /** Name of an activated ability this tier unlocks (the Blade's Cyclone Slash). */
+  ability?: string;
 }
 
 /**
@@ -696,6 +782,7 @@ export function upgradeEffectLabel(e: UpgradeEffect): string {
   if (e.setAoe === 'cone') {
     parts.push(`⟶ Wind Slice${e.coneAngle ? ` (${e.coneAngle}° cone)` : ' (cone)'}`);
   }
+  if (e.ability) parts.push(`⟶ ${e.ability} ability`);
   return parts.join(' · ');
 }
 

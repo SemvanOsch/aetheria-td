@@ -29,6 +29,12 @@ export const PLAYER_CHAMPION_IDS: Record<Proficiency, string> = {
   magic: 'player-magic',
 };
 
+/**
+ * Baseline mana capacity every hero champion starts a stage with. Abilities are
+ * paid for in mana and it refills only by killing enemies (see `EnemyDef.mana`).
+ */
+export const HERO_BASE_MANA = 50;
+
 /** The proficiency paths whose champion is fully implemented and grantable. */
 const IMPLEMENTED_PATHS: ReadonlySet<Proficiency> = new Set<Proficiency>([
   'sword',
@@ -122,6 +128,7 @@ function buildBladeChampion(
     damageType: 'physical',
     cost: 0, // The player's hero deploys free — it's locked to the team and unsellable.
     deployLimit: 1,
+    maxMana: HERO_BASE_MANA,
     upgrades: [
       {
         name: 'Honed Twin Blades',
@@ -137,11 +144,27 @@ function buildBladeChampion(
         attackSpeed: 0.2,
       },
       {
-        name: 'Bladestorm',
-        description: 'A whirling flurry of steel with a touch more reach.',
-        cost: 110,
-        damage: 14,
-        range: 10,
+        // Tier 3 grants no stat boost — it unlocks the Cyclone Slash *ability*,
+        // a player-triggered whirlwind cut. `cost` is read as the EXP threshold
+        // the hero pools to auto-level into this tier.
+        name: 'Cyclone Slash',
+        description:
+          'Unlocks Cyclone Slash — an activated whirlwind of steel that cuts ' +
+          'every foe within reach at once. Trigger it from its icon, then wait ' +
+          'for it to recharge.',
+        cost: 100,
+        ability: {
+          id: 'cyclone-slash',
+          name: 'Cyclone Slash',
+          description:
+            'A whirling cyclone — strikes every enemy in range for ' +
+            '1.5× the champion’s damage.',
+          damageMult: 1.5,
+          cooldown: 12,
+          manaCost: 30,
+          icon: '🌀',
+          image: '/cyclone_slash.png',
+        },
       },
     ],
     visual,
@@ -187,25 +210,42 @@ function buildBowChampion(
     burst: 3,
     cost: 0, // The player's hero deploys free — it's locked to the team and unsellable.
     deployLimit: 1,
+    maxMana: HERO_BASE_MANA,
     upgrades: [
       {
         name: 'Keen Broadheads',
         description: 'Sharper arrowheads bite deeper — every arrow of the volley.',
         cost: 30,
-        damage: 3,
+        damage: 4,
       },
       {
-        name: 'Rapid Nock',
-        description: 'A quicker draw looses volleys faster, and a little harder.',
+        name: 'Longbow Draw',
+        description: 'A fuller draw sends every arrow of the volley flying farther.',
         cost: 35,
         range: 22,
       },
       {
-        name: "Hunter's Focus",
-        description: 'A steadier eye reaches farther and strikes harder.',
-        cost: 110,
-        damage: 5,
-        range: 20,
+        // Tier 3 grants no stat boost — it unlocks the Quickdraw *ability*, a
+        // player-triggered burst of blistering fire speed. `cost` is read as the
+        // EXP threshold the hero pools to auto-level into this tier.
+        name: 'Quickdraw',
+        description:
+          'Unlocks Quickdraw — an activated burst of blistering draw speed, ' +
+          'loosing volleys far faster for a short spell. Trigger it from its ' +
+          'icon, then wait for it to recharge.',
+        cost: 85,
+        ability: {
+          id: 'quickdraw',
+          name: 'Quickdraw',
+          description:
+            'A blur of arrows — 2.5× attack speed for 6s. Recharges over 15s.',
+          speedMult: 2.5,
+          duration: 6,
+          cooldown: 15,
+          manaCost: 25,
+          icon: '🏹',
+          image: '/quickdraw.png',
+        },
       },
     ],
     visual,
@@ -254,6 +294,7 @@ function buildMagicChampion(
     damageType: 'magic',
     cost: 0, // The player's hero deploys free — it's locked to the team and unsellable.
     deployLimit: 1,
+    maxMana: HERO_BASE_MANA,
     upgrades: [
       {
         name: 'Dense Core',
@@ -268,11 +309,30 @@ function buildMagicChampion(
         attackSpeed: 0.2,
       },
       {
-        name: 'Arcane Overflow',
-        description: 'Overcharged castings reach farther and hit harder.',
+        // Tier 3 grants no stat boost — it unlocks the Mana Ray *ability*, a
+        // channelled beam. `cost` is read as the EXP threshold the hero pools to
+        // auto-level into this tier.
+        name: 'Mana Ray',
+        description:
+          'Unlocks Mana Ray — channels a continuous beam of raw mana, locked ' +
+          'where it is first aimed, searing every foe that walks through it. ' +
+          'The mage cannot cast orbs while the beam burns.',
         cost: 110,
-        damage: 14,
-        range: 12,
+        ability: {
+          id: 'mana-ray',
+          name: 'Mana Ray',
+          description:
+            'Channels a fixed beam for 3s, striking every enemy in its line for ' +
+            '1.25× damage every 0.5s. No orb-casting while it burns.',
+          damageMult: 1.25,
+          duration: 3,
+          aoeWidth: 18,
+          tickInterval: 0.5,
+          cooldown: 14,
+          manaCost: 40,
+          icon: '🔆',
+          image: '/mana_ray.png',
+        },
       },
     ],
     visual,

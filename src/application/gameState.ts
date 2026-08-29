@@ -169,7 +169,7 @@ function normalizeAudio(raw: Partial<AudioSettings> | undefined | null): AudioSe
 }
 
 const STORAGE_KEY = 'state';
-const STARTING_GEMS = 300;
+const STARTING_GEMS = 200;
 const CURRENT_VERSION = 15;
 
 /** Maximum distinct champions the player may bring into a stage. */

@@ -36,6 +36,29 @@ interface Props {
   onRetry: () => void;
 }
 
+/** One deployed champion's activated ability, mirrored for the HUD icon. */
+interface AbilityHud {
+  /** Uid of the tower that owns the ability (target of activation). */
+  uid: number;
+  name: string;
+  description: string;
+  /** Emoji fallback shown when the image asset is missing. */
+  icon: string;
+  /** Optional raster icon path (under public/). */
+  image?: string;
+  /** Seconds of cooldown left (0 = ready). */
+  cooldown: number;
+  cooldownMax: number;
+  /** Off cooldown AND enough mana to cast. */
+  ready: boolean;
+  /** Mana the cast costs. */
+  manaCost: number;
+  /** The hero's current mana pool. */
+  mana: number;
+  /** Whether the hero has enough mana to cast right now. */
+  affordable: boolean;
+}
+
 /** Snapshot of engine fields the HUD needs (updated each frame). */
 interface Hud {
   currency: number;
@@ -47,6 +70,8 @@ interface Hud {
   phase: string;
   outcome: Outcome;
   showBossBanner: boolean;
+  /** Activated abilities of deployed champions (the Blade's Cyclone Slash). */
+  abilities: AbilityHud[];
 }
 
 /** Live info for the hovered-enemy tooltip, positioned as % of the board. */
@@ -178,6 +203,25 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
       phase: engine.phase,
       outcome: engine.outcome,
       showBossBanner: now < bossBannerUntil,
+      abilities: engine.towers
+        .filter((t) => t.ability)
+        .map((t) => {
+          const manaCost = t.ability!.manaCost ?? 0;
+          const affordable = t.mana >= manaCost;
+          return {
+            uid: t.uid,
+            name: t.ability!.name,
+            description: t.ability!.description,
+            icon: t.ability!.icon,
+            image: t.ability!.image,
+            cooldown: t.abilityCooldown,
+            cooldownMax: t.abilityCooldownMax,
+            ready: t.abilityCooldown <= 0 && affordable,
+            manaCost,
+            mana: Math.floor(t.mana),
+            affordable,
+          };
+        }),
     });
 
     // Recompute the hovered-enemy tooltip from the live enemy each frame so it
@@ -360,6 +404,21 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
 
   // ---- Actions ------------------------------------------------------------
   const startWave = () => engineRef.current?.startWave();
+
+  const activateAbility = (uid: number) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const tower = engine.towers.find((t) => t.uid === uid);
+    if (engine.activateAbility(uid)) {
+      // Snap the camera's attention to the caster and refresh the panel.
+      if (tower) setSelectedTowerUid(uid);
+      refreshDeploys();
+    } else if (tower && tower.abilityCooldown > 0) {
+      showFlash(`${tower.ability?.name} is recharging…`);
+    } else if (tower && tower.mana < (tower.ability?.manaCost ?? 0)) {
+      showFlash(`Not enough mana for ${tower.ability?.name}.`);
+    }
+  };
 
   const setTargeting = (type: TargetingType) => {
     if (selectedTowerUid == null) return;
@@ -629,21 +688,51 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
               ) : (() => {
                 // Reflect the live buffs on the exact stat each one lifts: a
                 // Bard's tune → SPD/DPS, Better Morale → DMG, Guiding Gale → Range.
-                const spd = selectedTower.attackSpeed * (selectedTower.attackSpeedBuffMult ?? 1);
-                const spdBuffed = (selectedTower.attackSpeedBuffMult ?? 1) > 1;
+                const spd =
+                  selectedTower.attackSpeed *
+                  (selectedTower.attackSpeedBuffMult ?? 1) *
+                  (selectedTower.abilitySpeedBuffMult ?? 1);
+                const spdBuffed =
+                  (selectedTower.attackSpeedBuffMult ?? 1) > 1 ||
+                  (selectedTower.abilitySpeedBuffMult ?? 1) > 1;
                 const dmgBuffed = selectedTower.adjacentDamageMult > 0 && selectedTower.adjacentAllies > 0;
                 const rangeBuffed = selectedTower.rangeBuffed;
+                // DPS rises whenever damage or attack speed is lifted.
+                const dpsBuffed = dmgBuffed || spdBuffed;
+                // No in-stage crit buff exists yet; the class is wired so any future
+                // crit-boosting effect turns Crit / Crit Dmg yellow automatically.
+                const critBuffed = false;
+                // Buffed stats are recoloured by category (no trailing icons): attack
+                // speed → blue, damage → red, range → green, crit → yellow, DPS → its
+                // own violet.
                 return (
                 <div className="stat-row" style={{ marginTop: 4 }}>
-                  <div className={`s${dmgBuffed ? ' buffed morale' : ''}`}>DMG <b>{selectedTower.damage}{dmgBuffed ? ' ⚔' : ''}</b></div>
-                  <div className={`s${spdBuffed ? ' buffed' : ''}`}>SPD <b>{formatAttackSpeed(spd)}/s{spdBuffed ? ' ♪' : ''}</b></div>
-                  <div className={`s${rangeBuffed ? ' buffed gale' : ''}`}>Range <b>{selectedTower.range}{rangeBuffed ? ' 🌬' : ''}</b></div>
-                  <div className={`s${spdBuffed ? ' buffed' : ''}`}>DPS <b>{(selectedTower.damage * spd).toFixed(0)}{selectedTower.burstCount > 1 ? ` x${selectedTower.burstCount}` : ''}</b></div>
-                  <div className="s">Crit <b>{+(selectedTower.critChance * 100).toFixed(2)}%</b></div>
-                  <div className="s">Crit Dmg <b>{selectedTower.critMultiplier}×</b></div>
+                  <div className={`s${dmgBuffed ? ' buff-dmg' : ''}`}>DMG <b>{selectedTower.damage}</b></div>
+                  <div className={`s${spdBuffed ? ' buff-spd' : ''}`}>SPD <b>{formatAttackSpeed(spd)}/s</b></div>
+                  <div className={`s${rangeBuffed ? ' buff-range' : ''}`}>Range <b>{selectedTower.range}</b></div>
+                  <div className={`s${dpsBuffed ? ' buff-dps' : ''}`}>DPS <b>{(selectedTower.damage * spd).toFixed(0)}{selectedTower.burstCount > 1 ? ` x${selectedTower.burstCount}` : ''}</b></div>
+                  <div className={`s${critBuffed ? ' buff-crit' : ''}`}>Crit <b>{+(selectedTower.critChance * 100).toFixed(2)}%</b></div>
+                  <div className={`s${critBuffed ? ' buff-crit' : ''}`}>Crit Dmg <b>{selectedTower.critMultiplier}×</b></div>
                 </div>
                 );
               })()}
+
+              {selectedTower.maxMana > 0 && (
+                <div className="mana-box">
+                  <div className="mana-head">
+                    <span>✦ Mana</span>
+                    <span className="mana-val">
+                      {Math.floor(selectedTower.mana)} / {selectedTower.maxMana}
+                    </span>
+                  </div>
+                  <div className="mana-bar">
+                    <span
+                      style={{ width: `${(selectedTower.mana / selectedTower.maxMana) * 100}%` }}
+                    />
+                  </div>
+                  <div className="mana-hint">Refilled by kills · spent on abilities</div>
+                </div>
+              )}
 
               {(() => {
                 const buffs = activeBuffsFor(selectedTower);
@@ -669,9 +758,9 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                         ) : (
                           buffs.map((b, i) => (
                             <div key={i} className="buff-row">
-                              <span className="buff-ic">{b.icon}</span>
+                              <span className="buff-ic" style={b.color ? { color: b.color } : undefined}>{b.icon}</span>
                               <span className="buff-info">
-                                <b>{b.name}</b>
+                                <b style={b.color ? { color: b.color } : undefined}>{b.name}</b>
                                 <span>{b.detail}</span>
                               </span>
                             </div>
@@ -702,6 +791,8 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                   // Bard upgrades aren't stat-scaled — pass their tune deltas straight through.
                   bardTargets: up.bardTargets,
                   bardSpeedBonus: up.bardSpeedBonus,
+                  // A tier may unlock an activated ability (Cyclone Slash) rather than stats.
+                  ability: up.ability?.name,
                 });
                 // Hero champions never buy upgrades with gold — they pool wave-clear
                 // EXP and level up automatically once it reaches the next tier's cost.
@@ -776,6 +867,21 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
               )}
             </div>
           )}
+
+          {hud && hud.outcome === 'playing' && hud.abilities.length > 0 && (
+            <div className="panel panel-pad ability-panel">
+              <div className="ability-panel-head">⚡ Abilities</div>
+              <div className="ability-list">
+                {hud.abilities.map((ab) => (
+                  <AbilityButton
+                    key={ab.uid}
+                    ability={ab}
+                    onActivate={() => activateAbility(ab.uid)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </aside>
       </div>
 
@@ -784,11 +890,80 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   );
 }
 
+/**
+ * An activated-ability card in the battle side panel (the Blade's Cyclone Slash),
+ * shown beneath the champion inspector. A square icon shows the ability's art
+ * (falling back to its emoji if the raster asset is missing); while recharging it
+ * dims, sweeps a radial countdown over the icon and prints the seconds left.
+ * Clicking when ready fires the ability.
+ */
+function AbilityButton({
+  ability,
+  onActivate,
+}: {
+  ability: AbilityHud;
+  onActivate: () => void;
+}) {
+  // Whether the raster asset loaded; falls back to the emoji glyph if it 404s.
+  const [imgOk, setImgOk] = useState(true);
+  const cooling = ability.cooldown > 0;
+  const frac = ability.cooldownMax > 0 ? ability.cooldown / ability.cooldownMax : 0;
+  // Remaining sweep, drawn as a dark wedge shrinking clockwise as it recharges.
+  const deg = Math.max(0, Math.min(1, frac)) * 360;
+  // Off cooldown but too little mana: a distinct "starved" state.
+  const starved = !cooling && !ability.affordable;
+  const stateClass = ability.ready ? 'ready' : starved ? 'starved' : 'cooling';
+  const status = cooling
+    ? `Recharging · ${Math.ceil(ability.cooldown)}s`
+    : starved
+      ? `Needs ${ability.manaCost} mana (${ability.mana})`
+      : 'Ready — tap to unleash';
+  return (
+    <button
+      className={`ability-btn ${stateClass}`}
+      onClick={onActivate}
+      disabled={!ability.ready}
+      title={`${ability.name} — ${ability.manaCost} mana\n${ability.description}`}
+      aria-label={ability.name}
+    >
+      <span className="ability-icon">
+        {ability.image && imgOk ? (
+          <img src={ability.image} alt="" onError={() => setImgOk(false)} />
+        ) : (
+          <span className="ability-emoji">{ability.icon}</span>
+        )}
+        {cooling && (
+          <>
+            <span
+              className="ability-cooldown-sweep"
+              style={{
+                background: `conic-gradient(rgba(6,8,18,0.72) ${deg}deg, transparent ${deg}deg)`,
+              }}
+            />
+            <span className="ability-cooldown-num">{Math.ceil(ability.cooldown)}</span>
+          </>
+        )}
+        {ability.manaCost > 0 && (
+          <span className={`ability-mana-cost ${ability.affordable ? '' : 'short'}`}>
+            ✦{ability.manaCost}
+          </span>
+        )}
+      </span>
+      <span className="ability-text">
+        <b className="ability-name">{ability.name}</b>
+        <span className={`ability-status ${ability.ready ? 'is-ready' : ''}`}>{status}</span>
+      </span>
+    </button>
+  );
+}
+
 /** A temporary/aura effect currently modifying a deployed champion. */
 interface ActiveBuff {
   icon: string;
   name: string;
   detail: string;
+  /** Accent colour for the buff's icon + name (defaults to the theme text). */
+  color?: string;
 }
 
 /**
@@ -800,6 +975,18 @@ interface ActiveBuff {
  */
 function activeBuffsFor(t: Tower): ActiveBuff[] {
   const buffs: ActiveBuff[] = [];
+  // The champion's own ability haste (the Bow's Quickdraw) — its own symbol and a
+  // hot amber "speed" colour, distinct from the Bard's rosy tune below.
+  if ((t.abilitySpeedBuffMult ?? 1) > 1) {
+    buffs.push({
+      icon: '💨',
+      name: 'Quickdraw',
+      detail: `+${Math.round((t.abilitySpeedBuffMult - 1) * 100)}% attack speed · ${Math.ceil(
+        t.abilitySpeedBuffTimer,
+      )}s left`,
+      color: '#ffa83d',
+    });
+  }
   if ((t.attackSpeedBuffMult ?? 1) > 1) {
     buffs.push({
       icon: '🎵',
