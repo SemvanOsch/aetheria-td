@@ -301,6 +301,16 @@ const PROP_DRAWERS: Record<
   fountain: (c, x, y) => drawFountain(c, x, y),
   house: (c, x, y) => drawHouse(c, x, y),
   castle: (c, x, y) => drawCastle(c, x, y),
+  // --- Capital props ---
+  well: (c, x, y) => drawWell(c, x, y),
+  // 2×1: centre sits half a cell right of the anchor cell's centre.
+  marketStall: (c, x, y) => drawMarketStall(c, x + TILE / 2, y),
+  lamppost: (c, x, y) => drawLamppost(c, x, y),
+  tree: (c, x, y) => drawTree(c, x, y),
+  hedge: (c, x, y) => drawHedge(c, x, y),
+  cart: (c, x, y) => drawCart(c, x + TILE / 2, y),
+  signpost: (c, x, y) => drawSignpost(c, x, y),
+  townhouse: (c, x, y) => drawTownhouse(c, x + TILE / 2, y + TILE / 2),
 };
 
 /** Draw one decorative prop of `kind` centred at (`x`,`y`). Shared with the UI. */
@@ -1235,6 +1245,417 @@ function drawCastle(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.lineTo(18, -75);
   ctx.lineTo(0, -70);
   ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/** A stone village well with a shingled roof and a bucket on a rope. */
+function drawWell(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.save();
+  ctx.translate(x, y);
+  // Ground shadow.
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(0, 20, 22, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Circular stone rim.
+  ctx.fillStyle = '#7d8792';
+  ctx.beginPath();
+  ctx.ellipse(0, 12, 20, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#20262e';
+  ctx.beginPath();
+  ctx.ellipse(0, 11, 14, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Stone coursing on the rim.
+  ctx.strokeStyle = 'rgba(30,36,44,0.4)';
+  ctx.lineWidth = 1;
+  for (const a of [-1, -0.4, 0.4, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(a * 18, 6);
+    ctx.lineTo(a * 15, 15);
+    ctx.stroke();
+  }
+  // Two upright posts.
+  ctx.fillStyle = '#6e4a26';
+  ctx.fillRect(-18, -30, 5, 34);
+  ctx.fillRect(13, -30, 5, 34);
+  // Shingled peaked roof.
+  const rg = ctx.createLinearGradient(0, -44, 0, -26);
+  rg.addColorStop(0, '#7a2f2a');
+  rg.addColorStop(1, '#5a221e');
+  ctx.fillStyle = rg;
+  ctx.beginPath();
+  ctx.moveTo(-26, -26);
+  ctx.lineTo(0, -46);
+  ctx.lineTo(26, -26);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#3f1714';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // Crossbar + bucket on a rope.
+  ctx.fillStyle = '#4a3320';
+  ctx.fillRect(-16, -26, 32, 4);
+  ctx.strokeStyle = '#c9b48c';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, -22);
+  ctx.lineTo(0, -6);
+  ctx.stroke();
+  ctx.fillStyle = '#5a3a1e';
+  roundRect(ctx, -6, -6, 12, 9, 2);
+  ctx.fill();
+  ctx.fillStyle = '#3a2a1c';
+  ctx.fillRect(-6, -6, 12, 2);
+  ctx.restore();
+}
+
+/**
+ * A market stall: a striped-awning trestle piled with produce. Footprint is 2×1
+ * (anchor is the left cell), so its centre sits half a cell right of the anchor.
+ */
+function drawMarketStall(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.save();
+  ctx.translate(x, y);
+  // Ground shadow.
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  roundRect(ctx, -40, 16, 80, 10, 5);
+  ctx.fill();
+  // Back support posts.
+  ctx.fillStyle = '#5a3a1e';
+  ctx.fillRect(-38, -34, 5, 52);
+  ctx.fillRect(33, -34, 5, 52);
+  // Counter / table.
+  ctx.fillStyle = '#7a5230';
+  roundRect(ctx, -40, 2, 80, 16, 3);
+  ctx.fill();
+  ctx.fillStyle = '#5f3f24';
+  ctx.fillRect(-40, 14, 80, 4);
+  // Produce piles on the counter.
+  const heap = (hx: number, col: string) => {
+    ctx.fillStyle = col;
+    for (const [dx, dy] of [[-4, 0], [4, 0], [0, -4], [-2, -1], [2, -1]] as const) {
+      ctx.beginPath();
+      ctx.arc(hx + dx, -1 + dy, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+  heap(-24, '#d24b3a');
+  heap(-2, '#e2963a');
+  heap(20, '#5fa03a');
+  // Striped awning.
+  const stripeW = 76 / 6;
+  for (let i = 0; i < 6; i++) {
+    ctx.fillStyle = i % 2 === 0 ? '#c94b3a' : '#efe6d2';
+    ctx.beginPath();
+    ctx.moveTo(-38 + i * stripeW, -34);
+    ctx.lineTo(-38 + (i + 1) * stripeW, -34);
+    ctx.lineTo(-38 + (i + 1) * stripeW, -20);
+    ctx.lineTo(-38 + i * stripeW, -20);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // Scalloped awning hem.
+  ctx.fillStyle = '#a53a2c';
+  for (let i = 0; i < 6; i++) {
+    ctx.beginPath();
+    ctx.arc(-38 + (i + 0.5) * stripeW, -20, stripeW / 2, 0, Math.PI);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** A wrought-iron street lamp with a glowing lantern head. */
+function drawLamppost(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.save();
+  ctx.translate(x, y);
+  // Ground shadow.
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(0, 22, 12, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Base + fluted post.
+  ctx.fillStyle = '#2b3038';
+  roundRect(ctx, -7, 16, 14, 8, 2);
+  ctx.fill();
+  ctx.fillStyle = '#3a414b';
+  ctx.fillRect(-3, -22, 6, 40);
+  ctx.fillStyle = '#4a525d';
+  ctx.fillRect(-3, -22, 2, 40);
+  // Scroll bracket + crossarm.
+  ctx.strokeStyle = '#2b3038';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(0, -22);
+  ctx.lineTo(0, -30);
+  ctx.stroke();
+  // Lantern housing.
+  ctx.fillStyle = '#2b3038';
+  ctx.beginPath();
+  ctx.moveTo(-9, -30);
+  ctx.lineTo(9, -30);
+  ctx.lineTo(6, -46);
+  ctx.lineTo(-6, -46);
+  ctx.closePath();
+  ctx.fill();
+  // Cap.
+  ctx.beginPath();
+  ctx.moveTo(-7, -46);
+  ctx.lineTo(7, -46);
+  ctx.lineTo(0, -53);
+  ctx.closePath();
+  ctx.fill();
+  // Warm glass glow.
+  ctx.shadowColor = '#ffca66';
+  ctx.shadowBlur = 12;
+  ctx.fillStyle = '#ffe09a';
+  roundRect(ctx, -6, -44, 12, 13, 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+/** A broad-canopied deciduous tree. */
+function drawTree(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.save();
+  ctx.translate(x, y);
+  // Ground shadow.
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(0, 22, 20, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Trunk.
+  ctx.fillStyle = '#5a3f28';
+  ctx.fillRect(-5, 0, 10, 22);
+  ctx.fillStyle = '#6e4f32';
+  ctx.fillRect(-5, 0, 4, 22);
+  // Leafy canopy — clustered blobs, darker base then lit top.
+  const blobs: [number, number, number][] = [
+    [-13, -6, 15], [13, -6, 15], [0, -18, 18], [-8, -20, 12], [9, -19, 12],
+  ];
+  ctx.fillStyle = '#2f6a2f';
+  for (const [bx, by, r] of blobs) {
+    ctx.beginPath();
+    ctx.arc(bx, by, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#3f8a3a';
+  for (const [bx, by, r] of blobs) {
+    ctx.beginPath();
+    ctx.arc(bx - 3, by - 4, r * 0.72, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Sun-dappled highlights.
+  ctx.fillStyle = 'rgba(150,210,110,0.6)';
+  for (const [hx, hy] of [[-6, -22], [6, -14], [-12, -8]] as const) {
+    ctx.beginPath();
+    ctx.arc(hx, hy, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** A neatly trimmed garden hedge. */
+function drawHedge(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.save();
+  ctx.translate(x, y);
+  // Ground shadow.
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  roundRect(ctx, -20, 12, 40, 8, 4);
+  ctx.fill();
+  // Body of the hedge — rounded top.
+  ctx.fillStyle = '#2f6a34';
+  roundRect(ctx, -20, -12, 40, 28, 10);
+  ctx.fill();
+  // Lit crown.
+  ctx.fillStyle = '#3f8a42';
+  roundRect(ctx, -18, -12, 36, 12, 8);
+  ctx.fill();
+  // Foliage dabs for texture.
+  ctx.fillStyle = 'rgba(120,180,90,0.5)';
+  for (const [dx, dy] of [[-13, -6], [-4, -8], [6, -6], [14, -5], [0, 0], [-9, 2], [10, 2]] as const) {
+    ctx.beginPath();
+    ctx.arc(dx, dy, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/**
+ * A wooden merchant's cart with a canvas cover. Footprint is 2×1 (anchor is the
+ * left cell), so its centre sits half a cell right of the anchor.
+ */
+function drawCart(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.save();
+  ctx.translate(x, y);
+  // Ground shadow.
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  roundRect(ctx, -36, 16, 72, 9, 4);
+  ctx.fill();
+  // Wheels.
+  ctx.fillStyle = '#3a2a1c';
+  for (const wx of [-22, 22]) {
+    ctx.beginPath();
+    ctx.arc(wx, 14, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#5f3f24';
+    ctx.beginPath();
+    ctx.arc(wx, 14, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#3a2a1c';
+    ctx.lineWidth = 1.5;
+    for (const a of [0, 1, 2, 3]) {
+      ctx.beginPath();
+      ctx.moveTo(wx, 14);
+      ctx.lineTo(wx + Math.cos((a * Math.PI) / 2) * 8, 14 + Math.sin((a * Math.PI) / 2) * 8);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#3a2a1c';
+  }
+  // Cart bed.
+  ctx.fillStyle = '#7a5230';
+  roundRect(ctx, -34, -2, 68, 14, 2);
+  ctx.fill();
+  ctx.fillStyle = '#5f3f24';
+  ctx.fillRect(-34, 8, 68, 4);
+  // Plank lines.
+  ctx.strokeStyle = 'rgba(50,34,20,0.4)';
+  ctx.lineWidth = 1;
+  for (const px of [-20, -6, 8, 22]) {
+    ctx.beginPath();
+    ctx.moveTo(px, -2);
+    ctx.lineTo(px, 12);
+    ctx.stroke();
+  }
+  // Canvas cover / arched tilt over the back.
+  ctx.fillStyle = '#d9cdb0';
+  ctx.beginPath();
+  ctx.moveTo(-30, -2);
+  ctx.quadraticCurveTo(-8, -30, 14, -2);
+  ctx.closePath();
+  ctx.fill();
+  // Canvas ribbing.
+  ctx.strokeStyle = 'rgba(120,105,75,0.5)';
+  ctx.lineWidth = 1;
+  for (const rx of [-18, -4, 8]) {
+    ctx.beginPath();
+    ctx.moveTo(rx, -2);
+    ctx.quadraticCurveTo(rx + 2, -18, rx + 6, -2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** A wooden signpost with two pointing direction boards. */
+function drawSignpost(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.save();
+  ctx.translate(x, y);
+  // Ground shadow.
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(0, 22, 10, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Post.
+  ctx.fillStyle = '#6e4a26';
+  ctx.fillRect(-3, -26, 6, 48);
+  ctx.fillStyle = '#5a3a1e';
+  ctx.fillRect(1, -26, 2, 48);
+  // Two arrow boards pointing opposite ways.
+  const board = (top: number, dir: number, col: string) => {
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    if (dir > 0) {
+      ctx.moveTo(-2, top);
+      ctx.lineTo(16, top);
+      ctx.lineTo(22, top + 5);
+      ctx.lineTo(16, top + 10);
+      ctx.lineTo(-2, top + 10);
+    } else {
+      ctx.moveTo(2, top);
+      ctx.lineTo(-16, top);
+      ctx.lineTo(-22, top + 5);
+      ctx.lineTo(-16, top + 10);
+      ctx.lineTo(2, top + 10);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(50,34,20,0.5)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  };
+  board(-24, 1, '#a9803f');
+  board(-8, -1, '#96703a');
+  ctx.restore();
+}
+
+/**
+ * A tall, narrow row townhouse with a steep gable. Footprint is 2×2 (anchor is
+ * the top-left cell), so its centre sits half a cell right and down.
+ */
+function drawTownhouse(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.save();
+  ctx.translate(x, y);
+  // Ground shadow.
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(0, 44, 42, 11, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Plaster wall.
+  const wg = ctx.createLinearGradient(-32, 0, 32, 0);
+  wg.addColorStop(0, '#b9a680');
+  wg.addColorStop(0.5, '#d4c39a');
+  wg.addColorStop(1, '#b9a680');
+  ctx.fillStyle = wg;
+  ctx.fillRect(-32, -22, 64, 66);
+  ctx.strokeStyle = '#5a3a24';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(-32, -22, 64, 66);
+  // Exposed corner timbers.
+  ctx.fillStyle = '#5a3a24';
+  ctx.fillRect(-32, -22, 4, 66);
+  ctx.fillRect(28, -22, 4, 66);
+  // Steep gable roof (overhangs the wall).
+  const rg = ctx.createLinearGradient(0, -58, 0, -22);
+  rg.addColorStop(0, '#66463a');
+  rg.addColorStop(1, '#48302a');
+  ctx.fillStyle = rg;
+  ctx.beginPath();
+  ctx.moveTo(-38, -20);
+  ctx.lineTo(0, -60);
+  ctx.lineTo(38, -20);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#331f1a';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // Gable window (attic).
+  ctx.fillStyle = '#ffd98a';
+  roundRect(ctx, -6, -34, 12, 12, 2);
+  ctx.fill();
+  ctx.strokeStyle = '#5a3a24';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(-6, -34, 12, 12);
+  // Upper-storey windows.
+  for (const wx of [-17, 17]) {
+    ctx.fillStyle = '#ffd98a';
+    roundRect(ctx, wx - 8, -14, 16, 16, 2);
+    ctx.fill();
+    ctx.strokeStyle = '#5a3a24';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(wx - 8, -14, 16, 16);
+    ctx.beginPath();
+    ctx.moveTo(wx, -14); ctx.lineTo(wx, 2);
+    ctx.moveTo(wx - 8, -6); ctx.lineTo(wx + 8, -6);
+    ctx.stroke();
+  }
+  // Door.
+  ctx.fillStyle = '#4a2f18';
+  roundRect(ctx, -9, 16, 18, 28, 3);
+  ctx.fill();
+  ctx.fillStyle = '#c9a24a';
+  ctx.beginPath();
+  ctx.arc(5, 30, 1.6, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }

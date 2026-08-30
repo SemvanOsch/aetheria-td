@@ -5,9 +5,11 @@ import {
   DEFAULT_BANNER_COLOR,
   DEFAULT_PATH_LAYERS,
   DEFAULT_THEME,
+  PROP_CATEGORIES,
   PROP_PALETTE,
   propFootprint,
   type DecorProp,
+  type PropCategory,
   type PropKind,
 } from '../../domain/decor';
 import { drawProp } from '../../engine/renderer';
@@ -146,6 +148,8 @@ export function LevelDesigner({ onClose }: Props) {
   const [turns, setTurns] = useState<Cell[]>([]);
   const [props, setProps] = useState<DecorProp[]>([]);
   const [tool, setTool] = useState<Tool>('path');
+  // Which prop palette tab is showing (Castle interior vs. Capital townscape).
+  const [propTab, setPropTab] = useState<PropCategory>('castle');
   const [bannerColor, setBannerColor] = useState(DEFAULT_BANNER_COLOR);
   const [copied, setCopied] = useState(false);
 
@@ -318,7 +322,7 @@ export function LevelDesigner({ onClose }: Props) {
           click again or right-click to remove one. Then Export the snippet.
         </p>
 
-        {/* Tool palette: path + decorative props. */}
+        {/* The Path tool sits above the prop tabs — it isn't a decoration. */}
         <div className="ld-tools">
           <button
             type="button"
@@ -329,7 +333,25 @@ export function LevelDesigner({ onClose }: Props) {
             <span className="ld-tool-glyph">🛣️</span>
             <span className="ld-tool-label">Path</span>
           </button>
-          {PROP_PALETTE.map((p) => (
+        </div>
+
+        {/* Prop palette, split into Castle / Capital tabs. */}
+        <div className="ld-prop-tabs" role="tablist">
+          {PROP_CATEGORIES.map((cat) => (
+            <button
+              key={cat.id}
+              type="button"
+              role="tab"
+              aria-selected={propTab === cat.id}
+              className={`ld-prop-tab${propTab === cat.id ? ' active' : ''}`}
+              onClick={() => setPropTab(cat.id)}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
+        <div className="ld-tools">
+          {PROP_PALETTE.filter((p) => p.category === propTab).map((p) => (
             <button
               key={p.kind}
               type="button"

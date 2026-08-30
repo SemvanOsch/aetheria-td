@@ -152,6 +152,8 @@ const REGULAR: Record<string, EnemyDef> = {
  * tanky wall or a fast, fragile rush boss — instead of the calculated value.
  */
 interface BossMeta {
+  /** Global level this boss belongs to (1..15). Its enemy id is `boss<level>`. */
+  level: number;
   name: string;
   icon: string;
   color: string;
@@ -187,37 +189,29 @@ interface BossMeta {
   deathLine?: string;
 }
 
-// Ordered by global level (1..15): Castle 1-5, Forest 6-10, Inn 11-15. Any stat
+// Ordered by global level. Any stat
 // field may be added to an entry to override its calculated default.
 const BOSS_META: BossMeta[] = [
-  { name: 'Captain Aldric', icon: '🗡️', color: '#c3ccdc', health: 400, speed: 40, radius: 25 },
-  { name: 'Garrick Vane', icon: '🔪', color: '#8a94a8', health: 600, speed: 60, radius: 20, dodgeChance: 0.20, mechanic: 'Evasive — sidesteps a quarter of all incoming hits, taking no damage from them.' },
-  { name: 'The Iron Warden', icon: '🛡️', color: '#c05a6a', health: 350, speed: 30, radius: 30, physicalResist: 0.4, damageAura: { reduction: 0.3, radius: 96 }, mechanic: 'Aegis aura — every other enemy near the Warden takes 30% less damage.' },
+  { level: 1, name: 'Captain Aldric', icon: '🗡️', color: '#c3ccdc', health: 400, speed: 40, radius: 25 },
+  { level: 2, name: 'Garrick Vane', icon: '🔪', color: '#8a94a8', health: 600, speed: 60, radius: 20, dodgeChance: 0.20, mechanic: 'Evasive — sidesteps a quarter of all incoming hits, taking no damage from them.' },
+  { level: 3, name: 'The Iron Warden', icon: '🛡️', color: '#c05a6a', health: 350, speed: 30, radius: 30, physicalResist: 0.4, damageAura: { reduction: 0.3, radius: 96 }, mechanic: 'Aegis aura — every other enemy near the Warden takes 30% less damage.' },
   {
+    level: 4,
     name: 'Gowzer, the Night Falcon', icon: '🦅', color: '#1b031a', health: 700, speed: 44, radius: 20, magicResist: 0.2,
     spawnLines: ['The king still has his use.', 'You shall not get past this point.'],
     deathAnimation: 'shadowSwallow',
     deathLine: 'It does not end here...',
   },
-  { name: 'King Kael', icon: '👑', color: '#e0574a', health: 900, speed: 20, radius: 30, mechanic: 'Rises from his throne as the final wave begins.' },
-  // Forest
-  { name: 'Thornmaw the Ancient', icon: '🌳', color: '#6a9a5a' },
-  { name: 'Vexia, the Spider Queen', icon: '🕷️', color: '#8a6ac4' },
-  { name: 'Grimfang Alpha', icon: '🐺', color: '#9aa0b0' },
-  { name: 'The Verdant Horror', icon: '🍄', color: '#7ac06a' },
-  { name: 'Oakheart the Wrathful', icon: '🌲', color: '#4f8a44' },
-  // Inn
-  { name: 'Barkeep Bramwell', icon: '🍺', color: '#e0a040' },
-  { name: 'The Cellar Dweller', icon: '🕸️', color: '#7a6a9a' },
-  { name: 'Madame Hex', icon: '🔮', color: '#b455ff' },
-  { name: 'The Tavern Wraith', icon: '👻', color: '#a7c4d4' },
-  { name: "Gorehollow, the Innkeeper's Bane", icon: '💀', color: '#ff6a3d' },
+  { level: 5, name: 'King Kael', icon: '👑', color: '#e0574a', health: 900, speed: 20, radius: 30, mechanic: 'Rises from his throne as the final wave begins.' },
+  // Capital
+  { level: 6, name: 'Thornmaw the Ancient', icon: '🌳', color: '#6a9a5a' },
+
 ];
 
 function buildBosses(): Record<string, EnemyDef> {
   const out: Record<string, EnemyDef> = {};
   BOSS_META.forEach((m, i) => {
-    const tier = i + 1; // 1..15
+    const tier = m.level; // global level (1..15); its enemy id is `boss<level>`
     // Calculated defaults; any field the boss meta specifies overrides these.
     out[`boss${tier}`] = {
       id: `boss${tier}`,
@@ -264,7 +258,7 @@ export function bossIdForLevel(levelId: number): string {
 export const REGULAR_ENEMIES: EnemyDef[] = Object.values(REGULAR);
 
 /** Every boss, ordered by level (boss1..boss15) — for the Enemy Index. */
-export const BOSS_ENEMIES: EnemyDef[] = BOSS_META.map((_, i) => ENEMIES[`boss${i + 1}`]);
+export const BOSS_ENEMIES: EnemyDef[] = BOSS_META.map((m) => ENEMIES[`boss${m.level}`]);
 
 /** Whether an enemy has any physical or magic resistance worth showing. */
 export function hasResistance(def: EnemyDef): boolean {

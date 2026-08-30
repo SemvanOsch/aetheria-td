@@ -38,7 +38,23 @@ export type PropKind =
   | 'statue'
   | 'fountain'
   | 'house'
-  | 'castle';
+  | 'castle'
+  // Capital props: the townscape that surrounds the castle.
+  | 'well'
+  | 'marketStall'
+  | 'lamppost'
+  | 'tree'
+  | 'hedge'
+  | 'townhouse'
+  | 'cart'
+  | 'signpost';
+
+/**
+ * Which Level Designer palette tab a prop lives under: `castle` for the keep's
+ * interior fittings and fortifications, `capital` for the town that surrounds
+ * it. Purely an authoring grouping — the renderer treats all kinds alike.
+ */
+export type PropCategory = 'castle' | 'capital';
 
 /**
  * A single placed prop. `col`/`row` is the board cell it sits on; it must be a
@@ -56,30 +72,48 @@ export interface DecorProp {
 export interface PropInfo {
   kind: PropKind;
   label: string;
+  /** Which palette tab the prop belongs to (castle interior vs. capital town). */
+  category: PropCategory;
   /** Default colour for kinds that take one (banner). */
   color?: string;
 }
 
+/** Human labels + display order for the Level Designer's prop tabs. */
+export const PROP_CATEGORIES: { id: PropCategory; label: string }[] = [
+  { id: 'castle', label: '🏰 Castle' },
+  { id: 'capital', label: '🏙️ Capital' },
+];
+
 /** The ordered prop palette the Level Designer offers. */
 export const PROP_PALETTE: PropInfo[] = [
-  { kind: 'pillar', label: 'Pillar' },
-  { kind: 'torch', label: 'Torch' },
-  { kind: 'throne', label: 'Throne' },
-  { kind: 'chandelier', label: 'Chandelier' },
-  { kind: 'banner', label: 'Banner', color: '#8e1f2d' },
-  { kind: 'diningTable', label: 'Table' },
-  { kind: 'bed', label: 'Bed' },
-  { kind: 'chest', label: 'Chest' },
-  { kind: 'gate', label: 'Gate' },
-  { kind: 'battlements', label: 'Battlements' },
-  { kind: 'barrel', label: 'Barrel' },
-  { kind: 'crate', label: 'Crate' },
-  { kind: 'weaponRack', label: 'Weapon Rack' },
-  { kind: 'bookshelf', label: 'Bookshelf' },
-  { kind: 'statue', label: 'Statue' },
-  { kind: 'fountain', label: 'Fountain' },
-  { kind: 'house', label: 'House' },
-  { kind: 'castle', label: 'Castle' },
+  // --- Castle: interior fittings & fortifications ---
+  { kind: 'pillar', label: 'Pillar', category: 'castle' },
+  { kind: 'torch', label: 'Torch', category: 'castle' },
+  { kind: 'throne', label: 'Throne', category: 'castle' },
+  { kind: 'chandelier', label: 'Chandelier', category: 'castle' },
+  { kind: 'banner', label: 'Banner', category: 'castle', color: '#8e1f2d' },
+  { kind: 'diningTable', label: 'Table', category: 'castle' },
+  { kind: 'bed', label: 'Bed', category: 'castle' },
+  { kind: 'chest', label: 'Chest', category: 'castle' },
+  { kind: 'gate', label: 'Gate', category: 'castle' },
+  { kind: 'battlements', label: 'Battlements', category: 'castle' },
+  { kind: 'barrel', label: 'Barrel', category: 'castle' },
+  { kind: 'crate', label: 'Crate', category: 'castle' },
+  { kind: 'weaponRack', label: 'Weapon Rack', category: 'castle' },
+  { kind: 'bookshelf', label: 'Bookshelf', category: 'castle' },
+  // --- Capital: the town surrounding the castle ---
+  { kind: 'well', label: 'Well', category: 'capital' },
+  { kind: 'marketStall', label: 'Market Stall', category: 'capital' },
+  { kind: 'lamppost', label: 'Lamppost', category: 'capital' },
+  { kind: 'tree', label: 'Tree', category: 'capital' },
+  { kind: 'hedge', label: 'Hedge', category: 'capital' },
+  { kind: 'cart', label: 'Cart', category: 'capital' },
+  { kind: 'signpost', label: 'Signpost', category: 'capital' },
+  { kind: 'statue', label: 'Statue', category: 'capital' },
+  { kind: 'fountain', label: 'Fountain', category: 'capital' },
+  { kind: 'townhouse', label: 'Townhouse', category: 'capital' },
+  { kind: 'house', label: 'House', category: 'capital' },
+  { kind: 'castle', label: 'Castle', category: 'capital' },
 ];
 
 /**
@@ -109,6 +143,10 @@ export const PROP_FOOTPRINTS: Partial<
     [0, 1], [1, 1], [2, 1],
     [0, 2], [1, 2], [2, 2],
   ],
+  // Capital props with a wider-than-one footprint (anchor = top-left cell).
+  marketStall: [[0, 0], [1, 0]],
+  cart: [[0, 0], [1, 0]],
+  townhouse: [[0, 0], [1, 0], [0, 1], [1, 1]],
 };
 
 const SINGLE_CELL: ReadonlyArray<readonly [number, number]> = [[0, 0]];

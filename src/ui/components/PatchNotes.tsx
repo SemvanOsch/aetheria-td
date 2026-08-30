@@ -19,6 +19,15 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-08-30 · The Journal & The Capital',
+    changes: [
+      'The Adventurer’s Journal now opens with a written Introduction — a first-person diary recounting Aetheria’s golden age, King Kael’s turn to war two years ago, and the night the Voice of the World named you a Hero.',
+      'Journal chapters now turn page by page instead of scrolling: when a page fills, the writing pauses, and turning to the next page picks the story back up — with slightly quicker handwriting.',
+      'New realm on the world map: The Capital (🏘️) — coming soon while it’s still being built.',
+      'The Castle chapter’s description now reads “Fight your way through the castle to get to the king.”',
+    ],
+  },
+  {
     version: '2026-08-29 · Hero Abilities & Mana',
     changes: [
       'Each of your three heroes now unlocks a signature activated ability at their level-3 upgrade (in place of a stat boost): the Blade’s Cyclone Slash — a whirlwind of steel that cuts every foe in range at once; the Bow’s Quickdraw — a burst of blistering attack speed for a few seconds; and the Magic hero’s Mana Ray — a channelled beam, locked where it’s first aimed, that sears everything walking through it while the mage holds it (no orb-casting meanwhile).',

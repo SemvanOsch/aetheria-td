@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   defaultPlayerSprite,
   isValidPlayerName,
@@ -10,7 +10,7 @@ import {
 import { PlayerSprite } from './PlayerSprite';
 import { PlayerSpriteCreator } from './PlayerSpriteCreator';
 import { playIntroSound } from '../introAudio';
-import { JOURNAL_CHAPTERS, unlockedChapterCount } from '../../domain/journal';
+import { JOURNAL_CHAPTERS, chapterPageTexts, unlockedChapterCount } from '../../domain/journal';
 import {
   DEFAULT_PROFICIENCY,
   PROFICIENCIES,
@@ -50,11 +50,42 @@ type Phase = 'intro' | 'opening' | 'page' | 'closing';
 const CHAPTER_PLACEHOLDER =
   "The ink here has yet to dry. This chapter's tale will be written soon…";
 
-/** The text a chapter reader shows — its lore, or the placeholder when empty. */
-function chapterBodyText(index: number): string {
-  const body = JOURNAL_CHAPTERS[index]?.body.trim();
-  return body || CHAPTER_PLACEHOLDER;
+/**
+ * One turnable reader page. A chapter's lore is split into several of these so
+ * the player pages through it instead of scrolling; an unwritten chapter
+ * contributes a single placeholder leaf.
+ */
+interface ReaderLeaf {
+  /** Owning chapter index. */
+  chapter: number;
+  /** Page within the chapter (0-based). */
+  sub: number;
+  /** Total pages in the owning chapter. */
+  total: number;
+  /** This page's text (the placeholder when the chapter is unwritten). */
+  text: string;
+  /** True when the chapter has no lore yet (renders the placeholder styling). */
+  isEmpty: boolean;
 }
+
+/** Flatten the first `count` chapters into the reader's page sequence. */
+function buildLeaves(count: number): ReaderLeaf[] {
+  const leaves: ReaderLeaf[] = [];
+  for (let c = 0; c < count; c++) {
+    const pages = chapterPageTexts(c);
+    if (pages.length === 0) {
+      leaves.push({ chapter: c, sub: 0, total: 1, text: CHAPTER_PLACEHOLDER, isEmpty: true });
+    } else {
+      pages.forEach((text, sub) =>
+        leaves.push({ chapter: c, sub, total: pages.length, text, isEmpty: false }),
+      );
+    }
+  }
+  return leaves;
+}
+
+/** Stable key for a leaf — remembers which pages have finished typing. */
+const leafKey = (l: { chapter: number; sub: number }) => `${l.chapter}:${l.sub}`;
 
 /**
  * First-time player introduction.
@@ -85,10 +116,12 @@ export function PlayerIntro({
   const [reading, setReading] = useState(false);
   const navigable = isReview || reading;
 
-  // Journal paging: 0 = Identification, 1 = Chapters index, 2+ = a chapter reader
-  // (page 2 + chapterIndex). Only unlocked chapters are reachable.
+  // Journal paging: 0 = Identification, 1 = Chapters index, 2+ = a reader leaf.
+  // Chapters are split into several turnable leaves (see buildLeaves), so page
+  // 2 + leafIndex reads the flat sequence across all unlocked chapters.
   const unlockedChapters = navigable ? unlockedChapterCount(stagesCleared) : 0;
-  const lastPage = navigable ? 1 + unlockedChapters : 0;
+  const leaves = useMemo(() => buildLeaves(unlockedChapters), [unlockedChapters]);
+  const lastPage = navigable ? 1 + leaves.length : 0;
   const [page, setPage] = useState(0);
 
   const turnPage = (dir: 'next' | 'prev') => {
@@ -100,8 +133,10 @@ export function PlayerIntro({
 
   const openChapter = (chapterIndex: number) => {
     if (chapterIndex >= unlockedChapters) return;
+    const leafIdx = leaves.findIndex((l) => l.chapter === chapterIndex);
+    if (leafIdx < 0) return;
     playIntroSound('pageTurn');
-    setPage(2 + chapterIndex);
+    setPage(2 + leafIdx);
   };
 
   // Portrait state: the confirmed sprite, plus a transient "ink drawing itself"
@@ -130,12 +165,22 @@ export function PlayerIntro({
   const [sealed, setSealed] = useState(isReview);
   const [fading, setFading] = useState(false);
 
-  // Chapter lore is typed out letter-by-letter the *first* time each chapter is
-  // opened; already-seen chapters render instantly. `revealed` remembers which
-  // chapters have finished typing; `typeCount` drives the currently-typing one.
-  const [revealed, setRevealed] = useState<Set<number>>(() => new Set(readChapters ?? []));
+  // Chapter lore is typed out letter-by-letter the *first* time each page is
+  // opened; already-seen pages render instantly. `revealedLeaves` remembers
+  // which reader pages have finished typing (keyed by leafKey); `typeCount`
+  // drives the currently-typing one. A fully-read chapter (from readChapters)
+  // marks all of its leaves revealed up front.
+  const [revealedLeaves, setRevealedLeaves] = useState<Set<string>>(() => {
+    const read = new Set(readChapters ?? []);
+    const set = new Set<string>();
+    buildLeaves(unlockedChapterCount(stagesCleared)).forEach((l) => {
+      if (read.has(l.chapter)) set.add(leafKey(l));
+    });
+    return set;
+  });
   const [typeCount, setTypeCount] = useState(0);
-  const currentChapter = page >= 2 ? page - 2 : null;
+  const currentLeafIndex = page >= 2 ? page - 2 : null;
+  const currentLeaf = currentLeafIndex != null ? leaves[currentLeafIndex] ?? null : null;
 
   const nameInputRef = useRef<HTMLInputElement>(null);
   const timers = useRef<number[]>([]);
@@ -291,11 +336,13 @@ export function PlayerIntro({
     });
   };
 
-  // Type the chapter's lore out letter-by-letter the first time it's opened.
+  // Type the current page's lore out letter-by-letter the first time it's
+  // opened. Reaching the last page of a chapter fires onChapterRead once.
   useEffect(() => {
-    if (currentChapter == null) return;
-    const text = chapterBodyText(currentChapter);
-    if (revealed.has(currentChapter)) {
+    if (currentLeaf == null) return;
+    const key = leafKey(currentLeaf);
+    const text = currentLeaf.text;
+    if (revealedLeaves.has(key)) {
       setTypeCount(text.length);
       return;
     }
@@ -307,18 +354,18 @@ export function PlayerIntro({
       setTypeCount(count);
       if (count % 3 === 0) playIntroSound('quill');
       if (count >= text.length) {
-        setRevealed((prev) => new Set(prev).add(currentChapter));
-        onChapterRead?.(currentChapter);
+        setRevealedLeaves((prev) => new Set(prev).add(key));
+        if (currentLeaf.sub === currentLeaf.total - 1) onChapterRead?.(currentLeaf.chapter);
         return;
       }
-      id = window.setTimeout(step, 36);
+      id = window.setTimeout(step, 26);
     };
-    id = window.setTimeout(step, 260);
+    id = window.setTimeout(step, 220);
     timers.current.push(id);
     return () => clearTimeout(id);
-    // Intentionally keyed only on the chapter: `revealed` is read once at entry.
+    // Intentionally keyed only on the page: `revealedLeaves` is read once at entry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentChapter]);
+  }, [page]);
 
   // --- Dismiss the journal: close cinematic, then hand the finished profile to
   // the parent. Commits (onComplete) on first launch, saves edits (onClose) in
@@ -393,51 +440,51 @@ export function PlayerIntro({
                   </div>
                 </div>
               </>
-            ) : navigable && page >= 2 ? (
-              /* ---- Chapter reader ---- */
+            ) : navigable && page >= 2 && currentLeaf ? (
+              /* ---- Chapter reader (one turnable page of a chapter) ---- */
               (() => {
-                const chapter = JOURNAL_CHAPTERS[page - 2];
+                const leaf = currentLeaf;
+                const chapter = JOURNAL_CHAPTERS[leaf.chapter];
+                const key = leafKey(leaf);
+                const done = revealedLeaves.has(key);
+                const shown = done ? leaf.text : leaf.text.slice(0, typeCount);
+                const paras = shown.split(/\n\s*\n/);
                 return (
                   <>
                     <div className="book-page left" key={`ch-left-${page}`}>
                       <div className="page-flourish top">❧</div>
                       <div className="frontispiece">
                         <div className="compass-rose">
-                          {page - 2 === 0 ? '❖' : '✦'}
+                          {leaf.chapter === 0 ? '❖' : '✦'}
                         </div>
                         <div className="chapter-reader-kicker">
-                          {page - 2 === 0 ? 'The Opening Words' : `Chapter ${page - 2}`}
+                          {leaf.chapter === 0 ? 'The Opening Words' : `Chapter ${leaf.chapter}`}
                         </div>
                         <div className="frontispiece-title">{chapter.title}</div>
+                        {leaf.total > 1 && (
+                          <div className="frontispiece-motto">
+                            Page {leaf.sub + 1} of {leaf.total}
+                          </div>
+                        )}
                       </div>
                       <div className="page-flourish bottom">❧</div>
                     </div>
                     <div className="book-page right" key={`ch-right-${page}`}>
                       <div className="id-header">{chapter.title}</div>
                       <div className="id-rule" />
-                      {(() => {
-                        const idx = page - 2;
-                        const fullText = chapterBodyText(idx);
-                        const done = revealed.has(idx);
-                        const shown = done ? fullText : fullText.slice(0, typeCount);
-                        const isEmpty = !chapter.body.trim();
-                        const paras = shown.split(/\n\s*\n/);
-                        return (
-                          <div className={`chapter-body ${isEmpty ? 'empty' : ''}`}>
-                            {paras.map((para, i) => (
-                              <p
-                                key={i}
-                                className={isEmpty ? 'chapter-body-empty' : undefined}
-                              >
-                                {para}
-                                {!done && i === paras.length - 1 && (
-                                  <span className="name-cursor" />
-                                )}
-                              </p>
-                            ))}
-                          </div>
-                        );
-                      })()}
+                      <div className={`chapter-body ${leaf.isEmpty ? 'empty' : ''}`}>
+                        {paras.map((para, i) => (
+                          <p
+                            key={i}
+                            className={leaf.isEmpty ? 'chapter-body-empty' : undefined}
+                          >
+                            {para}
+                            {!done && i === paras.length - 1 && (
+                              <span className="name-cursor" />
+                            )}
+                          </p>
+                        ))}
+                      </div>
                     </div>
                   </>
                 );
