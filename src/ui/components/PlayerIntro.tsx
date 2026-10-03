@@ -457,7 +457,7 @@ export function PlayerIntro({
   });
 
   return (
-    <div className={`intro-root ${fading ? 'fading' : ''}`}>
+    <div className={`intro-root ${fading ? 'fading' : ''}${isReview ? ' over-desk' : ''}`}>
       <div className="intro-motes" aria-hidden="true" />
       <div className="journal-stage">
         <div className={`journal-book phase-${phase}`}>

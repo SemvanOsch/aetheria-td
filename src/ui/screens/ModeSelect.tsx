@@ -2,6 +2,8 @@ import { Icon, type IconName } from '../components/Icon';
 
 interface Props {
   onStory: () => void;
+  /** Back to the home desk. */
+  onBack: () => void;
 }
 
 interface ModeCard {
@@ -18,10 +20,13 @@ const MODES: ModeCard[] = [
   { id: 'trials', name: 'Trials', icon: 'trophy', desc: 'Curated challenge gauntlets. Coming soon.', available: false },
 ];
 
-export function ModeSelect({ onStory }: Props) {
+export function ModeSelect({ onStory, onBack }: Props) {
   return (
     <main className="screen">
-      <div className="section-title">
+      <div className="section-title" style={{ gap: 12 }}>
+        <button className="btn ghost sort-toggle" onClick={onBack}>
+          <Icon name="back" /> Home
+        </button>
         <Icon name="swords" /> Choose a Mode <small>how do you want to play?</small>
       </div>
 

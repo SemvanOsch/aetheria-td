@@ -7,7 +7,6 @@ import { getUnit, summonableUnits } from '../../domain/units';
 import type { SummonOutcome } from '../../application/summon';
 import { UnitCard } from '../components/UnitCard';
 import { UnitSprite } from '../components/UnitSprite';
-import { Gems } from '../components/Currency';
 import { Icon } from '../components/Icon';
 import { SummonFx, type SummonPhase } from '../components/SummonFx';
 import { playSummonSound } from '../summonAudio';
@@ -21,7 +20,7 @@ const T_FLASH = 1400;
 const T_SILHOUETTE = 1520;
 const T_REVEAL = 2300;
 
-export function Summon() {
+export function Summon({ onBack }: { onBack: () => void }) {
   const { state, summon, summonCost } = useGame();
   const [phase, setPhase] = useState<SummonPhase>('idle');
   const [result, setResult] = useState<SummonOutcome | null>(null);
@@ -68,9 +67,11 @@ export function Summon() {
     <main className="screen">
       <div className="section-title" style={{ justifyContent: 'space-between' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button className="btn ghost sort-toggle" onClick={onBack}>
+            <Icon name="back" /> Home
+          </button>
           <Icon name="orb" style={{ color: 'var(--gold)' }} /> Summoning Altar
         </span>
-        <Gems amount={state.gems} />
       </div>
 
       <div className={`panel ornate summon-altar ${phase} ${result?.rarity ?? ''}`} style={style}>

@@ -298,7 +298,13 @@ export function Backdrop({ mood = 'night' }: { mood?: 'night' | 'dawn' }) {
     };
   }, [mood]);
 
-  return <canvas ref={ref} className="backdrop" aria-hidden="true" />;
+  // The canvas is overscaled under its blur; the viewport-sized wrapper clips
+  // that overscale so it never adds a scrollbar.
+  return (
+    <div className="backdrop" aria-hidden="true">
+      <canvas ref={ref} className="backdrop-canvas" />
+    </div>
+  );
 }
 
 /** The castle on its crag: keep, towers, lit windows and a beacon. */

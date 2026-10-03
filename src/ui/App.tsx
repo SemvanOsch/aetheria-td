@@ -2,13 +2,12 @@ import { useEffect, useState } from 'react';
 import { applyAudioSettings } from './audioBus';
 import { battleTrackFor, setMusicTrack } from './music';
 import { TopBar } from './components/TopBar';
-import { Home } from './screens/Home';
+import { DeskBackdrop, Home } from './screens/Home';
 import { Summon } from './screens/Summon';
 import { ModeSelect } from './screens/ModeSelect';
 import { Story } from './screens/Story';
 import { GameScreen } from './screens/GameScreen';
 import { PlayerIntro, type JournalSection } from './components/PlayerIntro';
-import { Backdrop } from './components/Backdrop';
 import { useGame } from '../application/gameContext';
 import { hasAffordableMasteryUpgrade, hasCompletedIntro } from '../application/gameState';
 import { getLevel, type SectionId } from '../domain/levels';
@@ -25,6 +24,13 @@ export function App() {
   // The journal, open on one of its bookmarks: the adventurer's own pages,
   // their champions (and team), or the bestiary. Null while it's closed.
   const [journal, setJournal] = useState<JournalSection | null>(null);
+  // Which desk object the player is coming back from, so the home screen can
+  // zoom back out from it (the orb after Summon, the map after Play).
+  const [homeFrom, setHomeFrom] = useState<'summon' | 'play' | null>(null);
+  const goHomeFrom = (from: 'summon' | 'play') => {
+    setHomeFrom(from);
+    setScreen('home');
+  };
 
   // Keep the shared audio bus in sync with the persisted volume settings, so
   // sliders in Settings take effect immediately and the saved levels apply on
@@ -62,14 +68,11 @@ export function App() {
   // From a battle result, jump straight back to the home screen.
   const goHome = () => {
     setActiveLevel(null);
-    setScreen('home');
+    goHomeFrom('play');
   };
 
   // Restart the current stage by remounting GameScreen with a fresh engine.
   const retryLevel = () => setRetryNonce((n) => n + 1);
-
-  // Highlight the "Play" tab across the whole play flow.
-  const navActive: Screen = screen === 'story' ? 'modes' : screen;
 
   // First-launch detection: with no saved adventurer, run the journal intro in
   // place of the normal shell. Completing it commits the profile, which flips
@@ -90,14 +93,10 @@ export function App() {
     <div className="app">
       {/* The living night backdrop sits behind every menu (the battle board
           paints its own world, so it's skipped there). */}
-      {screen !== 'game' && <Backdrop />}
-      {screen !== 'game' && (
-        <TopBar
-          active={navActive}
-          onNavigate={(s) => (s === 'modes' ? goPlay() : setScreen(s))}
-          onChampions={() => setJournal('champions')}
-        />
+      {screen !== 'game' && screen !== 'home' && (
+        <DeskBackdrop key={screen === 'summon' ? 'summon' : 'play'} focus={screen === 'summon' ? 'summon' : 'play'} />
       )}
+      {screen !== 'game' && <TopBar />}
 
       {screen === 'home' && (
         <Home
@@ -105,10 +104,12 @@ export function App() {
           onContinue={startLevel}
           onSummon={() => setScreen('summon')}
           onJournal={() => setJournal('profile')}
+          journalOpen={journal != null}
+          returnFrom={homeFrom}
         />
       )}
-      {screen === 'summon' && <Summon />}
-      {screen === 'modes' && <ModeSelect onStory={() => setScreen('story')} />}
+      {screen === 'summon' && <Summon onBack={() => goHomeFrom('summon')} />}
+      {screen === 'modes' && <ModeSelect onStory={() => setScreen('story')} onBack={() => goHomeFrom('play')} />}
       {screen === 'story' && (
         <Story
           section={storySection}

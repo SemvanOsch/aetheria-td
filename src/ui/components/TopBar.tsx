@@ -1,54 +1,22 @@
 import { useState } from 'react';
-import type { Screen } from '../App';
 import { useGame } from '../../application/gameContext';
 import { Gems } from './Currency';
 import { Settings } from './Settings';
 import { PatchNotes } from './PatchNotes';
-import { Icon, type IconName } from './Icon';
-import { Crest } from './Crest';
+import { Icon } from './Icon';
 
-interface Props {
-  active: Screen;
-  onNavigate: (screen: Screen) => void;
-  /** Open the journal on its Champions bookmark. */
-  onChampions: () => void;
-}
-
-const TABS: { id: Screen; label: string; icon: IconName }[] = [
-  { id: 'home', label: 'Home', icon: 'keep' },
-  { id: 'modes', label: 'Play', icon: 'swords' },
-  { id: 'summon', label: 'Summon', icon: 'orb' },
-];
-
-export function TopBar({ active, onNavigate, onChampions }: Props) {
+/**
+ * The bar across the top of every menu: just the gem purse, the patch notes
+ * and settings. Getting around happens on the screens themselves (the home
+ * desk's objects, and a back button on each destination).
+ */
+export function TopBar() {
   const { state } = useGame();
   const [showSettings, setShowSettings] = useState(false);
   const [showPatchNotes, setShowPatchNotes] = useState(false);
 
   return (
     <header className="topbar">
-      <button className="brand" onClick={() => onNavigate('home')}>
-        <Crest className="brand-crest" />
-        <span className="brand-word">Aetheria</span>
-      </button>
-      <nav>
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            className={`nav-btn ${active === t.id ? 'active' : ''}`}
-            onClick={() => onNavigate(t.id)}
-            aria-label={t.label}
-          >
-            <Icon name={t.icon} />
-            <span className="nav-label">{t.label}</span>
-          </button>
-        ))}
-        {/* Champions live in the journal now; this opens it on their bookmark. */}
-        <button className="nav-btn" onClick={onChampions} aria-label="Champions">
-          <Icon name="helm" />
-          <span className="nav-label">Champions</span>
-        </button>
-      </nav>
       <Gems amount={state.gems} />
       <button
         className="settings-btn"
