@@ -17,6 +17,7 @@ import { getUnit, summonableUnits, type UnitDef } from '../../domain/units';
 import { isPlayerChampionId } from '../../domain/playerChampion';
 import { RARITIES } from '../../domain/rarity';
 import { UnitCard } from '../components/UnitCard';
+import { Icon } from '../components/Icon';
 import { UnitSprite } from '../components/UnitSprite';
 import { ChampionDetail } from '../components/ChampionDetail';
 import { MasteryTree } from '../components/MasteryTree';
@@ -80,7 +81,7 @@ export function Collection() {
     <main className="screen">
       <div className="section-title" style={{ justifyContent: 'space-between' }}>
         <span>
-          🎴 Champions <small>{ownedCount} / {all.length} collected — tap a card for details</small>
+          <Icon name="helm" /> Champions <small>{ownedCount} / {all.length} collected — tap a card for details</small>
         </span>
         <div className="collection-controls">
           <button
@@ -88,7 +89,7 @@ export function Collection() {
             onClick={() => setPrefs({ showMasteryMarks: !showMarks })}
             title={showMarks ? 'Hide mastery-available marks' : 'Show mastery-available marks'}
           >
-            {showMarks ? '🔔 Marks On' : '🔕 Marks Off'}
+            {showMarks ? 'Marks On' : 'Marks Off'}
           </button>
           <button
             className="btn ghost sort-toggle"
@@ -102,7 +103,9 @@ export function Collection() {
 
       <div className="team-bar">
         <div className="team-bar-head">
-          <span className="team-bar-title">⚔️ Your Team</span>
+          <span className="team-bar-title">
+            <Icon name="swords" /> Your Team
+          </span>
           <span className="team-bar-count">{state.team.length - 1} / {MAX_TEAM_SIZE - 1}</span>
         </div>
         <div className="team-slots">
@@ -123,7 +126,7 @@ export function Collection() {
                   title={`${def.name} — your champion, always deployed`}
                 >
                   <span className="team-slot-ic"><UnitSprite unit={def} size={34} /></span>
-                  <span className="team-slot-lock">🔒</span>
+                  <span className="team-slot-lock"><Icon name="lock" /></span>
                 </div>
               );
             }
@@ -154,7 +157,7 @@ export function Collection() {
                 onDragEnd={endDrag}
               >
                 <span className="team-slot-ic"><UnitSprite unit={def} size={34} /></span>
-                <span className="team-slot-x">✕</span>
+                <span className="team-slot-x"><Icon name="close" /></span>
               </button>
             ) : (
               <div key={`empty-${i}`} className="team-slot empty">
@@ -192,7 +195,7 @@ export function Collection() {
               {owned && (
                 isLockedChampion(state, u.id) ? (
                   <button className="team-toggle champion locked" disabled>
-                    🔒 Champion
+                    <Icon name="lock" /> Champion
                   </button>
                 ) : (
                   <button
@@ -200,7 +203,17 @@ export function Collection() {
                     disabled={!inTeam && teamFull}
                     onClick={() => toggleTeamMember(u.id)}
                   >
-                    {inTeam ? '✓ In Team' : teamFull ? 'Team Full' : '+ Add to Team'}
+                    {inTeam ? (
+                      <>
+                        <Icon name="check" /> In Team
+                      </>
+                    ) : teamFull ? (
+                      'Team Full'
+                    ) : (
+                      <>
+                        <Icon name="plus" /> Add to Team
+                      </>
+                    )}
                   </button>
                 )
               )}

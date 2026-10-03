@@ -4,17 +4,19 @@ import { useGame } from '../../application/gameContext';
 import { Gems } from './Currency';
 import { Settings } from './Settings';
 import { PatchNotes } from './PatchNotes';
+import { Icon, type IconName } from './Icon';
+import { Crest } from './Crest';
 
 interface Props {
   active: Screen;
   onNavigate: (screen: Screen) => void;
 }
 
-const TABS: { id: Screen; label: string }[] = [
-  { id: 'home', label: 'Home' },
-  { id: 'modes', label: 'Play' },
-  { id: 'summon', label: 'Summon' },
-  { id: 'collection', label: 'Champions' },
+const TABS: { id: Screen; label: string; icon: IconName }[] = [
+  { id: 'home', label: 'Home', icon: 'keep' },
+  { id: 'modes', label: 'Play', icon: 'swords' },
+  { id: 'summon', label: 'Summon', icon: 'orb' },
+  { id: 'collection', label: 'Champions', icon: 'helm' },
 ];
 
 export function TopBar({ active, onNavigate }: Props) {
@@ -25,7 +27,8 @@ export function TopBar({ active, onNavigate }: Props) {
   return (
     <header className="topbar">
       <button className="brand" onClick={() => onNavigate('home')}>
-        <span>🛡️</span> Aetheria
+        <Crest className="brand-crest" />
+        <span className="brand-word">Aetheria</span>
       </button>
       <nav>
         {TABS.map((t) => (
@@ -33,8 +36,10 @@ export function TopBar({ active, onNavigate }: Props) {
             key={t.id}
             className={`nav-btn ${active === t.id ? 'active' : ''}`}
             onClick={() => onNavigate(t.id)}
+            aria-label={t.label}
           >
-            {t.label}
+            <Icon name={t.icon} />
+            <span className="nav-label">{t.label}</span>
           </button>
         ))}
       </nav>
@@ -45,15 +50,15 @@ export function TopBar({ active, onNavigate }: Props) {
         aria-label="Patch notes"
         title="Patch notes"
       >
-        📝
+        <Icon name="scroll" />
       </button>
       <button
-        className="settings-btn"
+        className="settings-btn gear"
         onClick={() => setShowSettings(true)}
         aria-label="Settings"
         title="Settings"
       >
-        ⚙️
+        <Icon name="gear" />
       </button>
       {showSettings && <Settings onClose={() => setShowSettings(false)} />}
       {showPatchNotes && <PatchNotes onClose={() => setShowPatchNotes(false)} />}

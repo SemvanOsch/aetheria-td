@@ -479,7 +479,6 @@ export const UNITS: Record<string, UnitDef> = {
     aoe: 'single',
     attackType: 'ranged',
     damageType: 'magic',
-    // Base magic-arrow leaps: her shaft bites one extra nearby foe on impact.
     bounces: 1,
     cost: 65,
     deployLimit: 2,

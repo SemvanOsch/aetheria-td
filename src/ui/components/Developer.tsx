@@ -4,6 +4,7 @@ import { useGame } from '../../application/gameContext';
 import { ALL_UNITS } from '../../domain/units';
 import { BOSS_ENEMIES, REGULAR_ENEMIES } from '../../domain/enemies';
 import { LevelDesigner } from '../screens/LevelDesigner';
+import { Icon } from './Icon';
 
 interface Props {
   onClose: () => void;
@@ -53,28 +54,28 @@ export function Developer({ onClose }: Props) {
   return createPortal(
     <div className="modal-backdrop" onClick={onClose}>
       <div className="panel modal settings-modal" onClick={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose} aria-label="Close">✕</button>
-        <h2>🛠️ Developer Menu</h2>
+        <button className="modal-close" onClick={onClose} aria-label="Close"><Icon name="close" /></button>
+        <h2><Icon name="hammer" /> Developer Menu</h2>
         <p className="hint" style={{ marginTop: -4 }}>
           Debug &amp; authoring tools. These aren't part of normal play.
         </p>
 
         <div className="settings-section gems">
           <div className="settings-row-title">Gems</div>
-          <p className="hint">You currently have 💎 {state.gems.toLocaleString()}.</p>
+          <p className="hint">You currently have <Icon name="gem" /> {state.gems.toLocaleString()}.</p>
           <button className="btn primary block" onClick={() => grantGems(100)}>
-            💎 +100 Gems
+            <Icon name="gem" /> +100 Gems
           </button>
         </div>
 
         <div className="settings-section">
           <div className="settings-row-title">Champion Mastery</div>
           <p className="hint">
-            Grants ⭐ {MASTERY_GRANT} skill-tree EXP to every champion, to spend
+            Grants {MASTERY_GRANT} skill-tree EXP to every champion, to spend
             in their mastery trees.
           </p>
           <button className="btn primary block" onClick={grantMasteryAll}>
-            ⭐ +{MASTERY_GRANT} EXP to All Champions
+            <Icon name="star" /> +{MASTERY_GRANT} EXP to All Champions
           </button>
         </div>
 
@@ -85,7 +86,7 @@ export function Developer({ onClose }: Props) {
             Index, to help unlock their entries.
           </p>
           <button className="btn primary block" onClick={grantKillsAll}>
-            📖 +{KILLS_GRANT} Kills to All Enemies
+            <Icon name="bestiary" /> +{KILLS_GRANT} Kills to All Enemies
           </button>
         </div>
 
@@ -96,7 +97,7 @@ export function Developer({ onClose }: Props) {
             code to paste into a level in <code>domain/levels.ts</code>.
           </p>
           <button className="btn primary block" onClick={() => setShowDesigner(true)}>
-            🗺️ Open Level Designer
+            <Icon name="flag" /> Open Level Designer
           </button>
         </div>
 
@@ -109,7 +110,7 @@ export function Developer({ onClose }: Props) {
 
           {!confirming ? (
             <button className="btn danger block" onClick={() => setConfirming(true)}>
-              🗑️ Reset Account Data
+              <Icon name="skull" /> Reset Account Data
             </button>
           ) : (
             <div className="settings-confirm">

@@ -64,6 +64,8 @@ import type {
   Cyclone,
   Enemy,
   FloatingText,
+  FxElement,
+  FxEvent,
   Outcome,
   Phase,
   Projectile,
@@ -105,6 +107,19 @@ const SELL_REFUND = 0.7;
  */
 function isHeroTower(tower: Tower): boolean {
   return tower.def.rarity === 'hero';
+}
+
+/**
+ * VFX family of a tower's attacks (cosmetic only): the Wizard's gusts read as
+ * wind, the Elf's and Mage's spells as arcane, the Bard's as holy, and every
+ * blade/arrow/bolt as steel sparks.
+ */
+function fxElementFor(tower: Tower): FxElement {
+  const shape = tower.def.visual.shape;
+  if (shape === 'wizard') return 'wind';
+  if (shape === 'elf' || shape === 'player-magic') return 'arcane';
+  if (shape === 'bard') return 'holy';
+  return tower.def.damageType === 'magic' ? 'arcane' : 'steel';
 }
 
 // ─── TUNING: End-of-wave cash reward ─────────────────────────────────────────
@@ -331,6 +346,13 @@ export class GameEngine {
    * is the audio layer's job, so this can safely fill up on busy frames.
    */
   readonly sfx: SfxName[] = [];
+  /**
+   * Cosmetic VFX events (hits, kills, blasts, casts…) — the visual twin of
+   * `sfx`. The renderer drains them each frame to spawn sparks, corpses, flashes
+   * and lights; nothing in the simulation reads them. Capped (see `emitFx`) so a
+   * headless engine nobody drains can't grow without bound.
+   */
+  readonly fx: FxEvent[] = [];
 
   private uidCounter = 1;
   private spawnQueue: ScheduledSpawn[] = [];
@@ -578,6 +600,8 @@ export class GameEngine {
     });
     // A new tower can grant/receive adjacency bonuses (Better Morale).
     this.recomputeAdjacency();
+    const placed = cellCenter(col, row);
+    this.emitFx({ kind: 'deploy', x: placed.x, y: placed.y, color: def.visual.color });
     return true;
   }
 
@@ -745,6 +769,7 @@ export class GameEngine {
     });
     t.attackAnim = 0.3;
     this.sfx.push('cycloneSlash');
+    this.emitFx({ kind: 'cast', ability: 'cyclone', x: t.pos.x, y: t.pos.y, color: t.def.visual.color, radius: t.range });
     let anyLanded = false;
     for (const e of this.enemies) {
       if (e.dead || e.dying || e.rise > 0 || isSpeaking(e)) continue;
@@ -777,6 +802,7 @@ export class GameEngine {
     t.abilitySpeedBuffTimer = ability.duration ?? 0;
     t.attackAnim = 0.2;
     this.sfx.push('quickdraw');
+    this.emitFx({ kind: 'cast', ability: 'quickdraw', x: t.pos.x, y: t.pos.y, color: t.def.visual.color, radius: 40 });
     this.floaters.push({
       pos: { x: t.pos.x, y: t.pos.y - 16 },
       text: 'QUICKDRAW!',
@@ -826,6 +852,7 @@ export class GameEngine {
     };
     t.attackAnim = 0.2;
     this.sfx.push('manaRay');
+    this.emitFx({ kind: 'cast', ability: 'manaRay', x: t.pos.x, y: t.pos.y, color: t.def.visual.color, radius: t.beamRange });
     this.floaters.push({
       pos: { x: t.pos.x, y: t.pos.y - 16 },
       text: 'MANA RAY!',
@@ -986,6 +1013,7 @@ export class GameEngine {
           size: 16,
         });
         leveled = true;
+        this.emitFx({ kind: 'cast', ability: 'levelUp', x: t.pos.x, y: t.pos.y, color: '#ffd76a', radius: 36 });
         up = nextUpgrade(t.def, t.upgradeTier);
       }
     }
@@ -1182,6 +1210,8 @@ export class GameEngine {
         deathT: 0,
       });
       if (def.boss) {
+        const at = this.positionAtDistance(this.lanes[laneIndex], 0);
+        this.emitFx({ kind: 'bossSpawn', x: at.x, y: at.y, color: def.visual.color });
         this.bossJustAppeared = true;
         this.bossHasSpawned = true;
       }
@@ -1249,6 +1279,7 @@ export class GameEngine {
         const exit = lane.waypoints[lane.waypoints.length - 1];
         // A boss reaching the base is an instant defeat, regardless of how much
         // base health is left — letting the boss through is never survivable.
+        this.emitFx({ kind: 'breach', x: exit.x, y: exit.y, boss: e.def.boss });
         if (e.def.boss) {
           this.baseHealth = 0;
           this.floaters.push({
@@ -1466,6 +1497,7 @@ export class GameEngine {
     t.genLeft -= 1;
     t.genTimer = GEN_INTERVAL;
     t.attackAnim = 0.25; // little harvest pulse
+    this.emitFx({ kind: 'cast', ability: 'harvest', x: t.pos.x, y: t.pos.y, color: '#ffd76a', radius: 24 });
     this.floaters.push({
       pos: { x: t.pos.x, y: t.pos.y - 8 },
       text: `+${t.genAmount}`,
@@ -1534,6 +1566,7 @@ export class GameEngine {
     // note that floats up from the minstrel.
     t.attackAnim = 0.4;
     this.sfx.push('bardPlay');
+    this.emitFx({ kind: 'cast', ability: 'bard', x: t.pos.x, y: t.pos.y, color: t.def.visual.color, radius: t.range });
     this.floaters.push({
       pos: { x: t.pos.x, y: t.pos.y - 16 },
       text: '♪',
@@ -1778,6 +1811,7 @@ export class GameEngine {
       if (this.damageEnemy(e, p.damage, p.source)) anyLanded = true;
     }
     if (p.crit && anyLanded) this.critFloater(pos);
+    this.emitFx({ kind: 'blast', x: pos.x, y: pos.y, radius, color: p.color, element: fxElementFor(p.source), crit: p.crit });
     // A big blast ring filling the detonation circle, plus a bright inner flash.
     this.bursts.push({
       pos: { ...pos },
@@ -1811,8 +1845,30 @@ export class GameEngine {
     return this.rng() < tower.critChance;
   }
 
+  /**
+   * Queue a cosmetic VFX event (see `fx`). Bounded: once full, further events
+   * are dropped until the renderer drains the queue, so a headless engine never
+   * leaks.
+   */
+  private emitFx(e: FxEvent): void {
+    if (this.fx.length < 400) this.fx.push(e);
+  }
+
   /** Spawn a bold "CRIT!" popup plus a spark burst at a hit position. */
   private critFloater(pos: Vec2): void {
+    // Upgrade the matching hit event (same frame, same spot) to a crit so the
+    // VFX layer can give it the bigger flash; fall back to the latest hit.
+    let latest: Extract<FxEvent, { kind: 'hit' }> | undefined;
+    for (let i = this.fx.length - 1; i >= Math.max(0, this.fx.length - 16); i--) {
+      const e = this.fx[i];
+      if (e.kind !== 'hit') continue;
+      latest ??= e;
+      if (Math.abs(e.x - pos.x) < 1.5 && Math.abs(e.y - pos.y) < 1.5) {
+        latest = e;
+        break;
+      }
+    }
+    if (latest) latest.crit = true;
     this.floaters.push({
       pos: { x: pos.x, y: pos.y - 12 },
       text: 'CRIT!',
@@ -1850,6 +1906,7 @@ export class GameEngine {
     const halfWidth = tower.def.aoeWidth ?? 14;
 
     if (isThrow) {
+      this.emitFx({ kind: 'cast', ability: 'throw', x: tower.pos.x, y: tower.pos.y, color: tower.def.visual.color, radius: range });
       this.floaters.push({
         pos: { x: tower.pos.x, y: tower.pos.y - 16 },
         text: 'THROW!',
@@ -2043,6 +2100,7 @@ export class GameEngine {
     // funnels through this choke point — melee, projectiles, line-AoE, gusts.
     if (enemy.def.dodgeChance && this.rng() < enemy.def.dodgeChance) {
       enemy.dodge = DODGE_ANIM_TIME; // trigger the sidestep-weave in the renderer
+      this.emitFx({ kind: 'dodge', x: enemy.pos.x, y: enemy.pos.y });
       this.floaters.push({
         pos: { x: enemy.pos.x, y: enemy.pos.y - 6 },
         text: 'Dodge',
@@ -2062,8 +2120,25 @@ export class GameEngine {
       (1 - enemy.wardReduction);
     enemy.health -= dealt;
     enemy.hitFlash = 0.12;
+    const from = source?.pos ?? enemy.pos;
+    const element = source ? fxElementFor(source) : 'steel';
+    this.emitFx({
+      kind: 'hit',
+      x: enemy.pos.x,
+      y: enemy.pos.y,
+      fromX: from.x,
+      fromY: from.y,
+      enemyUid: enemy.uid,
+      color: source?.def.visual.color ?? '#ffffff',
+      element,
+      crit: false,
+      melee: source?.def.attackType === 'melee',
+      amount: dealt,
+      weight: Math.min(1, dealt / Math.max(1, enemy.def.health)),
+    });
     if (enemy.health <= 0) {
       enemy.health = 0;
+      this.emitFx({ kind: 'kill', enemy, fromX: from.x, fromY: from.y, element });
       // An enemy with a special death lingers to play it out (frozen and
       // untargetable) instead of popping — victory waits until it finishes. Every
       // other enemy dies instantly as before. Rewards/kill credit bank now either

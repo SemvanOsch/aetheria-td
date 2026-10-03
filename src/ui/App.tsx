@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { applyAudioSettings } from './audioBus';
+import { battleTrackFor, setMusicTrack } from './music';
 import { TopBar } from './components/TopBar';
 import { Home } from './screens/Home';
 import { Summon } from './screens/Summon';
@@ -9,9 +10,10 @@ import { GameScreen } from './screens/GameScreen';
 import { Collection } from './screens/Collection';
 import { EnemyIndex } from './screens/EnemyIndex';
 import { PlayerIntro } from './components/PlayerIntro';
+import { Backdrop } from './components/Backdrop';
 import { useGame } from '../application/gameContext';
 import { hasCompletedIntro } from '../application/gameState';
-import type { SectionId } from '../domain/levels';
+import { getLevel, type SectionId } from '../domain/levels';
 
 export type Screen = 'home' | 'summon' | 'collection' | 'enemies' | 'modes' | 'story' | 'game';
 
@@ -32,7 +34,14 @@ export function App() {
     applyAudioSettings(state.audio);
   }, [state.audio]);
 
-  // Play always starts at the mode picker (reset any drilled-in section).
+  // Background music: the menu theme everywhere outside a battle (the journal
+  // intro included), the stage's chapter battle theme inside one.
+  const battleSection = screen === 'game' && activeLevel != null ? getLevel(activeLevel)?.section : undefined;
+  useEffect(() => {
+    setMusicTrack(battleSection ? battleTrackFor(battleSection) : 'menu');
+  }, [battleSection]);
+
+  // Play always starts at the mode picker (the campaign then opens on the latest chapter).
   const goPlay = () => {
     setStorySection(null);
     setScreen('modes');
@@ -40,10 +49,12 @@ export function App() {
 
   const startLevel = (levelId: number) => {
     setActiveLevel(levelId);
+    // Remember the chapter so leaving the battle reopens its map.
+    setStorySection(getLevel(levelId)?.section ?? null);
     setScreen('game');
   };
 
-  // Returning from a battle goes back to the section's level list.
+  // Returning from a battle goes back to the chapter's map.
   const exitLevel = () => {
     setActiveLevel(null);
     setScreen('story');
@@ -78,11 +89,15 @@ export function App() {
 
   return (
     <div className="app">
+      {/* The living night backdrop sits behind every menu (the battle board
+          paints its own world, so it's skipped there). */}
+      {screen !== 'game' && <Backdrop />}
       {screen !== 'game' && <TopBar active={navActive} onNavigate={(s) => (s === 'modes' ? goPlay() : setScreen(s))} />}
 
       {screen === 'home' && (
         <Home
           onPlay={goPlay}
+          onContinue={startLevel}
           onSummon={() => setScreen('summon')}
           onCollection={() => setScreen('collection')}
           onEnemyIndex={() => setScreen('enemies')}
@@ -97,8 +112,9 @@ export function App() {
         <Story
           section={storySection}
           onSelectSection={setStorySection}
-          onBack={() => setStorySection(null)}
           onPlay={startLevel}
+          onEditTeam={() => setScreen('collection')}
+          onBack={goPlay}
         />
       )}
       {screen === 'game' && activeLevel != null && (

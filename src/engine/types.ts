@@ -475,6 +475,69 @@ export interface Projectile {
 /** How a projectile is drawn in flight. */
 export type ProjectileStyle = 'arrow' | 'wind' | 'magic' | 'orb';
 
+/**
+ * Elemental family of an attack, for VFX only (sparks vs. gusts vs. arcane
+ * motes). Derived from the attacking champion; never read by combat.
+ */
+export type FxElement = 'steel' | 'wind' | 'arcane' | 'fire' | 'frost' | 'holy' | 'dark';
+
+/**
+ * Cosmetic battle events the engine emits for the renderer's VFX layer, the
+ * visual twin of `sfx`. Pure notifications — nothing in the simulation reads
+ * them back — so effects can react to hits/kills without the renderer
+ * re-deriving combat. The renderer drains the queue every frame; a headless
+ * engine caps it (see `GameEngine.emitFx`).
+ */
+export type FxEvent =
+  | {
+      kind: 'hit';
+      /** Where the blow landed (the enemy's position). */
+      x: number;
+      y: number;
+      /** Where it came from (attacker), for directional sparks / recoil. */
+      fromX: number;
+      fromY: number;
+      enemyUid: number;
+      color: string;
+      element: FxElement;
+      crit: boolean;
+      /** A close-quarters blow (sword/spear) — gets a slash crescent. */
+      melee: boolean;
+      /** Damage actually dealt (after resists), for scaling the impact. */
+      amount: number;
+      /** Fraction of the enemy's max health this blow took (0..1). */
+      weight: number;
+    }
+  | {
+      kind: 'kill';
+      enemy: Enemy;
+      fromX: number;
+      fromY: number;
+      element: FxElement;
+    }
+  | {
+      kind: 'blast';
+      x: number;
+      y: number;
+      radius: number;
+      color: string;
+      element: FxElement;
+      crit: boolean;
+    }
+  | {
+      kind: 'cast';
+      /** Which ability / flourish: drives the bespoke flash + light. */
+      ability: 'cyclone' | 'quickdraw' | 'manaRay' | 'bard' | 'harvest' | 'throw' | 'levelUp';
+      x: number;
+      y: number;
+      color: string;
+      radius: number;
+    }
+  | { kind: 'dodge'; x: number; y: number }
+  | { kind: 'breach'; x: number; y: number; boss: boolean }
+  | { kind: 'deploy'; x: number; y: number; color: string }
+  | { kind: 'bossSpawn'; x: number; y: number; color: string };
+
 export type Outcome = 'playing' | 'won' | 'lost';
 
 export type Phase = 'prep' | 'wave' | 'ended';

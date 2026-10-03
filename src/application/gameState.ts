@@ -144,6 +144,8 @@ export interface AudioSettings {
   master: number;
   ui: number;
   combat: number;
+  /** Background music (menu theme and chapter battle themes). */
+  music: number;
   muted: boolean;
 }
 
@@ -151,6 +153,7 @@ const DEFAULT_AUDIO: AudioSettings = {
   master: 100,
   ui: 100,
   combat: 100,
+  music: 60,
   muted: false,
 };
 
@@ -164,6 +167,7 @@ function normalizeAudio(raw: Partial<AudioSettings> | undefined | null): AudioSe
     master: lvl(raw?.master, DEFAULT_AUDIO.master),
     ui: lvl(raw?.ui, DEFAULT_AUDIO.ui),
     combat: lvl(raw?.combat, DEFAULT_AUDIO.combat),
+    music: lvl(raw?.music, DEFAULT_AUDIO.music),
     muted: raw?.muted === true,
   };
 }

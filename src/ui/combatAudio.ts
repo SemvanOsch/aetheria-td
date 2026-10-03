@@ -16,7 +16,7 @@
  */
 
 import type { SfxName } from '../engine/GameEngine';
-import { audioBus } from './audioBus';
+import { AUDIO_LEAD, audioBus } from './audioBus';
 
 // Destination node for the voice currently being scheduled — the combat
 // category output of the shared bus. Set immediately before a voice runs (all
@@ -58,7 +58,7 @@ function noiseSweep(
   const bp = ac.createBiquadFilter();
   bp.type = type;
   bp.Q.value = q;
-  const t = ac.currentTime;
+  const t = ac.currentTime + AUDIO_LEAD;
   bp.frequency.setValueAtTime(from, t);
   bp.frequency.exponentialRampToValueAtTime(Math.max(40, to), t + dur);
   const g = ac.createGain();
@@ -83,7 +83,7 @@ function toneGlide(
   const osc = ac.createOscillator();
   osc.type = type;
   const g = ac.createGain();
-  const t = ac.currentTime + delay;
+  const t = ac.currentTime + AUDIO_LEAD + delay;
   osc.frequency.setValueAtTime(from, t);
   osc.frequency.exponentialRampToValueAtTime(Math.max(30, to), t + dur);
   g.gain.setValueAtTime(0.0001, t);
@@ -213,7 +213,7 @@ export function playCombatSound(sound: SfxName): void {
   const { ac } = bus;
   const now = ac.currentTime;
   const gap = MIN_GAP[sound] ?? DEFAULT_GAP;
-  if (now - (lastPlayed[sound] ?? 0) < gap) return; // throttle bursts
+  if (now - (lastPlayed[sound] ?? -Infinity) < gap) return; // throttle bursts
   lastPlayed[sound] = now;
   dest = bus.out;
   try {

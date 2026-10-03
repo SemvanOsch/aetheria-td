@@ -27,7 +27,11 @@ import { GameEngine } from '../../engine/GameEngine';
 import { drawBoard, type RenderUiState } from '../../engine/renderer';
 import type { Outcome, Tower } from '../../engine/types';
 import { playCombatSound } from '../combatAudio';
+import { audioBus, holdAudioAwake } from '../audioBus';
+import { setMusicIntensity } from '../music';
+import { playUiSound } from '../uiAudio';
 import { UnitSprite } from '../components/UnitSprite';
+import { Icon, type IconName } from '../components/Icon';
 
 interface Props {
   levelId: number;
@@ -303,7 +307,14 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     };
     raf = requestAnimationFrame(frame);
 
-    return () => cancelAnimationFrame(raf);
+    // Keep the audio output live for the whole battle so the first hit after a
+    // quiet build phase isn't swallowed while the device wakes up.
+    const releaseAudio = holdAudioAwake();
+
+    return () => {
+      cancelAnimationFrame(raf);
+      releaseAudio();
+    };
     // Engine is created once per level mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [levelId]);
@@ -331,12 +342,14 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     uiRef.current.hoverRow = cell.row;
     const enemy = engine.enemyAt(x, y);
     hoverEnemyRef.current = enemy ? enemy.uid : null;
+    uiRef.current.hoverEnemyUid = hoverEnemyRef.current;
   };
 
   const handleLeave = () => {
     uiRef.current.hoverCol = -1;
     uiRef.current.hoverRow = -1;
     hoverEnemyRef.current = null;
+    uiRef.current.hoverEnemyUid = null;
     setTooltip(null);
   };
 
@@ -357,18 +370,22 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     if (selectedUnitId) {
       const def = getUnit(selectedUnitId)!;
       if (!engine.canDeployMore(selectedUnitId)) {
+        playUiSound('deny');
         showFlash(`Deploy limit reached (${def.deployLimit} ${def.name}s).`);
         return;
       }
       if (!engine.canPlaceAt(col, row)) {
+        playUiSound('deny');
         showFlash('Cannot build there.');
         return;
       }
       if (engine.currency < def.cost) {
+        playUiSound('deny');
         showFlash('Not enough gold to deploy.');
         return;
       }
       if (engine.placeUnit(selectedUnitId, col, row)) {
+        playUiSound('place');
         // Select the unit we just placed (leave placement mode).
         const placed = engine.towerAt(col, row);
         setSelectedUnitId(null);
@@ -393,6 +410,13 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     clearSelection();
   };
 
+  // The chapter battle theme thins out in the build phase and swells while a
+  // wave is on the board; after the battle it settles back down.
+  const musicPhase = !hud || hud.outcome !== 'playing' ? 'over' : hud.phase;
+  useEffect(() => {
+    setMusicIntensity(musicPhase === 'prep' ? 0.3 : musicPhase === 'over' ? 0.15 : 1);
+  }, [musicPhase]);
+
   // Escape also cancels the current selection.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -403,7 +427,11 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   }, []);
 
   // ---- Actions ------------------------------------------------------------
-  const startWave = () => engineRef.current?.startWave();
+  const startWave = () => {
+    // A click is the surest moment to (re)start a suspended audio context.
+    audioBus('combat');
+    engineRef.current?.startWave();
+  };
 
   const activateAbility = (uid: number) => {
     const engine = engineRef.current;
@@ -455,8 +483,8 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   return (
     <main className="game-wrap">
       <div className="game-hud">
-        <button className="btn ghost" onClick={onExit}>
-          ← Retreat
+        <button className="btn ghost sort-toggle" onClick={onExit}>
+          <Icon name="back" /> Retreat
         </button>
         <div className="hud-stat">
           <span className="lbl">Realm</span> {level.name}
@@ -479,8 +507,8 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
           </div>
           {hud?.baseHealth ?? 0}
         </div>
-        <div className="hud-stat" style={{ color: 'var(--gold)' }}>
-          🪙 {hud?.currency ?? 0}
+        <div className="hud-stat hud-gold">
+          <Icon name="coin" /> {hud?.currency ?? 0}
         </div>
         <button
           className={`btn ff-toggle ${fastForward ? 'active' : ''}`}
@@ -488,7 +516,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
           title="Fast forward (3× game speed)"
           aria-pressed={fastForward}
         >
-          ⏩ {fastForward ? '3×' : '1×'}
+          <Icon name="fast" /> {fastForward ? '3×' : '1×'}
         </button>
       </div>
 
@@ -509,7 +537,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                 style={{ left: `${tooltip.xPct}%`, top: `${tooltip.yPct}%` }}
               >
                 <div className="et-name">
-                  {tooltip.boss && '☠ '}
+                  {tooltip.boss && <Icon name="skull" />}
                   {tooltip.name}
                   {tooltip.physicalResist > 0 && (
                     <ResistShield
@@ -531,7 +559,9 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
             )}
             <div className="board-overlay">
               {hud?.showBossBanner && hud.outcome === 'playing' && (
-                <div className="boss-banner">☠ A BOSS APPROACHES ☠</div>
+                <div className="boss-banner">
+                  <Icon name="skull" /> A Boss Approaches <Icon name="skull" />
+                </div>
               )}
               {hud && hud.outcome !== 'playing' && (
                 <ResultCard
@@ -592,11 +622,18 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                           {deployed}/{def.deployLimit} deployed
                         </span>
                       </span>
-                      <span className={`cost ${affordable ? '' : 'unaffordable'}`}>{def.cost > 0 ? `🪙${def.cost}` : 'Free'}</span>
+                      <span className={`cost ${affordable ? '' : 'unaffordable'}`}>{def.cost > 0 ? (
+                          <>
+                            <Icon name="coin" />
+                            {def.cost}
+                          </>
+                        ) : (
+                          'Free'
+                        )}</span>
                       <span className="deploy-stats-tip" role="tooltip">
                         {def.generator ? (
                           <>
-                            <span className="dst-row"><span>Harvest</span><b>🪙{def.generator.amount}</b></span>
+                            <span className="dst-row"><span>Harvest</span><b><Icon name="coin" />{def.generator.amount}</b></span>
                             <span className="dst-row"><span>Harvests</span><b>{def.generator.timesPerWave}/wave</b></span>
                           </>
                         ) : def.bard ? (
@@ -625,12 +662,13 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
         <aside className="side-panel">
           {canStartWave && (
             <button className="btn primary block" onClick={startWave}>
-              {hud && hud.waveIndex === 0 ? '▶ Start Battle' : '▶ Next Wave'}
+              <Icon name="swords" />
+              {hud && hud.waveIndex === 0 ? 'Start Battle' : 'Next Wave'}
             </button>
           )}
           {hud?.phase === 'wave' && (
             <div className="panel panel-pad" style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>
-              ⚔️ Wave in progress…
+              <Icon name="swords" /> Wave in progress…
             </div>
           )}
 
@@ -672,10 +710,10 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
               </div>
               {selectedTower.def.generator ? (
                 <div className="stat-row" style={{ marginTop: 4 }}>
-                  <div className="s">Harvest <b>🪙{selectedTower.genAmount}</b></div>
+                  <div className="s">Harvest <b><Icon name="coin" />{selectedTower.genAmount}</b></div>
                   <div className="s">Per wave <b>{selectedTower.def.generator.timesPerWave}×</b></div>
                   <div className="s">Left <b>{selectedTower.genLeft} this wave</b></div>
-                  <div className="s">Total <b>🪙{selectedTower.genAmount * selectedTower.def.generator.timesPerWave}/wave</b></div>
+                  <div className="s">Total <b><Icon name="coin" />{selectedTower.genAmount * selectedTower.def.generator.timesPerWave}/wave</b></div>
                 </div>
               ) : selectedTower.bardEvery > 0 ? (
                 <div className="stat-row" style={{ marginTop: 4 }}>
@@ -720,7 +758,9 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
               {selectedTower.maxMana > 0 && (
                 <div className="mana-box">
                   <div className="mana-head">
-                    <span>✦ Mana</span>
+                    <span>
+                      <Icon name="mana" /> Mana
+                    </span>
                     <span className="mana-val">
                       {Math.floor(selectedTower.mana)} / {selectedTower.maxMana}
                     </span>
@@ -744,7 +784,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                       aria-expanded={showBuffs}
                     >
                       <span>
-                        ✨ Active Buffs
+                        <Icon name="sparkle" /> Active Buffs
                         <span className={`buffs-count ${buffs.length ? 'has' : ''}`}>
                           {buffs.length}
                         </span>
@@ -758,7 +798,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                         ) : (
                           buffs.map((b, i) => (
                             <div key={i} className="buff-row">
-                              <span className="buff-ic" style={b.color ? { color: b.color } : undefined}>{b.icon}</span>
+                              <span className="buff-ic" style={b.color ? { color: b.color } : undefined}><Icon name={b.icon} /></span>
                               <span className="buff-info">
                                 <b style={b.color ? { color: b.color } : undefined}>{b.name}</b>
                                 <span>{b.detail}</span>
@@ -777,7 +817,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                 const up = nextUpgrade(selectedTower.def, selectedTower.upgradeTier);
                 if (!up) {
                   return (
-                    <div className="upgrade-box maxed">✦ Fully upgraded (Lv {maxUpgradeTier(selectedTower.def)})</div>
+                    <div className="upgrade-box maxed"><Icon name="star" /> Fully upgraded (Lv {maxUpgradeTier(selectedTower.def)})</div>
                   );
                 }
                 const effLabel = upgradeEffectLabel({
@@ -804,7 +844,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                     <div className="upgrade-box hero-xp">
                       <div className="up-head">
                         <span>⬆ {up.name}</span>
-                        <span className="up-xp">✨ {have}/{need}</span>
+                        <span className="up-xp"><Icon name="star" /> {have}/{need}</span>
                       </div>
                       <div className="hero-xp-bar">
                         <span style={{ width: `${pct}%` }} />
@@ -828,7 +868,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                   >
                     <div className="up-head">
                       <span>⬆ {up.name}</span>
-                      <span className="up-cost">🪙{upCost}</span>
+                      <span className="up-cost"><Icon name="coin" />{upCost}</span>
                     </div>
                     <div className="up-eff">{effLabel}</div>
                   </button>
@@ -858,11 +898,11 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                   style={{ marginTop: 12 }}
                   onClick={sellSelected}
                 >
-                  Sell · +🪙{engineRef.current?.sellValue(selectedTower.uid) ?? 0}
+                  Sell · +<Icon name="coin" />{engineRef.current?.sellValue(selectedTower.uid) ?? 0}
                 </button>
               ) : (
                 <p className="hint" style={{ marginTop: 12, textAlign: 'center' }}>
-                  🔒 Your hero cannot be sold.
+                  <Icon name="lock" /> Your hero cannot be sold.
                 </p>
               )}
             </div>
@@ -870,7 +910,9 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
 
           {hud && hud.outcome === 'playing' && hud.abilities.length > 0 && (
             <div className="panel panel-pad ability-panel">
-              <div className="ability-panel-head">⚡ Abilities</div>
+              <div className="ability-panel-head">
+                <Icon name="sparkle" /> Abilities
+              </div>
               <div className="ability-list">
                 {hud.abilities.map((ab) => (
                   <AbilityButton
@@ -945,7 +987,8 @@ function AbilityButton({
         )}
         {ability.manaCost > 0 && (
           <span className={`ability-mana-cost ${ability.affordable ? '' : 'short'}`}>
-            ✦{ability.manaCost}
+            <Icon name="mana" />
+            {ability.manaCost}
           </span>
         )}
       </span>
@@ -959,7 +1002,7 @@ function AbilityButton({
 
 /** A temporary/aura effect currently modifying a deployed champion. */
 interface ActiveBuff {
-  icon: string;
+  icon: IconName;
   name: string;
   detail: string;
   /** Accent colour for the buff's icon + name (defaults to the theme text). */
@@ -979,7 +1022,7 @@ function activeBuffsFor(t: Tower): ActiveBuff[] {
   // hot amber "speed" colour, distinct from the Bard's rosy tune below.
   if ((t.abilitySpeedBuffMult ?? 1) > 1) {
     buffs.push({
-      icon: '💨',
+      icon: 'fast',
       name: 'Quickdraw',
       detail: `+${Math.round((t.abilitySpeedBuffMult - 1) * 100)}% attack speed · ${Math.ceil(
         t.abilitySpeedBuffTimer,
@@ -989,7 +1032,7 @@ function activeBuffsFor(t: Tower): ActiveBuff[] {
   }
   if ((t.attackSpeedBuffMult ?? 1) > 1) {
     buffs.push({
-      icon: '🎵',
+      icon: 'music',
       name: 'Hastened',
       detail: `+${Math.round((t.attackSpeedBuffMult - 1) * 100)}% attack speed · ${Math.ceil(
         t.attackSpeedBuffTimer,
@@ -998,7 +1041,7 @@ function activeBuffsFor(t: Tower): ActiveBuff[] {
   }
   if (t.adjacentDamageMult > 0 && t.adjacentAllies > 0) {
     buffs.push({
-      icon: '⚔️',
+      icon: 'swords',
       name: 'Better Morale',
       detail: `+${Math.round(t.adjacentDamageMult * t.adjacentAllies * 100)}% damage · ${
         t.adjacentAllies
@@ -1007,7 +1050,7 @@ function activeBuffsFor(t: Tower): ActiveBuff[] {
   }
   if (t.rangeBuffed) {
     buffs.push({
-      icon: '🌬️',
+      icon: 'target',
       name: 'Guiding Gale',
       detail: `+${Math.round(((t.rangeBuffMult ?? 1) - 1) * 100)}% attack range · from a nearby Wizard`,
     });
@@ -1033,7 +1076,9 @@ function ResultCard({
   const won = outcome === 'won';
   return (
     <div className={`panel result-card ${won ? 'win' : 'lose'}`}>
-      <h2>{won ? '🏆 Victory!' : '💀 Defeated'}</h2>
+      <h2>
+        <Icon name={won ? 'trophy' : 'skull'} /> {won ? 'Victory' : 'Defeated'}
+      </h2>
       <p style={{ color: 'var(--text-dim)' }}>
         {won
           ? 'The realm is saved. The boss lies vanquished!'
@@ -1041,11 +1086,11 @@ function ResultCard({
       </p>
       <div className="reward">
         {won && firstClear && (
-          <div style={{ color: '#6fd6ff' }}>Realm reward · 💎{gemReward}</div>
+          <div style={{ color: '#6fd6ff' }}>Realm reward · <Icon name="gem" /> {gemReward}</div>
         )}
         {won && !firstClear && (
           <div style={{ color: '#6fd6ff' }}>
-            Replay reward · 💎{REPLAY_GEM_REWARD}
+            Replay reward · <Icon name="gem" /> {REPLAY_GEM_REWARD}
           </div>
         )}
       </div>

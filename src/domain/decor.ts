@@ -17,7 +17,25 @@ export interface BoardTheme {
   groundOdd: string;
   /** Path stroke layers painted outer→inner as [colour, inset-from-TILE]. */
   path?: [string, number][];
+  /**
+   * Floor material painted over the checker colours (seeded per stage). The two
+   * ground colours become the material's base + variation tones. Omit for a
+   * plain stone floor.
+   */
+  floor?: FloorKind;
+  /** Material detail laid over the path's stroke layers (default `dirt`). */
+  pathKind?: PathKind;
 }
+
+/** Buildable-floor materials the terrain baker knows how to paint. */
+export type FloorKind = 'grass' | 'stone' | 'flagstone' | 'wood' | 'marble' | 'dirt' | 'cobble';
+
+/** Enemy-path materials (detail over the authored stroke colours). */
+export type PathKind = 'dirt' | 'carpet' | 'cobble' | 'stone';
+
+/** Designer pickers: every floor / path material, in display order. */
+export const FLOOR_KINDS: FloorKind[] = ['grass', 'stone', 'flagstone', 'wood', 'marble', 'dirt', 'cobble'];
+export const PATH_KINDS: PathKind[] = ['dirt', 'carpet', 'cobble', 'stone'];
 
 /** Every decorative prop the renderer can draw (see `drawProp`). */
 export type PropKind =

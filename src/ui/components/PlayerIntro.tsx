@@ -9,6 +9,10 @@ import {
 } from '../../domain/playerSprite';
 import { PlayerSprite } from './PlayerSprite';
 import { PlayerSpriteCreator } from './PlayerSpriteCreator';
+import { Crest } from './Crest';
+import { Icon, type IconName } from './Icon';
+import { CompassRose, CoverCorner, Flourish, PageCorners, WaxSeal } from './JournalArt';
+import type { PlayerWeapon } from '../../engine/sprites';
 import { playIntroSound } from '../introAudio';
 import { JOURNAL_CHAPTERS, chapterPageTexts, unlockedChapterCount } from '../../domain/journal';
 import {
@@ -45,6 +49,20 @@ interface Props {
 
 /** Cinematic phases: black → book opens → interactive page → book closes. */
 type Phase = 'intro' | 'opening' | 'page' | 'closing';
+
+/** The champion weapon each proficiency fights with (the plate and gear preview). */
+const WEAPON_FOR: Record<Proficiency, PlayerWeapon> = {
+  sword: 'dual-swords',
+  bow: 'bow',
+  magic: 'magic',
+};
+
+/** The journal's icon for each proficiency. */
+const PROF_ICON: Record<Proficiency, IconName> = {
+  sword: 'swords',
+  bow: 'bow',
+  magic: 'staff',
+};
 
 /** Shown in the reader for a chapter whose lore hasn't been written yet. */
 const CHAPTER_PLACEHOLDER =
@@ -124,19 +142,33 @@ export function PlayerIntro({
   const lastPage = navigable ? 1 + leaves.length : 0;
   const [page, setPage] = useState(0);
 
+  // A leaf sweeping across the spread while the content beneath it changes.
+  // Cleared on animationend, with a timer as a fallback for when the event
+  // never fires (e.g. the animation is suppressed).
+  const [turn, setTurn] = useState<{ id: number; dir: 'next' | 'prev' } | null>(null);
+  const sweepLeaf = (dir: 'next' | 'prev') => {
+    const id = Date.now();
+    setTurn({ id, dir });
+    after(900, () => setTurn((t) => (t && t.id === id ? null : t)));
+  };
+  const goToPage = (target: number) => {
+    if (target === page) return;
+    playIntroSound('pageTurn');
+    sweepLeaf(target > page ? 'next' : 'prev');
+    setPage(target);
+  };
+
   const turnPage = (dir: 'next' | 'prev') => {
     const target = dir === 'next' ? page + 1 : page - 1;
     if (target < 0 || target > lastPage) return;
-    playIntroSound('pageTurn');
-    setPage(target);
+    goToPage(target);
   };
 
   const openChapter = (chapterIndex: number) => {
     if (chapterIndex >= unlockedChapters) return;
     const leafIdx = leaves.findIndex((l) => l.chapter === chapterIndex);
     if (leafIdx < 0) return;
-    playIntroSound('pageTurn');
-    setPage(2 + leafIdx);
+    goToPage(2 + leafIdx);
   };
 
   // Portrait state: the confirmed sprite, plus a transient "ink drawing itself"
@@ -331,6 +363,7 @@ export function PlayerIntro({
     // Admire the sealed page, then open the book to the Introduction (page 2).
     after(1200, () => {
       setReading(true);
+      sweepLeaf('next');
       setPage(2);
       playIntroSound('pageTurn');
     });
@@ -396,48 +429,75 @@ export function PlayerIntro({
 
   return (
     <div className={`intro-root ${fading ? 'fading' : ''}`}>
+      <div className="intro-motes" aria-hidden="true" />
       <div className="journal-stage">
         <div className={`journal-book phase-${phase}`}>
           {/* Closed leather cover — visible before/while opening, and on close. */}
           <div className="book-cover">
-            <div className="book-cover-emblem">✦</div>
+            <div className="cover-bands" aria-hidden="true" />
+            <div className="cover-tooling" aria-hidden="true" />
+            <CoverCorner className="tl" />
+            <CoverCorner className="tr" />
+            <CoverCorner className="bl" />
+            <CoverCorner className="br" />
+            <div className="cover-medallion">
+              <Crest size={96} />
+            </div>
             <div className="book-cover-title">Adventurer&apos;s Journal</div>
+            <div className="book-cover-sub">
+              {isReview ? `kept by ${review.name}` : 'Chronicles of Aetheria'}
+            </div>
+            <div className="cover-strap" aria-hidden="true" />
           </div>
 
-          {/* The open two-page spread. */}
+          {/* The open two-page spread, on its leather boards. */}
           <div className="book-spread">
+            <div className="book-boards" aria-hidden="true" />
+            <div className="book-ribbon" aria-hidden="true" />
             {navigable && page === 1 ? (
               /* ---- Chapters index ---- */
               <>
                 <div className="book-page left" key="chapters-left">
-                  <div className="page-flourish top">❧</div>
+                  <PageCorners />
                   <div className="frontispiece">
-                    <div className="compass-rose">✧</div>
-                    <div className="frontispiece-title">Chronicles<br />of Aetheria</div>
+                    <CompassRose className="frontis-rose" />
+                    <div className="frontispiece-kicker">Being the</div>
+                    <div className="frontispiece-title">
+                      Chronicles
+                      <br />
+                      of Aetheria
+                    </div>
+                    <Flourish />
                     <div className="frontispiece-motto">
                       {unlockedChapters} {unlockedChapters === 1 ? 'chapter' : 'chapters'} written
                     </div>
                   </div>
-                  <div className="page-flourish bottom">❧</div>
+                  <div className="page-folio">{folio(1, 'left')}</div>
                 </div>
                 <div className="book-page right" key="chapters-right">
-                  <div className="id-header">Chapters</div>
-                  <div className="id-rule" />
+                  <PageCorners />
+                  <div className="id-header">Contents</div>
+                  <Flourish className="id-flourish" />
                   <div className="chapter-list">
                     {/* Only unlocked (written) chapters are shown; sealed ones
                         stay hidden until the player unlocks them. */}
-                    {JOURNAL_CHAPTERS.slice(0, unlockedChapters).map((ch, i) => (
-                      <button
-                        key={i}
-                        className="chapter-entry"
-                        onClick={() => openChapter(i)}
-                      >
-                        <span className="chapter-index">{i === 0 ? '❖' : i}</span>
-                        <span className="chapter-title">{ch.title}</span>
-                        <span className="chapter-status">›</span>
-                      </button>
-                    ))}
+                    {JOURNAL_CHAPTERS.slice(0, unlockedChapters).map((ch, i) => {
+                      const first = leaves.findIndex((l) => l.chapter === i);
+                      const read = leaves
+                        .filter((l) => l.chapter === i)
+                        .every((l) => revealedLeaves.has(leafKey(l)));
+                      return (
+                        <button key={i} className="chapter-entry" onClick={() => openChapter(i)}>
+                          <span className="chapter-index">{i === 0 ? '—' : toRoman(i)}</span>
+                          <span className="chapter-title">{ch.title}</span>
+                          {!read && <span className="chapter-new">new</span>}
+                          <span className="chapter-leader" aria-hidden="true" />
+                          <span className="chapter-page">{folio(2 + first, 'left')}</span>
+                        </button>
+                      );
+                    })}
                   </div>
+                  <div className="page-folio">{folio(1, 'right')}</div>
                 </div>
               </>
             ) : navigable && page >= 2 && currentLeaf ? (
@@ -449,42 +509,69 @@ export function PlayerIntro({
                 const done = revealedLeaves.has(key);
                 const shown = done ? leaf.text : leaf.text.slice(0, typeCount);
                 const paras = shown.split(/\n\s*\n/);
+                const dropCap = !leaf.isEmpty && leaf.sub === 0;
                 return (
                   <>
                     <div className="book-page left" key={`ch-left-${page}`}>
-                      <div className="page-flourish top">❧</div>
-                      <div className="frontispiece">
-                        <div className="compass-rose">
-                          {leaf.chapter === 0 ? '❖' : '✦'}
-                        </div>
+                      <PageCorners />
+                      <div className="frontispiece reader">
+                        <CompassRose className="frontis-rose small" />
                         <div className="chapter-reader-kicker">
-                          {leaf.chapter === 0 ? 'The Opening Words' : `Chapter ${leaf.chapter}`}
+                          {leaf.chapter === 0 ? 'The Opening Words' : `Chapter ${toRoman(leaf.chapter)}`}
                         </div>
                         <div className="frontispiece-title">{chapter.title}</div>
+                        <Flourish />
                         {leaf.total > 1 && (
                           <div className="frontispiece-motto">
                             Page {leaf.sub + 1} of {leaf.total}
                           </div>
                         )}
+                        <div className="leaf-pips" aria-hidden="true">
+                          {Array.from({ length: leaf.total }, (_, i) => (
+                            <span key={i} className={i === leaf.sub ? 'on' : ''} />
+                          ))}
+                        </div>
+                        {/* Quick contents: jump straight to any unlocked chapter. */}
+                        <nav className="mini-contents" aria-label="Chapters">
+                          <div className="mini-contents-head">Contents</div>
+                          <div className="mini-contents-list">
+                            {JOURNAL_CHAPTERS.slice(0, unlockedChapters).map((ch, i) => (
+                              <button
+                                key={i}
+                                className={`mini-contents-entry ${i === leaf.chapter ? 'current' : ''}`}
+                                onClick={() => openChapter(i)}
+                                disabled={i === leaf.chapter && leaf.sub === 0}
+                                aria-current={i === leaf.chapter ? 'true' : undefined}
+                              >
+                                <span className="mini-contents-num">{i === 0 ? '—' : toRoman(i)}</span>
+                                <span className="mini-contents-title">{ch.title}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </nav>
                       </div>
-                      <div className="page-flourish bottom">❧</div>
+                      <div className="page-folio">{folio(page, 'left')}</div>
                     </div>
                     <div className="book-page right" key={`ch-right-${page}`}>
-                      <div className="id-header">{chapter.title}</div>
-                      <div className="id-rule" />
+                      <PageCorners />
+                      <div className="id-header small">{chapter.title}</div>
+                      <Flourish className="id-flourish" />
                       <div className={`chapter-body ${leaf.isEmpty ? 'empty' : ''}`}>
                         {paras.map((para, i) => (
-                          <p
-                            key={i}
-                            className={leaf.isEmpty ? 'chapter-body-empty' : undefined}
-                          >
-                            {para}
-                            {!done && i === paras.length - 1 && (
-                              <span className="name-cursor" />
+                          <p key={i} className={leaf.isEmpty ? 'chapter-body-empty' : undefined}>
+                            {dropCap && i === 0 && para.length > 0 ? (
+                              <>
+                                <span className="drop-cap">{para.charAt(0)}</span>
+                                {para.slice(1)}
+                              </>
+                            ) : (
+                              para
                             )}
+                            {!done && i === paras.length - 1 && <span className="name-cursor" />}
                           </p>
                         ))}
                       </div>
+                      <div className="page-folio">{folio(page, 'right')}</div>
                     </div>
                   </>
                 );
@@ -492,204 +579,247 @@ export function PlayerIntro({
             ) : (
               /* ---- Identification (page 0, and the first-launch intro) ---- */
               <>
-            {/* Left page — decorative frontispiece. */}
-            <div className="book-page left">
-              <div className="page-flourish top">❧</div>
-              <div className="frontispiece">
-                <div className="compass-rose">✳</div>
-                <div className="frontispiece-title">The Adventurers&apos;<br />Guild</div>
-                <div className="frontispiece-motto">“Every legend begins<br />with a name.”</div>
-              </div>
-              <div className="page-flourish bottom">❧</div>
-            </div>
-
-            {/* Right page — the Identification form. */}
-            <div className="book-page right">
-              <div className="id-header">Adventurer Identification</div>
-              <div className="id-rule" />
-
-              <div className="id-top">
-                {/* Portrait frame (top-left). */}
-                <div className="id-portrait-block">
-                  <div className="id-label">Portrait</div>
-                  <button
-                    className={`id-portrait-frame ${portrait ? 'filled' : 'empty'} ${
-                      portraitInking ? 'inking' : ''
-                    } ${!portrait && !showCreator ? 'beckon' : ''}`}
-                    onClick={openCreator}
-                    aria-label={portrait ? 'Edit portrait' : 'Create your portrait'}
-                    disabled={writing || (sealed && !isReview)}
-                    title={isReview ? 'Tap to edit portrait' : undefined}
-                  >
-                    {portrait ? (
-                      <PlayerSprite config={portrait} size={116} label="Your portrait" />
-                    ) : (
-                      <span className="id-portrait-hint">
-                        <span className="id-portrait-plus">✎</span>
-                        <span className="id-portrait-tap">Tap to sketch</span>
-                      </span>
-                    )}
-                  </button>
-                </div>
-
-                {/* Registration details (decorative, hand-written). */}
-                <div className="id-details">
-                  <div className="id-detail-row">
-                    <span className="id-label">Guild Rank</span>
-                    <span className="id-handwritten">Novice</span>
-                  </div>
-                  <div className="id-detail-row">
-                    <span className="id-label">Registered</span>
-                    <span className="id-handwritten small">{registered}</span>
-                  </div>
-                  <div className="id-detail-row">
-                    <span className="id-label">Seal</span>
-                    <span className={`wax-seal ${sealed ? 'stamped' : ''}`}>
-                      {sealed ? '✦' : ''}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Name line. */}
-              <div className={`id-name-block ${portraitDone ? 'active' : 'locked'}`}>
-                <div className="id-label">Name</div>
-                <div className="id-name-line">
-                  {nameDone ? (
-                    isReview || !sealed ? (
-                      <button
-                        className="id-name-written final editable"
-                        onClick={editName}
-                        disabled={sealed && !isReview}
-                        title="Tap to edit name"
-                      >
-                        {writtenName}
-                        <span className="id-name-edit-pencil">✎</span>
-                      </button>
-                    ) : (
-                      <span className="id-name-written final">{writtenName}</span>
-                    )
-                  ) : writing ? (
-                    <span className="id-name-written">
-                      {displayWriting}
-                      <span className="name-cursor" />
-                    </span>
-                  ) : portraitDone ? (
-                    <div className="id-name-entry">
-                      <input
-                        ref={nameInputRef}
-                        className="id-name-input"
-                        value={nameInput}
-                        maxLength={MAX_NAME_LENGTH}
-                        placeholder="Sign your name…"
-                        onChange={(e) => {
-                          setNameInput(e.target.value);
-                          if (nameError) setNameError(false);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') submitName();
-                        }}
-                        aria-label="Adventurer name"
-                      />
-                      <button
-                        className="id-name-submit"
-                        onClick={submitName}
-                        disabled={!isValidPlayerName(nameInput)}
-                        aria-label="Ink your name"
-                        title="Ink your name"
-                      >
-                        ➜
-                      </button>
+                {/* Left page — the adventurer's plate once sketched, else the
+                    guild frontispiece. */}
+                <div className="book-page left" key="id-left">
+                  <PageCorners />
+                  {portrait && !portraitInking ? (
+                    <div className="plate">
+                      <div className="plate-kicker">Plate the First</div>
+                      <div className="plate-frame">
+                        <PlayerSprite
+                          config={portrait}
+                          size={236}
+                          idle
+                          weapon={writtenProficiency ? WEAPON_FOR[writtenProficiency] : 'none'}
+                          label={`${writtenName || 'Your adventurer'}, full portrait`}
+                        />
+                      </div>
+                      <div className="plate-caption">
+                        <span className="plate-name">{writtenName || 'An adventurer yet unnamed'}</span>
+                        <span className="plate-path">
+                          {writtenProficiency
+                            ? `${proficiencyDef(writtenProficiency).label} of the Guild`
+                            : 'Novice of the Guild'}
+                        </span>
+                      </div>
                     </div>
                   ) : (
-                    <span className="id-name-placeholder">
-                      ✒ ____________________
-                    </span>
+                    <div className="frontispiece">
+                      <div className="frontis-crest">
+                        <Crest size={104} />
+                      </div>
+                      <div className="frontispiece-kicker">The Register of the</div>
+                      <div className="frontispiece-title">
+                        Adventurers&apos;
+                        <br />
+                        Guild
+                      </div>
+                      <Flourish />
+                      <div className="frontispiece-motto">
+                        “Every legend begins
+                        <br />
+                        with a name.”
+                      </div>
+                    </div>
                   )}
+                  <div className="page-folio">{folio(0, 'left')}</div>
                 </div>
-                {nameError && <div className="id-name-error">Every adventurer needs a name.</div>}
-                {!portraitDone && !portrait && (
-                  <div className="id-name-hint">Sketch your portrait first ↑</div>
-                )}
-              </div>
 
-              {/* Proficiency — a dropdown, then handwritten like the name.
-                  Editable during the intro; fixed (read-only) in review mode. */}
-              <div className={`id-prof-block ${nameDone || isReview ? 'active' : 'locked'}`}>
-                <div className="id-label">Proficiency</div>
-                <div className="id-prof-line">
-                  {isReview && writtenProficiency ? (
-                    // Review: show the chosen path, not editable.
-                    <span className="id-prof-written final">
-                      {proficiencyDef(writtenProficiency).label}
-                    </span>
-                  ) : proficiencyDone && writtenProficiency ? (
-                    // Intro, chosen & written: clickable to change.
-                    <button
-                      className="id-prof-written final editable"
-                      onClick={editProficiency}
-                      disabled={sealed}
-                      title="Tap to change your path"
-                    >
-                      {proficiencyDef(writtenProficiency).label}
-                      <span className="id-name-edit-pencil">✎</span>
-                    </button>
-                  ) : profWriting ? (
-                    <span className="id-prof-written">
-                      {displayProfWriting}
-                      <span className="name-cursor" />
-                    </span>
-                  ) : (
-                    <select
-                      className="id-prof-select"
-                      value={proficiency ?? ''}
-                      disabled={!nameDone}
-                      onChange={(e) => chooseProficiency(e.target.value as Proficiency)}
-                      aria-label="Choose your proficiency"
-                    >
-                      <option value="" disabled>
-                        Choose your path…
-                      </option>
-                      {PROFICIENCIES.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.label} — {p.blurb}
-                        </option>
-                      ))}
-                    </select>
+                {/* Right page — the Identification form. */}
+                <div className="book-page right" key="id-right">
+                  <PageCorners />
+                  <div className="id-header">Adventurer Identification</div>
+                  <Flourish className="id-flourish" />
+
+                  <div className="id-top">
+                    {/* Portrait cameo (top-left). */}
+                    <div className="id-portrait-block">
+                      <button
+                        className={`id-portrait-frame ${portrait ? 'filled' : 'empty'} ${
+                          portraitInking ? 'inking' : ''
+                        } ${!portrait && !showCreator ? 'beckon' : ''}`}
+                        onClick={openCreator}
+                        aria-label={portrait ? 'Edit portrait' : 'Create your portrait'}
+                        disabled={writing || (sealed && !isReview)}
+                        title={isReview ? 'Tap to edit portrait' : undefined}
+                      >
+                        {portrait ? (
+                          <PlayerSprite config={portrait} size={108} framing="bust" label="Your portrait" />
+                        ) : (
+                          <span className="id-portrait-hint">
+                            <Icon name="quill" className="id-portrait-plus" />
+                            <span className="id-portrait-tap">Tap to sketch</span>
+                          </span>
+                        )}
+                      </button>
+                      <div className="id-label center">Portrait</div>
+                    </div>
+
+                    {/* Registration details (decorative, hand-written). */}
+                    <div className="id-details">
+                      <div className="id-detail-row">
+                        <span className="id-label">Guild Rank</span>
+                        <span className="id-handwritten">Novice</span>
+                      </div>
+                      <div className="id-detail-row">
+                        <span className="id-label">Registered</span>
+                        <span className="id-handwritten small">{registered}</span>
+                      </div>
+                      <div className="id-detail-row seal-row">
+                        <span className="id-label">Seal</span>
+                        <span className={`wax-seal ${sealed ? 'stamped' : ''}`}>
+                          {sealed && <WaxSeal />}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Name line. */}
+                  <div className={`id-name-block ${portraitDone ? 'active' : 'locked'}`}>
+                    <div className="id-label">Name</div>
+                    <div className="id-name-line">
+                      {nameDone ? (
+                        isReview || !sealed ? (
+                          <button
+                            className="id-name-written final editable"
+                            onClick={editName}
+                            disabled={sealed && !isReview}
+                            title="Tap to edit name"
+                          >
+                            {writtenName}
+                            <Icon name="quill" className="id-name-edit-pencil" />
+                          </button>
+                        ) : (
+                          <span className="id-name-written final">{writtenName}</span>
+                        )
+                      ) : writing ? (
+                        <span className="id-name-written">
+                          {displayWriting}
+                          <span className="name-cursor" />
+                        </span>
+                      ) : portraitDone ? (
+                        <div className="id-name-entry">
+                          <input
+                            ref={nameInputRef}
+                            className="id-name-input"
+                            value={nameInput}
+                            maxLength={MAX_NAME_LENGTH}
+                            placeholder="Sign your name…"
+                            onChange={(e) => {
+                              setNameInput(e.target.value);
+                              if (nameError) setNameError(false);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') submitName();
+                            }}
+                            aria-label="Adventurer name"
+                          />
+                          <button
+                            className="id-name-submit"
+                            onClick={submitName}
+                            disabled={!isValidPlayerName(nameInput)}
+                            aria-label="Ink your name"
+                            title="Ink your name"
+                          >
+                            <Icon name="quill" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="id-name-placeholder" />
+                      )}
+                    </div>
+                    {nameError && <div className="id-name-error">Every adventurer needs a name.</div>}
+                    {!portraitDone && !portrait && (
+                      <div className="id-name-hint">Sketch your portrait first</div>
+                    )}
+                  </div>
+
+                  {/* Proficiency — three inked choices, then handwritten like the
+                      name. Editable during the intro; fixed in review mode. */}
+                  <div className={`id-prof-block ${nameDone || isReview ? 'active' : 'locked'}`}>
+                    <div className="id-label">Proficiency</div>
+                    {isReview && writtenProficiency ? (
+                      <div className="id-prof-line">
+                        <span className="id-prof-written final">
+                          <Icon name={PROF_ICON[writtenProficiency]} className="id-prof-icon" />
+                          {proficiencyDef(writtenProficiency).label}
+                        </span>
+                      </div>
+                    ) : proficiencyDone && writtenProficiency ? (
+                      <div className="id-prof-line">
+                        <button
+                          className="id-prof-written final editable"
+                          onClick={editProficiency}
+                          disabled={sealed}
+                          title="Tap to change your path"
+                        >
+                          <Icon name={PROF_ICON[writtenProficiency]} className="id-prof-icon" />
+                          {proficiencyDef(writtenProficiency).label}
+                          <Icon name="quill" className="id-name-edit-pencil" />
+                        </button>
+                      </div>
+                    ) : profWriting ? (
+                      <div className="id-prof-line">
+                        <span className="id-prof-written">
+                          {proficiency && <Icon name={PROF_ICON[proficiency]} className="id-prof-icon" />}
+                          {displayProfWriting}
+                          <span className="name-cursor" />
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="prof-choices" role="radiogroup" aria-label="Choose your proficiency">
+                        {PROFICIENCIES.map((p) => (
+                          <button
+                            key={p.id}
+                            role="radio"
+                            aria-checked={proficiency === p.id}
+                            className={`prof-choice ${proficiency === p.id ? 'selected' : ''}`}
+                            disabled={!nameDone}
+                            onClick={() => chooseProficiency(p.id)}
+                            onMouseEnter={() => nameDone && playIntroSound('hover')}
+                          >
+                            <Icon name={PROF_ICON[p.id]} className="prof-choice-icon" />
+                            <span className="prof-choice-label">{p.label}</span>
+                            <span className="prof-choice-blurb">{p.blurb}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {!nameDone && !isReview && <div className="id-name-hint">Sign your name first</div>}
+                  </div>
+
+                  {sealed && (
+                    <div className="id-complete-flourish">
+                      <Icon name="check" />
+                      {isReview ? 'Registered Adventurer' : 'Registration Complete'}
+                    </div>
                   )}
+                  <div className="page-folio">{folio(0, 'right')}</div>
                 </div>
-                {!nameDone && !isReview && (
-                  <div className="id-name-hint">Sign your name first ↑</div>
-                )}
-              </div>
-
-              {sealed && (
-                <div className="id-complete-flourish">
-                  {isReview ? 'Registered Adventurer ✓' : 'Registration Complete ✓'}
-                </div>
-              )}
-            </div>
               </>
+            )}
+
+            {/* A leaf sweeping across the spread as the page turns. */}
+            {turn && (
+              <div
+                key={turn.id}
+                className={`turning-leaf ${turn.dir}`}
+                onAnimationEnd={() => setTurn(null)}
+                aria-hidden="true"
+              />
             )}
 
             {/* Page-turn arrows (navigable book). Each shows only when there is
                 a page to move to in that direction. */}
             {navigable && phase === 'page' && page > 0 && (
-              <button
-                className="journal-arrow left"
-                onClick={() => turnPage('prev')}
-                aria-label="Previous page"
-              >
-                ‹
+              <button className="journal-arrow left" onClick={() => turnPage('prev')} aria-label="Previous page">
+                <Icon name="back" />
               </button>
             )}
             {navigable && phase === 'page' && page < lastPage && (
-              <button
-                className="journal-arrow right"
-                onClick={() => turnPage('next')}
-                aria-label="Next page"
-              >
-                ›
+              <button className="journal-arrow right" onClick={() => turnPage('next')} aria-label="Next page">
+                <Icon name="forward" />
               </button>
             )}
           </div>
@@ -699,7 +829,7 @@ export function PlayerIntro({
       {/* Close button beneath the journal (review, or after confirming). */}
       {navigable && phase === 'page' && (
         <button className="journal-close-btn" onClick={dismiss}>
-          Close Journal
+          <Icon name="journal" /> Close Journal
         </button>
       )}
 
@@ -712,7 +842,7 @@ export function PlayerIntro({
           disabled={!allDone}
           title={allDone ? 'Seal your identification' : 'Fill in every field first'}
         >
-          Confirm &amp; Begin
+          <Icon name="quill" /> Confirm &amp; Begin
         </button>
       )}
 
@@ -723,6 +853,7 @@ export function PlayerIntro({
             initial={portrait ?? seededSprite()}
             onConfirm={confirmPortrait}
             onCancel={() => setShowCreator(false)}
+            weapon={writtenProficiency ? WEAPON_FOR[writtenProficiency] : undefined}
           />
         </div>
       )}
@@ -732,9 +863,27 @@ export function PlayerIntro({
 
 /** A pleasant, slightly-random starting point for a first-time creator. */
 function seededSprite(): PlayerSpriteConfig {
-  // Bias toward the tidy default but randomise colour/hair so it feels personal
-  // without ever looking broken.
+  // Bias toward the tidy default but randomise colour/hair/eyes so it feels
+  // personal without ever looking broken.
   const base = defaultPlayerSprite();
   const rand = randomPlayerSprite();
-  return { ...base, hair: rand.hair, hairColor: rand.hairColor, outfitColor: rand.outfitColor };
+  return {
+    ...base,
+    hair: rand.hair,
+    hairColor: rand.hairColor,
+    eyeColor: rand.eyeColor,
+    outfitColor: rand.outfitColor,
+  };
+}
+
+/** Roman numerals for chapter numbers (1–39 is plenty for the chronicle). */
+function toRoman(n: number): string {
+  const tens = ['', 'X', 'XX', 'XXX'][Math.floor(n / 10)] ?? '';
+  const ones = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX'][n % 10];
+  return tens + ones;
+}
+
+/** The printed page number of one side of spread `spread` (spread 0 = pages 1–2). */
+function folio(spread: number, side: 'left' | 'right'): number {
+  return spread * 2 + (side === 'left' ? 1 : 2);
 }

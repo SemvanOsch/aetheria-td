@@ -1,4 +1,5 @@
 import { createPortal } from 'react-dom';
+import { Icon } from './Icon';
 
 interface Props {
   onClose: () => void;
@@ -18,6 +19,25 @@ interface PatchEntry {
  * release goes first so it renders at the top of the list. See CLAUDE.md.
  */
 const PATCH_NOTES: PatchEntry[] = [
+  {
+    version: '2026-10-03 · The Great Revamp',
+    changes: [
+      'A full visual overhaul of the battle board: painted stone, wood and grass floors with worn paths, real-time lighting (torches, candles, windows and moonlight pooling in dark rooms), a mood of its own for every stage, depth-sorted props that fade when a figure walks behind them, and new effects — sparks, slash arcs, impact rings, corpses, screen shake (off with reduced motion) and soft cast shadows.',
+      'Every champion and enemy has been redrawn with proper bodies — jointed legs and knees, shoulders, elbows, hands, capes — plus shading, rim light and a crisp outline, so each archetype has its own build: broad tanks, lean rangers, robed casters.',
+      'Gowzer, the Night Falcon (stage 4) is reborn: a hooded assassin in midnight cloth with a bronze falcon mask, glowing gold eyes, a gold-tipped feather mantle and twin talon daggers. He now stalks forward in a crouch, twirls a dagger while delivering his lines, and bursts into drifting feathers as the shadows swallow him.',
+      'The Wizard’s Guiding Gale now spirals soft wind ribbons up around the champions it empowers, wrapping behind and in front of them, with a faint swirl at their feet.',
+      'New look across every menu: a living night-sky backdrop (softly blurred so menus stand out), hand-drawn icons instead of emoji, new fonts, gilded panels and an Aetheria crest.',
+      'New home screen: your adventurer front and centre with their stats, a Continue button that drops you straight into your next stage, live shortcut tiles (Summon, Champions, Journal, Bestiary — with a red dot when something is ready), and campaign progress per chapter.',
+      'New Campaign screen: chapter tabs, a winding map of the chapter’s stages (cleared ones light the road gold), and a briefing panel for the selected stage with a preview of its battlefield, waves, castle health, gold and gem reward, its boss (a dark silhouette until you’ve beaten it), the enemies you’ll face (marked New if you haven’t met them) and your team. Locked stages can’t be selected, and a back button returns to the mode picker.',
+      'Redesigned champion details: a large portrait in the champion’s rarity glow, a battle profile of stat tiles, and its levels with stat gains in green and ability tiers highlighted in gold.',
+      'Redesigned mastery skill tree: nodes on a map linked by lines that light up gold as you learn them, capstones as diamonds, and a side panel to inspect and learn each node plus a running list of your total bonuses.',
+      'The summon ceremony is now animated with swirling energy, a flash and a silhouette reveal. The result now shows the champion with its rarity, name and note fading in underneath — no extra card and no Again button (just press Summon again) — with gentler embers.',
+      'Background music: a calm menu theme, and a battle theme for the Castle that builds up when a wave starts. It has its own Music volume slider in Settings.',
+      'Placing a champion now plays a soft thump and chime, and a dull knock when you can’t place there (both follow the Combat volume).',
+      'Fixed the first hit of a battle sometimes playing without sound.',
+      'The Adventurer’s Journal has been revamped with a mini contents page and page labels, and your adventurer has far more to customise: eye colour, face markings, many more hairstyles and colours, facial hair, new outfits, an accent colour, headwear and cloaks — each with its own colour. Gear colours are now separate from your outfit, the nose and hood are gone, and hair highlights are softer (no more grey cap on dark hair).',
+    ],
+  },
   {
     version: '2026-08-30 · The Journal & The Capital',
     changes: [
@@ -129,8 +149,8 @@ export function PatchNotes({ onClose }: Props) {
   return createPortal(
     <div className="modal-backdrop" onClick={onClose}>
       <div className="panel modal patch-notes-modal" onClick={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose} aria-label="Close">✕</button>
-        <h2>📝 Patch Notes</h2>
+        <button className="modal-close" onClick={onClose} aria-label="Close"><Icon name="close" /></button>
+        <h2><Icon name="scroll" /> Patch Notes</h2>
 
         {PATCH_NOTES.map((entry) => (
           <div className="patch-entry" key={entry.version}>

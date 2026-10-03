@@ -4,19 +4,39 @@
  * Pure drawing: reads an immutable snapshot of engine state plus a little UI
  * state (hover cell, selected unit) and paints the board. Contains no game
  * rules — it can be swapped or restyled without touching the simulation.
+ *
+ * A frame is composed in passes, back to front:
+ *
+ *   1. **Ground** — the stage's floor + path, baked once into an offscreen
+ *      canvas (`terrain.ts`); a lane mid-reveal is drawn live over it.
+ *   2. **World** — ground-layer props, then props / champions / foes / corpses
+ *      depth-sorted by where they meet the floor, each figure finished through
+ *      the shared compositor (`figure.ts`: ink outline, form shading, rim
+ *      light, hit flash), then smoke/dust/debris.
+ *   3. **Lighting** — the stage's ambient darkness with every light punched
+ *      out of it, an additive colour bloom, grade (`lighting.ts`).
+ *   4. **Glow** — attacks, projectiles, sparks, embers, flashes: drawn after
+ *      the darkness so they read as light sources (`vfx.ts`).
+ *   5. **Overlays** — health bars, range/AoE guides, damage numbers, boss
+ *      bars: never darkened, never shaken, always legible.
+ *
+ * Per-board caches (baked terrain, lighting layers, the VFX pool) live in a
+ * `WeakMap` keyed by the engine, so a new stage mount gets fresh state and an
+ * old one is collected with its engine.
  */
 
-import { BOARD_HEIGHT, BOARD_WIDTH, COLS, ROWS, TILE } from '../domain/grid';
-import {
-  DEFAULT_BANNER_COLOR,
-  DEFAULT_PATH_LAYERS,
-  DEFAULT_THEME,
-  type BoardTheme,
-  type PropKind,
-} from '../domain/decor';
+import { BOARD_HEIGHT, BOARD_WIDTH, TILE } from '../domain/grid';
+import { DEFAULT_PATH_LAYERS, type BoardTheme } from '../domain/decor';
+import { atmosphereFor, type Atmosphere } from '../domain/atmosphere';
 import { coneAngleDeg, DEFAULT_BURST_RADIUS, getUnit } from '../domain/units';
 import { getEnemy } from '../domain/enemies';
-import { drawEnemySprite, drawUnitSprite, hasEnemySprite, hasSprite, shade } from './sprites';
+import { drawEnemySprite, drawFeather, drawUnitSprite, enemyWalkPeriod, hasEnemySprite, hasSprite } from './sprites';
+import { BOSS_BOX, DEFAULT_BOX, paintFigure, type FigureStyle } from './figure';
+import { bakeTerrain } from './terrain';
+import { Lighting, flicker, type Light } from './lighting';
+import { Vfx, type Corpse } from './vfx';
+import { drawLegacyDecor, drawProp, propAnchor, PROP_META } from './props';
+import { FEEDBACK, INK, LIGHT, ease, shade, withAlpha } from './palette';
 import {
   THROW_ANIM_TIME,
   RISE_LIFT,
@@ -26,60 +46,435 @@ import {
   DEATH_FALL_TIME,
   DEATH_HOLD_TIME,
 } from './GameEngine';
-import { currentSpeechLine } from './types';
-import type { Enemy } from './types';
+import { currentSpeechLine, isSpeaking } from './types';
+import type { Enemy, Tower } from './types';
 import type { GameEngine } from './GameEngine';
+
+export { drawProp };
 
 export interface RenderUiState {
   hoverCol: number;
   hoverRow: number;
   selectedUnitId: string | null;
   selectedTowerUid: number | null;
+  /** Enemy under the cursor (outlined as a threat); optional. */
+  hoverEnemyUid?: number | null;
 }
+
+/**
+ * Board scale of a standard figure (champions and rank-and-file foes), applied
+ * about the feet. Slightly larger than the authored sprite so silhouettes read
+ * at a glance; bosses scale themselves inside their own sprite.
+ */
+const FIGURE_SCALE = 1.12;
+
+/** Stable cache-key fragment for a player avatar config (memoized per object). */
+const CFG_KEYS = new WeakMap<object, string>();
+function cfgKey(cfg: object | undefined): string {
+  if (!cfg) return '';
+  let k = CFG_KEYS.get(cfg);
+  if (!k) {
+    k = JSON.stringify(cfg);
+    CFG_KEYS.set(cfg, k);
+  }
+  return k;
+}
+
+/**
+ * Quantize a foe's walked distance onto one of a fixed number of stride frames
+ * within its sprite's repeat period, so walking figures hit the frame cache.
+ */
+function strideFrame(id: string, dist: number): { q: number; idx: number } {
+  const period = enemyWalkPeriod(id);
+  const frames = id === 'cas_brute' ? 48 : 16;
+  const idx = Math.floor((((dist % period) + period) % period) / period * frames) % frames;
+  return { q: (idx * period) / frames, idx };
+}
+
+/** Typeface stacks for canvas text (match the UI's CSS tokens). */
+const FONT_TITLE = "'Cinzel', 'Georgia', serif";
+const FONT_UI = "'Inter', system-ui, sans-serif";
+
+// ---------------------------------------------------------------------------
+// Per-board render state
+// ---------------------------------------------------------------------------
+
+interface StaticLight extends Light {
+  flicker: boolean;
+  phase: number;
+}
+
+interface BoardState {
+  atmo: Atmosphere;
+  terrain: HTMLCanvasElement | null;
+  terrainKey: string;
+  lighting: Lighting;
+  vfx: Vfx;
+  last: number;
+  /** Prop lights (static positions; flicker applied per frame). */
+  propLights: StaticLight[];
+  flames: { x: number; y: number; strength: number }[];
+  chimneys: { x: number; y: number }[];
+  /** Reused per frame to avoid allocation churn. */
+  lights: Light[];
+  drawables: Drawable[];
+}
+
+const STATES = new WeakMap<GameEngine, BoardState>();
+
+function stateFor(engine: GameEngine): BoardState {
+  let st = STATES.get(engine);
+  if (st) return st;
+  const propLights: StaticLight[] = [];
+  const flames: BoardState['flames'] = [];
+  const chimneys: BoardState['chimneys'] = [];
+  for (const p of engine.level.decor ?? []) {
+    const meta = PROP_META[p.kind];
+    const a = propAnchor(p.col, p.row);
+    for (const L of meta.lights ?? []) {
+      propLights.push({
+        x: a.x + L.dx,
+        y: a.y + L.dy,
+        radius: L.radius,
+        family: L.family,
+        intensity: L.intensity,
+        glow: L.glow ?? 1,
+        flicker: !!L.flicker,
+        phase: (p.col * 7.1 + p.row * 3.3) % 6.28,
+      });
+    }
+    for (const f of meta.flames ?? []) flames.push({ x: a.x + f.dx, y: a.y + f.dy, strength: f.strength ?? 1 });
+    for (const c of meta.chimneys ?? []) chimneys.push({ x: a.x + c.dx, y: a.y + c.dy });
+  }
+  st = {
+    atmo: atmosphereFor(engine.level.id, engine.level.section),
+    terrain: null,
+    terrainKey: '',
+    lighting: new Lighting(),
+    vfx: new Vfx(),
+    last: now(),
+    propLights,
+    flames,
+    chimneys,
+    lights: [],
+    drawables: [],
+  };
+  STATES.set(engine, st);
+  return st;
+}
+
+function now(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+// ---------------------------------------------------------------------------
+// Frame
+// ---------------------------------------------------------------------------
 
 export function drawBoard(
   ctx: CanvasRenderingContext2D,
   engine: GameEngine,
   ui: RenderUiState,
 ): void {
+  const st = stateFor(engine);
+  const t = now();
+  const dt = Math.min(0.05, Math.max(0, (t - st.last) / 1000));
+  st.last = t;
+
+  // Drain this frame's cosmetic events into the VFX layer and advance it.
+  if (engine.fx.length) {
+    st.vfx.consume(engine.fx);
+    engine.fx.length = 0;
+  }
+  st.vfx.update(dt);
+  st.vfx.weather(st.atmo.weather, st.atmo.weatherDensity ?? 1, dt);
+  for (const f of st.flames) st.vfx.flame(f.x, f.y, dt, f.strength);
+  for (const c of st.chimneys) st.vfx.chimney(c.x, c.y, dt);
+
   ctx.clearRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
-  drawGround(ctx, engine);
-  drawPath(ctx, engine);
-  // Per-level cosmetic decorations (e.g. the Throne Room's throne + pillars),
-  // drawn under towers/enemies so gameplay tokens always sit on top.
-  drawDecor(ctx, engine);
-  // The Throne Room's boss sits on his throne until he rises on the final wave.
-  drawSeatedKing(ctx, engine);
-  // Before the first wave, an animated arrow trail flows along each lane so the
-  // player can read where enemies will walk. It vanishes once wave 1 starts.
+  const shake = st.vfx.shakeOffset();
+  ctx.save();
+  ctx.translate(shake.x, shake.y);
+
+  // 1. Ground.
+  drawGround(ctx, engine, st);
   drawPathPreview(ctx, engine);
   drawPlacementHints(ctx, engine, ui);
-  drawTowers(ctx, engine, ui);
-  drawEnemies(ctx, engine);
+  drawSelectedRange(ctx, engine, ui);
+
+  // 2. World: props + figures, depth-sorted.
+  drawWorld(ctx, engine, ui, st);
+  st.vfx.drawWorld(ctx);
   drawShots(ctx, engine);
-  // Wind Slices (the Wizard's cone attack) sweep over enemies.
+
+  // 3. Lighting.
+  const lights = collectLights(engine, st, t / 1000);
+  const bossDark = engine.enemies.some((e) => e.def.boss && !e.dead) ? 0.08 : 0;
+  const atmo = bossDark ? { ...st.atmo, darkness: Math.min(0.75, st.atmo.darkness + bossDark) } : st.atmo;
+  st.lighting.render(ctx, lights, atmo, st.vfx.exposure);
+
+  // 4. Glow: attacks and spells read as light.
   drawSlices(ctx, engine);
-  // Mana Ray beams (the Mage's channelled ability) sear over enemies.
   drawBeams(ctx, engine);
-  // Homing arrows/bolts fly in world space, on top of enemies.
-  drawProjectiles(ctx, engine);
-  // Thrown javelins fly in world space, on top of the (faint) throw beam, so
-  // they read along the exact attack direction.
+  drawProjectiles(ctx, engine, st.vfx, dt);
   drawThrownSpears(ctx, engine);
-  // Preview of a charging "throw" (extended reach) for the selected tower, so
-  // the added range is visible from when the prior attack ends until it fires.
-  drawThrowCharge(ctx, engine, ui);
-  // AoE indicator for the selected tower is drawn on top of enemies so its
-  // marker (beam / 'x') stays visible over the target.
-  drawSelectedAoe(ctx, engine, ui);
   drawPuffs(ctx, engine);
   drawBursts(ctx, engine);
-  // Cyclone Slash whirlwinds (the Blade's ability) spin over the field.
   drawCyclones(ctx, engine);
-  drawFloaters(ctx, engine);
-  // Big boss health bar(s) pinned to the top of the board, over everything.
+  st.vfx.drawGlow(ctx);
+  st.lighting.drawVignette(ctx, st.atmo.vignette);
+  ctx.restore();
+
+  // 5. Overlays (unshaken, unlit).
+  drawTowerOverlays(ctx, engine);
+  drawEnemyOverlays(ctx, engine, ui);
+  drawThrowCharge(ctx, engine, ui);
+  drawSelectedAoe(ctx, engine, ui);
+  drawFloaters(ctx, engine, st.vfx);
   drawBossBars(ctx, engine);
 }
+
+// ---------------------------------------------------------------------------
+// Ground
+// ---------------------------------------------------------------------------
+
+/**
+ * Optional per-level cosmetic palette, keyed by level id, for the hand-authored
+ * castle stages. A stage may instead carry its own `theme` in the level data
+ * (e.g. one exported from the Level Designer), which takes precedence — see
+ * `themeFor`. Levels with neither use the default blue-slate board.
+ */
+const BOARD_THEMES: Record<number, BoardTheme> = {
+  1: { groundEven: '#333a44', groundOdd: '#3c4450', floor: 'cobble', path: [['#191d24', TILE - 4], ['#57606b', TILE - 12], ['#68727e', TILE - 26]], pathKind: 'stone' },
+  2: { groundEven: '#4a3728', groundOdd: '#54402f', floor: 'wood', path: [['#7a5a2e', TILE - 4], ['#6d3a30', TILE - 12], ['#8a4a3e', TILE - 26]], pathKind: 'carpet' },
+  3: { groundEven: '#3f4356', groundOdd: '#484d62', floor: 'marble', path: [['#b7933f', TILE - 4], ['#2b3d78', TILE - 12], ['#3a51a4', TILE - 26]], pathKind: 'carpet' },
+  4: { groundEven: '#2a2038', groundOdd: '#332a46', floor: 'flagstone', path: [['#c9a24a', TILE - 4], ['#472a6b', TILE - 12], ['#5b378a', TILE - 26]], pathKind: 'carpet' },
+  5: { groundEven: '#3a2836', groundOdd: '#443040', floor: 'stone', path: [['#c8a24a', TILE - 4], ['#7c1b2b', TILE - 12], ['#9e2a3c', TILE - 26]], pathKind: 'carpet' },
+};
+
+function themeFor(engine: GameEngine): BoardTheme | undefined {
+  // Level-data theme (e.g. authored in the Level Designer) wins over the
+  // built-in per-id table.
+  return engine.level.theme ?? BOARD_THEMES[engine.level.id];
+}
+
+/**
+ * The baked floor + path, re-baked only when the set of fully revealed lanes
+ * changes (or the device scale does). A lane still rolling out is stroked live
+ * on top with its plain layers until it completes and joins the bake.
+ */
+function drawGround(ctx: CanvasRenderingContext2D, engine: GameEngine, st: BoardState): void {
+  const scale = Math.min(2, Math.max(1, ctx.getTransform().a));
+  const done: number[] = [];
+  const rolling: number[] = [];
+  engine.lanes.forEach((_, i) => {
+    const frac = engine.laneRevealFraction(i);
+    if (frac >= 1) done.push(i);
+    else if (frac > 0) rolling.push(i);
+  });
+  const key = `${done.join(',')}@${scale}`;
+  if (!st.terrain || st.terrainKey !== key) {
+    st.terrain = bakeTerrain({
+      stageKey: engine.level.id,
+      theme: themeFor(engine),
+      lanes: done.map((i) => engine.lanes[i].waypoints),
+      scale,
+    });
+    st.terrainKey = key;
+  }
+  ctx.drawImage(st.terrain, 0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+  if (rolling.length) drawRollingLanes(ctx, engine, rolling);
+}
+
+/** A hidden lane rolling out mid-battle: its leading fraction, plain layers. */
+function drawRollingLanes(ctx: CanvasRenderingContext2D, engine: GameEngine, lanes: number[]): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  const layers: [string, number][] = themeFor(engine)?.path ?? DEFAULT_PATH_LAYERS;
+  const shapes = lanes.map((i) => partialPolyline(engine.lanes[i].waypoints, engine.laneRevealFraction(i)));
+  for (const [color, width] of layers) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    for (const pts of shapes) strokePolyline(ctx, pts);
+  }
+  // A bright leading edge where the carpet is unrolling.
+  for (const pts of shapes) {
+    const tip = pts[pts.length - 1];
+    const g = ctx.createRadialGradient(tip.x, tip.y, 0, tip.x, tip.y, 26);
+    g.addColorStop(0, 'rgba(255,220,150,0.55)');
+    g.addColorStop(1, 'rgba(255,220,150,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(tip.x - 26, tip.y - 26, 52, 52);
+  }
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// World (depth-sorted props + figures)
+// ---------------------------------------------------------------------------
+
+type Drawable =
+  | { k: 'prop'; base: number; i: number; alpha: number }
+  | { k: 'tower'; base: number; t: Tower }
+  | { k: 'enemy'; base: number; e: Enemy }
+  | { k: 'corpse'; base: number; c: Corpse }
+  | { k: 'king'; base: number };
+
+function drawWorld(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: RenderUiState, st: BoardState): void {
+  const decor = engine.level.decor ?? [];
+  // Ground-layer props first (under every figure).
+  for (const p of decor) {
+    if (PROP_META[p.kind].layer !== 'ground') continue;
+    const a = propAnchor(p.col, p.row);
+    drawProp(ctx, p.kind, a.x, a.y, p.color);
+  }
+  if (decor.length === 0) drawLegacyDecor(ctx, engine.level.id);
+
+  const list = st.drawables;
+  list.length = 0;
+  for (const t of engine.towers) list.push({ k: 'tower', base: t.pos.y + 10, t });
+  for (const e of engine.enemies) {
+    if (e.dead) continue;
+    list.push({ k: 'enemy', base: e.pos.y - footLiftFor(e.def.id) + e.def.radius * 0.7, e });
+  }
+  for (const c of st.vfx.corpses) list.push({ k: 'corpse', base: c.y + c.enemy.def.radius * 0.5, c });
+  const king = seatedKingSpawn(engine);
+  if (king) list.push({ k: 'king', base: king.y - RISE_LIFT + 4 });
+  decor.forEach((p, i) => {
+    const meta = PROP_META[p.kind];
+    if (meta.layer !== 'standing') return;
+    const a = propAnchor(p.col, p.row);
+    list.push({ k: 'prop', base: a.y + meta.base, i, alpha: 1 });
+  });
+
+  // Occlusion: a tall prop drawn *in front of* a figure (figure's base is
+  // above the prop's) that overlaps it fades so the unit stays readable.
+  for (const d of list) {
+    if (d.k !== 'prop') continue;
+    const p = decor[d.i];
+    const meta = PROP_META[p.kind];
+    if (!meta.occludes) continue;
+    const a = propAnchor(p.col, p.row);
+    const [x0, y0, x1, y1] = meta.bounds;
+    for (const o of list) {
+      if (o.k !== 'tower' && o.k !== 'enemy') continue;
+      if (o.base >= d.base) continue;
+      const pos = o.k === 'tower' ? o.t.pos : o.e.pos;
+      if (pos.x > a.x + x0 - 8 && pos.x < a.x + x1 + 8 && pos.y > a.y + y0 - 4 && pos.y - 20 < a.y + y1) {
+        d.alpha = 0.5;
+        break;
+      }
+    }
+  }
+
+  list.sort((a, b) => a.base - b.base);
+  for (const d of list) {
+    switch (d.k) {
+      case 'prop': {
+        const p = decor[d.i];
+        const a = propAnchor(p.col, p.row);
+        if (d.alpha < 1) {
+          ctx.save();
+          ctx.globalAlpha = d.alpha;
+          drawProp(ctx, p.kind, a.x, a.y, p.color);
+          ctx.restore();
+        } else {
+          drawProp(ctx, p.kind, a.x, a.y, p.color);
+        }
+        break;
+      }
+      case 'tower':
+        drawTower(ctx, engine, ui, st, d.t);
+        break;
+      case 'enemy':
+        if (d.e.dying) drawDeathAnimation(ctx, d.e, st);
+        else drawEnemy(ctx, ui, st, d.e);
+        break;
+      case 'corpse':
+        drawCorpse(ctx, st, d.c);
+        break;
+      case 'king':
+        drawSeatedKing(ctx, engine, st);
+        break;
+    }
+  }
+
+  // Overhead props (chandeliers) hang above everyone.
+  for (const p of decor) {
+    if (PROP_META[p.kind].layer !== 'overhead') continue;
+    const a = propAnchor(p.col, p.row);
+    drawProp(ctx, p.kind, a.x, a.y, p.color);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Lights
+// ---------------------------------------------------------------------------
+
+function collectLights(engine: GameEngine, st: BoardState, time: number): Light[] {
+  const out = st.lights;
+  out.length = 0;
+  for (const L of st.propLights) {
+    const f = L.flicker ? flicker(time, L.phase) : 1;
+    out.push({ x: L.x, y: L.y, radius: L.radius * (0.96 + 0.04 * f), family: L.family, intensity: L.intensity * f, glow: L.glow });
+  }
+  // Champions carry a soft pool of light — the player's units are always the
+  // best-lit things on the board (readability before mood).
+  const pool = st.atmo.championLight;
+  for (const t of engine.towers) {
+    out.push({ x: t.pos.x, y: t.pos.y + 2, radius: pool, family: 'candle', intensity: 0.6, glow: 0.18 });
+    // Guiding Gale's wind carries a faint cool light so it reads in dark rooms.
+    if (t.rangeBuffed) out.push({ x: t.pos.x, y: t.pos.y - 4, radius: 30, family: 'wind', intensity: 0.2 });
+    if (t.charge > 0 && t.chargeMax > 0) {
+      const k = 1 - t.charge / t.chargeMax;
+      const fam = t.def.visual.shape === 'wizard' ? 'wind' : 'arcane';
+      out.push({ x: t.pos.x, y: t.pos.y - 6, radius: 30 + 60 * k, family: fam, intensity: 0.4 + 0.5 * k });
+    }
+    if (t.beamTimer > 0) {
+      const ux = Math.cos(t.beamAngle);
+      const uy = Math.sin(t.beamAngle);
+      for (let d = 20; d < t.beamRange; d += 60) {
+        out.push({ x: t.pos.x + ux * d, y: t.pos.y + uy * d, radius: 80, family: 'arcane', intensity: 0.75 });
+      }
+    }
+  }
+  for (const p of engine.projectiles) {
+    if (p.style === 'orb') out.push({ x: p.pos.x, y: p.pos.y, radius: 80, family: 'arcane', intensity: 0.85 });
+    else if (p.style === 'magic') out.push({ x: p.pos.x, y: p.pos.y, radius: 46, family: 'arcane', intensity: 0.6 });
+    else if (p.style === 'wind') out.push({ x: p.pos.x, y: p.pos.y, radius: 34, family: 'wind', intensity: 0.45 });
+  }
+  for (const s of engine.slices) {
+    const lx = s.pos.x + Math.cos(s.angle) * s.lead;
+    const ly = s.pos.y + Math.sin(s.angle) * s.lead;
+    out.push({ x: lx, y: ly, radius: 70, family: 'wind', intensity: 0.5 });
+  }
+  for (const c of engine.cyclones) {
+    const k = c.ttl / c.maxTtl;
+    out.push({ x: c.pos.x, y: c.pos.y, radius: c.radius * 1.6, family: 'holy', intensity: 0.8 * k });
+  }
+  for (const e of engine.enemies) {
+    if (e.dead) continue;
+    if (e.def.boss) {
+      const pulse = 0.5 + 0.5 * Math.sin(time * 2.4);
+      const fam = e.def.id === 'boss4' ? 'dark' : 'blood';
+      out.push({ x: e.pos.x, y: e.pos.y, radius: 70 + 14 * pulse, family: fam, intensity: 0.35 + 0.15 * pulse, glow: 0.9 });
+      // Gowzer's eyes glare gold out of the hood (gone once he falls).
+      if (e.def.id === 'boss4' && !e.dying) out.push({ x: e.pos.x, y: e.pos.y - footLiftFor(e.def.id) - 15, radius: 16, family: 'holy', intensity: 0.5, glow: 0.5 });
+    } else if (e.def.id === 'cas_mage') {
+      out.push({ x: e.pos.x, y: e.pos.y - 10, radius: 40, family: 'arcane', intensity: 0.35 });
+    }
+  }
+  for (const ex of engine.baseExits) {
+    out.push({ x: ex.x, y: ex.y, radius: 70, family: 'moon', intensity: 0.4, glow: 0.6 });
+  }
+  st.vfx.lights(out);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Boss bars + selection guides
+// ---------------------------------------------------------------------------
 
 /**
  * Boss health bars pinned to the top-centre of the board, drawn over everything
@@ -91,54 +486,77 @@ function drawBossBars(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
   const bosses = engine.enemies.filter((e) => e.def.boss && (e.rise ?? 0) === 0);
   if (bosses.length === 0) return;
 
-  const barW = Math.min(BOARD_WIDTH - 40, 520);
-  const barH = 20;
-  const gap = 10;
-  const nameH = 18;
-  const rowH = nameH + barH + gap;
-  let top = 16;
+  const barW = Math.min(BOARD_WIDTH - 60, 460);
+  const barH = 14;
+  const nameH = 20;
+  const rowH = nameH + barH + 14;
+  let top = 12;
 
   for (const e of bosses) {
     const pct = Math.max(0, Math.min(1, e.health / e.def.health));
     const bx = (BOARD_WIDTH - barW) / 2;
     const by = top + nameH;
 
-    // Name (with icon) centred above the bar.
-    ctx.font = 'bold 15px system-ui, sans-serif';
+    ctx.save();
+    // Name plate.
+    ctx.font = `700 15px ${FONT_TITLE}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillText(`${e.def.visual.icon} ${e.def.name}`, BOARD_WIDTH / 2 + 1, top + 14 + 1);
-    ctx.fillStyle = '#ffe6a8';
-    ctx.fillText(`${e.def.visual.icon} ${e.def.name}`, BOARD_WIDTH / 2, top + 14);
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = 'rgba(8,4,12,0.85)';
+    ctx.strokeText(e.def.name, BOARD_WIDTH / 2, top + 14);
+    const ng = ctx.createLinearGradient(0, top, 0, top + 16);
+    ng.addColorStop(0, '#fff1c4');
+    ng.addColorStop(1, '#e7b64a');
+    ctx.fillStyle = ng;
+    ctx.fillText(e.def.name, BOARD_WIDTH / 2, top + 14);
 
-    // Bar frame.
-    ctx.fillStyle = 'rgba(0,0,0,0.65)';
-    ctx.fillRect(bx - 3, by - 3, barW + 6, barH + 6);
-    ctx.fillStyle = '#1a1d22';
+    // Frame: dark well with a thin gold rule and pointed end caps.
+    ctx.fillStyle = 'rgba(8,4,12,0.78)';
+    roundRect(ctx, bx - 4, by - 4, barW + 8, barH + 8, 4);
+    ctx.fill();
+    ctx.fillStyle = FEEDBACK.hpTrack;
     ctx.fillRect(bx, by, barW, barH);
-
-    // Fill.
-    ctx.fillStyle = pct > 0.5 ? '#5fd38a' : pct > 0.25 ? '#f2b23c' : '#ff5a5a';
+    // Fill: deep crimson with a lit top edge (boss HP always reads as danger).
+    const fg = ctx.createLinearGradient(0, by, 0, by + barH);
+    fg.addColorStop(0, '#ff6a5a');
+    fg.addColorStop(0.5, '#c8283a');
+    fg.addColorStop(1, '#7a1020');
+    ctx.fillStyle = fg;
     ctx.fillRect(bx, by, barW * pct, barH);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(bx, by, barW * pct, 2);
+    // Quarter ticks.
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    for (const q of [0.25, 0.5, 0.75]) ctx.fillRect(bx + barW * q - 0.5, by, 1, barH);
+    ctx.strokeStyle = '#c9a24a';
+    ctx.lineWidth = 1.2;
+    roundRect(ctx, bx - 2, by - 2, barW + 4, barH + 4, 3);
+    ctx.stroke();
+    for (const side of [-1, 1]) {
+      const cx = side < 0 ? bx - 8 : bx + barW + 8;
+      ctx.fillStyle = '#e7b64a';
+      ctx.beginPath();
+      ctx.moveTo(cx, by + barH / 2 - 5);
+      ctx.lineTo(cx + side * 6, by + barH / 2);
+      ctx.lineTo(cx, by + barH / 2 + 5);
+      ctx.lineTo(cx - side * 3, by + barH / 2);
+      ctx.closePath();
+      ctx.fill();
+    }
 
-    // Gold outline.
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#ffd76a';
-    ctx.strokeRect(bx, by, barW, barH);
-
-    // HP text inside the bar.
     const hp = `${Math.max(0, Math.ceil(e.health))} / ${Math.round(e.def.health)}`;
-    ctx.font = 'bold 12px system-ui, sans-serif';
+    ctx.font = `700 10.5px ${FONT_UI}`;
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.fillText(hp, BOARD_WIDTH / 2 + 1, by + barH / 2 + 1);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+    ctx.strokeText(hp, BOARD_WIDTH / 2, by + barH / 2 + 0.5);
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(hp, BOARD_WIDTH / 2, by + barH / 2);
+    ctx.fillText(hp, BOARD_WIDTH / 2, by + barH / 2 + 0.5);
+    ctx.restore();
 
     top += rowH;
   }
-  ctx.textBaseline = 'alphabetic';
 }
 
 function drawSelectedAoe(
@@ -151,1537 +569,27 @@ function drawSelectedAoe(
   if (tower) drawAoeIndicator(ctx, engine, tower);
 }
 
-/**
- * Optional per-level cosmetic palette, keyed by level id, for the hand-authored
- * castle stages. A stage may instead carry its own `theme` in the level data
- * (e.g. one exported from the Level Designer), which takes precedence — see
- * `themeFor`. Levels with neither use the default blue-slate board.
- */
-const BOARD_THEMES: Record<number, BoardTheme> = {
-  // Castle Door (level 1): cool grey cobblestone with a stone-slab road.
-  1: {
-    groundEven: '#333a44',
-    groundOdd: '#3c4450',
-    path: [
-      ['#191d24', TILE - 4], // dark mortar edge
-      ['#57606b', TILE - 12], // grey flagstone
-      ['#68727e', TILE - 26], // worn centre track
-    ],
-  },
-  // Dining Room (now level 2): warm wood-plank floor with a burgundy table runner.
-  2: {
-    groundEven: '#4a3728',
-    groundOdd: '#54402f',
-    path: [
-      ['#7a5a2e', TILE - 4], // braided gold edge
-      ['#6d3a30', TILE - 12], // burgundy runner
-      ['#8a4a3e', TILE - 26], // lighter centre weave
-    ],
-  },
-  // The Grand Hall (now level 3): bluish marble with a royal blue-and-gold runner.
-  3: {
-    groundEven: '#3f4356',
-    groundOdd: '#484d62',
-    path: [
-      ['#b7933f', TILE - 4], // gold trim border
-      ['#2b3d78', TILE - 12], // deep blue carpet
-      ['#3a51a4', TILE - 26], // lighter runner down the middle
-    ],
-  },
-  // The King's Chamber (now level 4): rich royal-purple stone with a purple-and-gold
-  // carpet, the deepest, most opulent room of the castle.
-  4: {
-    groundEven: '#2a2038',
-    groundOdd: '#332a46',
-    path: [
-      ['#c9a24a', TILE - 4], // gold trim border
-      ['#472a6b', TILE - 12], // royal purple carpet
-      ['#5b378a', TILE - 26], // lighter runner down the middle
-    ],
-  },
-  // Throne Room (now level 5): muted plum-stone floor (light enough that the dark
-  // dais + torch stems read against it) with a crimson-and-gold royal carpet
-  // in place of the dirt path.
-  5: {
-    groundEven: '#3a2836',
-    groundOdd: '#443040',
-    path: [
-      ['#c8a24a', TILE - 4], // gold trim border
-      ['#7c1b2b', TILE - 12], // crimson carpet
-      ['#9e2a3c', TILE - 26], // lighter runner down the middle
-    ],
-  },
-};
-
-function themeFor(engine: GameEngine): BoardTheme | undefined {
-  // Level-data theme (e.g. authored in the Level Designer) wins over the
-  // built-in per-id table.
-  return engine.level.theme ?? BOARD_THEMES[engine.level.id];
-}
-
-function drawGround(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
-  const theme = themeFor(engine);
-  const even = theme?.groundEven ?? DEFAULT_THEME.groundEven;
-  const odd = theme?.groundOdd ?? DEFAULT_THEME.groundOdd;
-  // Subtle checker painted across the WHOLE board (path cells included). The
-  // path is stroked on top, so the corner slivers its rounded joins don't cover
-  // show the floor beneath instead of bare black canvas.
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      ctx.fillStyle = (c + r) % 2 === 0 ? even : odd;
-      ctx.fillRect(c * TILE, r * TILE, TILE, TILE);
-    }
-  }
-}
-
-/**
- * Dispatch per-level cosmetic decorations drawn beneath gameplay tokens. Every
- * prop below is placed on cells the level's path never occupies, so the
- * furnishings never sit under the enemy corridor. They are purely cosmetic — the
- * engine neither knows nor cares they exist.
- */
-function drawDecor(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
-  // A stage carrying its own `decor` data (e.g. exported from the Level
-  // Designer) draws that; the hand-authored castle stages fall through to the
-  // switch below.
-  const decor = engine.level.decor;
-  if (decor && decor.length > 0) {
-    for (const p of decor) drawProp(ctx, p.kind, cellX(p.col), cellY(p.row), p.color);
-    return;
-  }
-  switch (engine.level.id) {
-    case 1:
-      drawCastleDoorDecor(ctx);
-      break;
-    case 2:
-      drawDiningRoomDecor(ctx);
-      break;
-    case 3:
-      drawGrandHallDecor(ctx);
-      break;
-    case 4:
-      drawKingsChamberDecor(ctx);
-      break;
-    case 5:
-      drawThroneRoomDecor(ctx);
-      break;
-  }
-}
-
-const cellX = (col: number) => col * TILE + TILE / 2;
-const cellY = (row: number) => row * TILE + TILE / 2;
-
-/**
- * Registry mapping each decorative `PropKind` to the primitive that draws it at
- * a board position (`x`,`y` = the prop's centre). This is the single dispatch
- * table both the board renderer (`drawDecor`) and the Level Designer preview go
- * through, so a prop looks identical in-game and while it's being placed.
- */
-const PROP_DRAWERS: Record<
-  PropKind,
-  (ctx: CanvasRenderingContext2D, x: number, y: number, color?: string) => void
-> = {
-  pillar: (c, x, y) => drawPillar(c, x, y),
-  torch: (c, x, y) => drawTorch(c, x, y),
-  // The throne prop is the throne + dais monument (3×2; centred on its footprint).
-  throne: (c, x, y) => drawThroneDais(c, x + TILE, y + TILE / 2),
-  chandelier: (c, x, y) => drawChandelier(c, x, y),
-  banner: (c, x, y, color) => drawBanner(c, x, y, color ?? DEFAULT_BANNER_COLOR),
-  diningTable: (c, x, y) => drawDiningTable(c, x, y),
-  bed: (c, x, y) => drawBed(c, x, y),
-  chest: (c, x, y) => drawChest(c, x, y),
-  gate: (c, x, y) => drawGate(c, x, y),
-  // The battlement band spans the whole top wall, ignoring the placed cell.
-  battlements: (c) => drawBattlements(c),
-  barrel: (c, x, y) => drawBarrel(c, x, y),
-  crate: (c, x, y) => drawCrate(c, x, y),
-  weaponRack: (c, x, y) => drawWeaponRack(c, x, y),
-  bookshelf: (c, x, y) => drawBookshelf(c, x, y),
-  statue: (c, x, y) => drawStatue(c, x, y),
-  fountain: (c, x, y) => drawFountain(c, x, y),
-  house: (c, x, y) => drawHouse(c, x, y),
-  castle: (c, x, y) => drawCastle(c, x, y),
-  // --- Capital props ---
-  well: (c, x, y) => drawWell(c, x, y),
-  // 2×1: centre sits half a cell right of the anchor cell's centre.
-  marketStall: (c, x, y) => drawMarketStall(c, x + TILE / 2, y),
-  lamppost: (c, x, y) => drawLamppost(c, x, y),
-  tree: (c, x, y) => drawTree(c, x, y),
-  hedge: (c, x, y) => drawHedge(c, x, y),
-  cart: (c, x, y) => drawCart(c, x + TILE / 2, y),
-  signpost: (c, x, y) => drawSignpost(c, x, y),
-  townhouse: (c, x, y) => drawTownhouse(c, x + TILE / 2, y + TILE / 2),
-};
-
-/** Draw one decorative prop of `kind` centred at (`x`,`y`). Shared with the UI. */
-export function drawProp(
-  ctx: CanvasRenderingContext2D,
-  kind: PropKind,
-  x: number,
-  y: number,
-  color?: string,
-): void {
-  PROP_DRAWERS[kind]?.(ctx, x, y, color);
-}
-
-/**
- * Castle Door (level 1): a fortified gatehouse. Battlements crown the top wall,
- * a barred stone gate sits on the wall flanked by torches, and stone gate-towers
- * frame the courtyard. Path: (-1,2)→(8,2)→(8,8)→(16,8).
- */
-function drawCastleDoorDecor(ctx: CanvasRenderingContext2D): void {
-  drawBattlements(ctx);
-  // The barred castle door high on the right wall, torches to either side.
-  drawGate(ctx, cellX(13), cellY(2));
-  drawTorch(ctx, cellX(12), cellY(2));
-  drawTorch(ctx, cellX(14), cellY(2));
-  // Stone gate-towers framing the lower courtyard (all off-path cells).
-  drawPillar(ctx, cellX(11), cellY(5));
-  drawPillar(ctx, cellX(14), cellY(5));
-  drawPillar(ctx, cellX(2), cellY(5));
-}
-
-/**
- * The Grand Hall (now level 3): a colonnaded state room. Two rows of marble columns
- * line the hall, chandeliers hang from the ceiling and banners drape the back
- * wall. Path threads between them.
- */
-function drawGrandHallDecor(ctx: CanvasRenderingContext2D): void {
-  // Colonnade — a row of columns top and bottom (open cells either side of path).
-  for (const col of [5, 9, 13]) {
-    drawPillar(ctx, cellX(col), cellY(1));
-    drawPillar(ctx, cellX(col), cellY(9));
-  }
-  // Chandeliers hung high between the top columns.
-  drawChandelier(ctx, cellX(7), 16);
-  drawChandelier(ctx, cellX(11), 16);
-  // Banners on the back wall.
-  drawBanner(ctx, cellX(3), 4, '#2b3d78');
-  drawBanner(ctx, cellX(15), 4, '#8e1f2d');
-}
-
-/**
- * Dining Room (now level 2): a feast interrupted. Long banquet tables set with
- * plates and candelabra, chairs down each side, and wall sconces.
- */
-function drawDiningRoomDecor(ctx: CanvasRenderingContext2D): void {
-  drawDiningTable(ctx, cellX(9), cellY(8));
-  drawDiningTable(ctx, cellX(14), cellY(2));
-  // Wall sconces lighting the room.
-  drawTorch(ctx, cellX(2), cellY(5));
-  drawTorch(ctx, cellX(15), cellY(4));
-  drawTorch(ctx, cellX(8), cellY(0) + 4);
-}
-
-/**
- * The Throne Room's furnishings: stone pillars in the open corners, wall torches
- * flanking a raised dais, and a golden throne at the head of the hall.
- */
-function drawThroneRoomDecor(ctx: CanvasRenderingContext2D): void {
-  const cx = cellX;
-  const cy = cellY;
-  // Pillars in open corners of the hall (all off-path cells).
-  for (const [col, row] of [[1, 1], [14, 1], [1, 8], [14, 8]] as const) {
-    drawPillar(ctx, cx(col), cy(row));
-  }
-  // The throne-on-dais monument at the top-centre of the hall, flanked by torches.
-  drawThroneDais(ctx, cx(8), cy(1) + 15);
-  drawTorch(ctx, cx(6), cy(1));
-  drawTorch(ctx, cx(10), cy(1));
-}
-
-/**
- * The King's Chamber (now level 4): the corrupt king's opulent private room. A
- * canopy bed at the head, spilled treasure chests, a small side throne and
- * banners — the deepest room of the castle. The two lanes enter along rows 2 & 8
- * and merge on row 6, leaving the mid-left and top open for furnishings.
- */
-function drawKingsChamberDecor(ctx: CanvasRenderingContext2D): void {
-  // Grand canopy bed spanning the top-centre (2×2, anchored at cell (5,0)).
-  drawBed(ctx, cellX(5), cellY(0));
-  // Treasure hoard along the open mid-left.
-  drawChest(ctx, cellX(2), cellY(4));
-  drawChest(ctx, cellX(4), cellY(4) + 4);
-  // A small side throne against the right wall.
-  drawThrone(ctx, cellX(14), cellY(4));
-  // Candle-torches flanking the bed + banners on the back wall.
-  drawTorch(ctx, cellX(4), cellY(0) + 6);
-  drawTorch(ctx, cellX(8), cellY(0) + 6);
-  drawBanner(ctx, cellX(11), 4, '#472a6b');
-  drawBanner(ctx, cellX(14), 4, '#c9a24a');
-}
-
-/** A short round stone pillar with a lit top, casting a soft ground shadow. */
-function drawPillar(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+/** The selected champion's reach, drawn on the floor under the figures. */
+function drawSelectedRange(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: RenderUiState): void {
+  if (ui.selectedTowerUid == null) return;
+  const t = engine.towers.find((x) => x.uid === ui.selectedTowerUid);
+  if (!t || t.def.generator) return;
+  const { x, y } = t.pos;
+  const time = now() / 1000;
   ctx.save();
-  ctx.translate(x, y);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.beginPath();
-  ctx.ellipse(0, 15, 16, 6, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Shaft.
-  const g = ctx.createLinearGradient(-11, 0, 11, 0);
-  g.addColorStop(0, '#4a4150');
-  g.addColorStop(0.5, '#7d7286');
-  g.addColorStop(1, '#4a4150');
-  ctx.fillStyle = g;
-  ctx.fillRect(-11, -16, 22, 32);
-  // Cap + base slabs.
-  ctx.fillStyle = '#9a8fa6';
-  ctx.fillRect(-14, -20, 28, 6);
-  ctx.fillRect(-14, 12, 28, 6);
-  ctx.restore();
-}
-
-/** A wall torch: dark bracket with a warm flame and glow. */
-function drawTorch(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Small ground shadow at the base.
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(0, 10, 7, 2.5, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Bracket.
-  ctx.strokeStyle = '#2a2230';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(0, 8);
-  ctx.lineTo(0, -4);
-  ctx.stroke();
-  // Flame glow + body.
-  ctx.shadowColor = '#ff9d3c';
-  ctx.shadowBlur = 16;
-  ctx.fillStyle = '#ffd15a';
-  ctx.beginPath();
-  ctx.ellipse(0, -9, 4.5, 8, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#ff8a2c';
-  ctx.beginPath();
-  ctx.ellipse(0, -8, 2.4, 5, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-/**
- * The throne standing on its raised dais, drawn as one monument centred at
- * (`x`,`y`) — the same arrangement (and size) the Throne Room stage uses. This
- * is what the `throne` prop places; its footprint is 3×2 (anchor = top-left),
- * so the drawer is invoked at the footprint centroid.
- */
-function drawThroneDais(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  drawDais(ctx, x, y + 11);
-  drawThrone(ctx, x, y - 11);
-}
-
-/** A two-step stone dais beneath the throne. */
-function drawDais(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.fillStyle = '#3b2130';
-  roundRect(ctx, -60, -6, 120, 20, 5);
-  ctx.fill();
-  ctx.fillStyle = '#4a2a3d';
-  roundRect(ctx, -44, -16, 88, 18, 5);
-  ctx.fill();
-  ctx.restore();
-}
-
-/** A golden high-backed throne with a red cushion and a small crown finial. */
-function drawThrone(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  const gold = '#e7b64a';
-  const goldDark = '#a97e26';
-  // High back.
-  ctx.fillStyle = gold;
-  roundRect(ctx, -16, -34, 32, 40, 5);
-  ctx.fill();
-  ctx.fillStyle = goldDark;
-  roundRect(ctx, -12, -30, 24, 32, 4);
-  ctx.fill();
-  // Red cushion / backrest padding.
-  ctx.fillStyle = '#8e1f2d';
-  roundRect(ctx, -10, -26, 20, 24, 3);
-  ctx.fill();
-  ctx.fillStyle = '#b5303f';
-  roundRect(ctx, -10, -4, 20, 10, 3);
-  ctx.fill();
-  // Armrests.
-  ctx.fillStyle = gold;
-  roundRect(ctx, -20, -6, 8, 14, 2);
-  ctx.fill();
-  roundRect(ctx, 12, -6, 8, 14, 2);
-  ctx.fill();
-  // Crown finial on top of the backrest.
-  ctx.fillStyle = gold;
-  ctx.beginPath();
-  ctx.moveTo(-9, -34);
-  ctx.lineTo(-9, -42);
-  ctx.lineTo(-4.5, -37);
-  ctx.lineTo(0, -44);
-  ctx.lineTo(4.5, -37);
-  ctx.lineTo(9, -42);
-  ctx.lineTo(9, -34);
-  ctx.closePath();
-  ctx.fill();
-  // Jewels on the crown.
-  ctx.fillStyle = '#e7443f';
-  ctx.beginPath();
-  ctx.arc(0, -40, 1.6, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-/**
- * A crenellated stone battlement strip across the very top edge of the board —
- * the castle's outer wall. Purely a backdrop band; nothing is placed on a cell.
- */
-function drawBattlements(ctx: CanvasRenderingContext2D): void {
-  ctx.save();
-  // Wall face.
-  ctx.fillStyle = '#3a4048';
-  ctx.fillRect(0, 0, BOARD_WIDTH, 14);
-  ctx.fillStyle = '#2c3138';
-  ctx.fillRect(0, 12, BOARD_WIDTH, 3);
-  // Merlons (the raised teeth) marching along the top.
-  ctx.fillStyle = '#4a515a';
-  const step = 24;
-  for (let x = 0; x < BOARD_WIDTH; x += step) {
-    ctx.fillRect(x + 3, 0, step - 6, 8);
-  }
-  ctx.restore();
-}
-
-/** A barred stone gate: an arched opening, a raised portcullis and iron studs. */
-function drawGate(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Stone surround.
-  ctx.fillStyle = '#5a626c';
-  roundRect(ctx, -20, -20, 40, 40, 4);
-  ctx.fill();
-  // Dark archway.
-  ctx.fillStyle = '#14171c';
-  ctx.beginPath();
-  ctx.moveTo(-13, 18);
-  ctx.lineTo(-13, -4);
-  ctx.arc(0, -4, 13, Math.PI, 0);
-  ctx.lineTo(13, 18);
-  ctx.closePath();
-  ctx.fill();
-  // Portcullis grid over the opening.
-  ctx.strokeStyle = '#8b929b';
-  ctx.lineWidth = 2;
-  for (const gx of [-8, 0, 8]) {
-    ctx.beginPath();
-    ctx.moveTo(gx, -12);
-    ctx.lineTo(gx, 17);
-    ctx.stroke();
-  }
-  for (const gy of [-4, 4, 12]) {
-    ctx.beginPath();
-    ctx.moveTo(-12, gy);
-    ctx.lineTo(12, gy);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-/** A hanging chandelier: a chain, an iron ring and a crown of candle flames. */
-function drawChandelier(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Chain up to the ceiling.
-  ctx.strokeStyle = '#4b4030';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, -y);
-  ctx.lineTo(0, -6);
-  ctx.stroke();
-  // Iron ring.
-  ctx.strokeStyle = '#6b5a34';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(0, 0, 12, 0, Math.PI * 2);
-  ctx.stroke();
-  // Candle flames around the ring.
-  for (let i = 0; i < 6; i++) {
-    const a = (i / 6) * Math.PI * 2;
-    const cxp = Math.cos(a) * 12;
-    const cyp = Math.sin(a) * 12;
-    ctx.shadowColor = '#ffb347';
-    ctx.shadowBlur = 8;
-    ctx.fillStyle = '#ffd15a';
-    ctx.beginPath();
-    ctx.ellipse(cxp, cyp - 3, 2, 4, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-  }
-  ctx.restore();
-}
-
-/** A hanging wall banner (pennant) in the given colour with a pale sigil bar. */
-function drawBanner(ctx: CanvasRenderingContext2D, x: number, y: number, color: string): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Rod.
-  ctx.fillStyle = '#c9a24a';
-  ctx.fillRect(-13, 0, 26, 3);
-  // Cloth with a notched (swallowtail) bottom.
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(-11, 3);
-  ctx.lineTo(11, 3);
-  ctx.lineTo(11, 34);
-  ctx.lineTo(0, 26);
-  ctx.lineTo(-11, 34);
-  ctx.closePath();
-  ctx.fill();
-  // Pale central emblem bar.
-  ctx.fillStyle = 'rgba(233,238,252,0.85)';
-  ctx.fillRect(-2.5, 8, 5, 14);
-  ctx.restore();
-}
-
-/** A long banquet table: cloth, place settings, a candelabra and side chairs. */
-function drawDiningTable(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  const halfW = 46;
-  ctx.save();
-  ctx.translate(x, y);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  roundRect(ctx, -halfW - 2, 12, halfW * 2 + 4, 10, 4);
-  ctx.fill();
-  // Chairs down each long side (drawn under the tabletop).
-  ctx.fillStyle = '#3a2a1c';
-  for (const cxp of [-30, -10, 10, 30]) {
-    ctx.fillRect(cxp - 5, -22, 10, 8);
-    ctx.fillRect(cxp - 5, 14, 10, 8);
-  }
-  // White tablecloth.
-  ctx.fillStyle = '#d9d2c4';
-  roundRect(ctx, -halfW, -14, halfW * 2, 28, 5);
-  ctx.fill();
-  ctx.fillStyle = '#c3bba8';
-  ctx.fillRect(-halfW, 8, halfW * 2, 6);
-  // Plates.
-  ctx.fillStyle = '#8b929b';
-  for (const px of [-32, -12, 12, 32]) {
-    ctx.beginPath();
-    ctx.arc(px, 0, 5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // Central candelabra.
-  ctx.strokeStyle = '#c9a24a';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(0, -10);
-  ctx.moveTo(-6, -6);
-  ctx.lineTo(6, -6);
-  ctx.stroke();
-  for (const fx of [-6, 0, 6]) {
-    ctx.shadowColor = '#ffb347';
-    ctx.shadowBlur = 7;
-    ctx.fillStyle = '#ffd15a';
-    ctx.beginPath();
-    ctx.ellipse(fx, -12, 1.8, 3.5, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-  }
-  ctx.restore();
-}
-
-/**
- * A grand four-poster canopy bed with a draped valance and pillows. Footprint
- * is 2×2 (anchor is the top-left cell), so its centre sits half a cell right
- * and down from the anchor.
- */
-function drawBed(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x + TILE / 2, y + TILE / 2);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  roundRect(ctx, -44, 30, 88, 14, 6);
-  ctx.fill();
-  // Mattress.
-  ctx.fillStyle = '#e7e1d4';
-  roundRect(ctx, -42, -10, 84, 44, 6);
-  ctx.fill();
-  // Blanket.
-  ctx.fillStyle = '#5a2a6e';
-  roundRect(ctx, -42, 12, 84, 22, 6);
-  ctx.fill();
-  ctx.fillStyle = '#c9a24a';
-  ctx.fillRect(-42, 12, 84, 4);
-  // Pillows.
-  ctx.fillStyle = '#ffffff';
-  roundRect(ctx, -36, -4, 30, 14, 4);
-  ctx.fill();
-  roundRect(ctx, 6, -4, 30, 14, 4);
-  ctx.fill();
-  // Bedposts.
-  ctx.fillStyle = '#7a5a2e';
-  for (const px of [-42, 42]) {
-    ctx.fillRect(px - 4, -38, 8, 72);
-  }
-  // Canopy top + drape.
-  ctx.fillStyle = '#472a6b';
-  ctx.fillRect(-47, -40, 94, 12);
-  ctx.fillStyle = '#5a2a6e';
-  ctx.beginPath();
-  ctx.moveTo(-47, -28);
-  ctx.quadraticCurveTo(-30, -16, -16, -28);
-  ctx.quadraticCurveTo(0, -16, 16, -28);
-  ctx.quadraticCurveTo(30, -16, 47, -28);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-}
-
-/** A treasure chest brimming with gold coins. */
-function drawChest(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(0, 14, 18, 5, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Body.
-  ctx.fillStyle = '#5a3a1e';
-  roundRect(ctx, -16, -2, 32, 16, 3);
-  ctx.fill();
-  // Lid (open, tilted back).
-  ctx.fillStyle = '#6e4a26';
-  roundRect(ctx, -16, -12, 32, 10, 3);
-  ctx.fill();
-  // Iron bands + lock.
-  ctx.fillStyle = '#3a2a1c';
-  ctx.fillRect(-2, -2, 4, 16);
-  ctx.fillStyle = '#c9a24a';
-  ctx.fillRect(-3, 4, 6, 5);
-  // Gold coins spilling from the top.
-  ctx.fillStyle = '#f2cf5b';
-  for (const [gx, gy] of [[-8, -3], [-1, -5], [6, -3], [-4, 0], [3, -1]] as const) {
-    ctx.beginPath();
-    ctx.arc(gx, gy, 3, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-/** A stout wooden barrel with iron hoops. */
-function drawBarrel(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(0, 16, 15, 5, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Barrel body (bulging staves).
-  const g = ctx.createLinearGradient(-13, 0, 13, 0);
-  g.addColorStop(0, '#5a3a1e');
-  g.addColorStop(0.5, '#8a5a2e');
-  g.addColorStop(1, '#5a3a1e');
+  const g = ctx.createRadialGradient(x, y, t.range * 0.2, x, y, t.range);
+  g.addColorStop(0, 'rgba(255,230,160,0)');
+  g.addColorStop(0.85, 'rgba(255,230,160,0.06)');
+  g.addColorStop(1, 'rgba(255,230,160,0.14)');
   ctx.fillStyle = g;
   ctx.beginPath();
-  ctx.moveTo(-11, -15);
-  ctx.quadraticCurveTo(-16, 0, -11, 15);
-  ctx.lineTo(11, 15);
-  ctx.quadraticCurveTo(16, 0, 11, -15);
-  ctx.closePath();
+  ctx.arc(x, y, t.range, 0, Math.PI * 2);
   ctx.fill();
-  // Stave seams.
-  ctx.strokeStyle = 'rgba(40,24,12,0.5)';
-  ctx.lineWidth = 1;
-  for (const sx of [-5, 0, 5]) {
-    ctx.beginPath();
-    ctx.moveTo(sx, -14);
-    ctx.lineTo(sx, 14);
-    ctx.stroke();
-  }
-  // Iron hoops.
-  ctx.strokeStyle = '#3a3a42';
-  ctx.lineWidth = 2.5;
-  for (const hy of [-10, 0, 10]) {
-    ctx.beginPath();
-    ctx.moveTo(-14, hy);
-    ctx.quadraticCurveTo(0, hy + 2, 14, hy);
-    ctx.stroke();
-  }
-  // Lid.
-  ctx.fillStyle = '#6e4a26';
-  ctx.beginPath();
-  ctx.ellipse(0, -15, 11, 3.5, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-/** A wooden supply crate with cross-braced planks. */
-function drawCrate(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(0, 16, 16, 5, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Box.
-  const g = ctx.createLinearGradient(-15, 0, 15, 0);
-  g.addColorStop(0, '#6e4a26');
-  g.addColorStop(0.5, '#8a642e');
-  g.addColorStop(1, '#6e4a26');
-  ctx.fillStyle = g;
-  roundRect(ctx, -15, -14, 30, 28, 2);
-  ctx.fill();
-  // Plank frame + diagonal braces.
-  ctx.strokeStyle = '#4a2f18';
-  ctx.lineWidth = 2.5;
-  ctx.strokeRect(-15, -14, 30, 28);
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(-15, -14);
-  ctx.lineTo(15, 14);
-  ctx.moveTo(15, -14);
-  ctx.lineTo(-15, 14);
+  ctx.strokeStyle = 'rgba(255,224,150,0.7)';
+  ctx.setLineDash([6, 6]);
+  ctx.lineDashOffset = -time * 14;
+  ctx.lineWidth = 1.4;
   ctx.stroke();
-  ctx.restore();
-}
-
-/** A wall rack holding crossed spears and a sword. */
-function drawWeaponRack(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.28)';
-  ctx.beginPath();
-  ctx.ellipse(0, 18, 15, 4, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Wooden rack frame.
-  ctx.fillStyle = '#4a2f18';
-  ctx.fillRect(-15, -18, 4, 36);
-  ctx.fillRect(11, -18, 4, 36);
-  ctx.fillRect(-15, -18, 30, 4);
-  ctx.fillRect(-15, 14, 30, 4);
-  // Two upright spears.
-  ctx.strokeStyle = '#7a5a2e';
-  ctx.lineWidth = 2;
-  for (const sx of [-6, 6]) {
-    ctx.beginPath();
-    ctx.moveTo(sx, 14);
-    ctx.lineTo(sx, -20);
-    ctx.stroke();
-    // Spearhead.
-    ctx.fillStyle = '#c8ccd4';
-    ctx.beginPath();
-    ctx.moveTo(sx, -26);
-    ctx.lineTo(sx - 3, -18);
-    ctx.lineTo(sx + 3, -18);
-    ctx.closePath();
-    ctx.fill();
-  }
-  // A sword hung across the middle.
-  ctx.strokeStyle = '#b7bcc6';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(-12, 2);
-  ctx.lineTo(12, -4);
-  ctx.stroke();
-  ctx.strokeStyle = '#c9a24a';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(-13, 3);
-  ctx.lineTo(-9, 0);
-  ctx.stroke();
-  ctx.restore();
-}
-
-/**
- * A tall two-bay bookshelf. Footprint spans two cells (anchor + the cell to its
- * right), so its visual centre sits on the seam between them.
- */
-function drawBookshelf(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x + TILE / 2, y);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  roundRect(ctx, -40, 16, 80, 9, 4);
-  ctx.fill();
-  // Case.
-  ctx.fillStyle = '#4a2f18';
-  roundRect(ctx, -40, -22, 80, 42, 3);
-  ctx.fill();
-  // Back panel.
-  ctx.fillStyle = '#2f1d0f';
-  ctx.fillRect(-36, -18, 72, 34);
-  // Shelves + book rows.
-  const bookColors = ['#7a2a2a', '#2a4a7a', '#2a6a3a', '#8a6a2a', '#5a2a6a'];
-  for (let s = 0; s < 3; s++) {
-    const shelfY = -18 + s * 12;
-    // Books standing on the shelf.
-    let bx = -35;
-    let ci = s;
-    while (bx < 35) {
-      const bw = 3 + ((ci * 7) % 4);
-      const bh = 8 + ((ci * 5) % 3);
-      ctx.fillStyle = bookColors[ci % bookColors.length];
-      ctx.fillRect(bx, shelfY + 10 - bh, bw, bh);
-      bx += bw + 1.5;
-      ci++;
-    }
-    // Shelf board.
-    ctx.fillStyle = '#3a2410';
-    ctx.fillRect(-36, shelfY + 10, 72, 2);
-  }
-  // Central divider between the two bays.
-  ctx.fillStyle = '#3a2410';
-  ctx.fillRect(-1.5, -18, 3, 34);
-  ctx.restore();
-}
-
-/**
- * A stone knight statue on a pedestal. Footprint is one cell wide and two tall
- * (anchor + the cell below), so it reads as a full-height monument.
- */
-function drawStatue(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y + TILE / 2);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.32)';
-  ctx.beginPath();
-  ctx.ellipse(0, 40, 20, 6, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Pedestal.
-  const pg = ctx.createLinearGradient(-16, 0, 16, 0);
-  pg.addColorStop(0, '#5a626c');
-  pg.addColorStop(0.5, '#7d8792');
-  pg.addColorStop(1, '#5a626c');
-  ctx.fillStyle = pg;
-  ctx.fillRect(-16, 20, 32, 20);
-  ctx.fillStyle = '#8b929b';
-  ctx.fillRect(-19, 16, 38, 6);
-  ctx.fillStyle = '#48505a';
-  ctx.fillRect(-16, 36, 32, 4);
-  // Stone knight figure.
-  const sg = ctx.createLinearGradient(-10, 0, 10, 0);
-  sg.addColorStop(0, '#6a727c');
-  sg.addColorStop(0.5, '#9aa2ac');
-  sg.addColorStop(1, '#6a727c');
-  ctx.fillStyle = sg;
-  // Legs/robe.
-  ctx.beginPath();
-  ctx.moveTo(-9, 16);
-  ctx.lineTo(-7, -6);
-  ctx.lineTo(7, -6);
-  ctx.lineTo(9, 16);
-  ctx.closePath();
-  ctx.fill();
-  // Torso + head.
-  ctx.beginPath();
-  ctx.moveTo(-7, -4);
-  ctx.lineTo(-6, -20);
-  ctx.lineTo(6, -20);
-  ctx.lineTo(7, -4);
-  ctx.closePath();
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(0, -25, 6, 0, Math.PI * 2);
-  ctx.fill();
-  // A grounded sword the statue rests both hands on.
-  ctx.strokeStyle = '#b7bcc6';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(0, -12);
-  ctx.lineTo(0, 16);
-  ctx.stroke();
-  ctx.strokeStyle = '#8b929b';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(-5, -10);
-  ctx.lineTo(5, -10);
-  ctx.stroke();
-  ctx.restore();
-}
-
-/**
- * A square ornamental fountain. Footprint is 2×2 (anchor is the top-left cell),
- * so its centre sits where the four cells meet.
- */
-function drawFountain(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x + TILE / 2, y + TILE / 2);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.28)';
-  ctx.beginPath();
-  ctx.ellipse(0, 34, 40, 10, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Outer stone basin.
-  ctx.fillStyle = '#7d8792';
-  ctx.beginPath();
-  ctx.ellipse(0, 8, 40, 22, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#5a626c';
-  ctx.beginPath();
-  ctx.ellipse(0, 12, 40, 20, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Water pool.
-  ctx.fillStyle = '#2f6b8a';
-  ctx.beginPath();
-  ctx.ellipse(0, 8, 33, 16, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#3f88ad';
-  ctx.beginPath();
-  ctx.ellipse(0, 7, 33, 16, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Central pillar + upper tier.
-  ctx.fillStyle = '#8b929b';
-  ctx.fillRect(-6, -18, 12, 24);
-  ctx.beginPath();
-  ctx.ellipse(0, -18, 16, 6, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#3f88ad';
-  ctx.beginPath();
-  ctx.ellipse(0, -19, 12, 4, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Water jets arcing off the top.
-  ctx.strokeStyle = 'rgba(180,225,245,0.8)';
-  ctx.lineWidth = 2;
-  for (const dir of [-1, 1]) {
-    ctx.beginPath();
-    ctx.moveTo(0, -22);
-    ctx.quadraticCurveTo(dir * 16, -30, dir * 24, 2);
-    ctx.stroke();
-  }
-  // Ripple highlights.
-  ctx.strokeStyle = 'rgba(200,235,250,0.5)';
-  ctx.lineWidth = 1;
-  for (const ry of [4, 10]) {
-    ctx.beginPath();
-    ctx.ellipse(0, ry, 20, 8, 0, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-/**
- * A large timber-framed house. Footprint is 3×2 (anchor is the top-left cell),
- * so its centre sits one cell right and half a cell down from the anchor.
- */
-function drawHouse(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x + TILE, y + TILE / 2);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(0, 44, 68, 12, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Chimney (behind the roof, smoking).
-  ctx.fillStyle = '#5a4030';
-  ctx.fillRect(28, -58, 14, 30);
-  ctx.fillStyle = '#3f2c20';
-  ctx.fillRect(26, -60, 18, 6);
-  // Plaster walls.
-  const wg = ctx.createLinearGradient(-54, 0, 54, 0);
-  wg.addColorStop(0, '#c9b48c');
-  wg.addColorStop(0.5, '#e0cda2');
-  wg.addColorStop(1, '#c9b48c');
-  ctx.fillStyle = wg;
-  ctx.fillRect(-54, -10, 108, 54);
-  // Timber framing (Tudor beams).
-  ctx.strokeStyle = '#5a3a24';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(-54, -10, 108, 54);
-  ctx.beginPath();
-  ctx.moveTo(-54, 18); ctx.lineTo(54, 18);       // mid rail
-  ctx.moveTo(-20, -10); ctx.lineTo(-20, 44);      // posts
-  ctx.moveTo(20, -10); ctx.lineTo(20, 44);
-  ctx.moveTo(-54, -10); ctx.lineTo(-20, 18);      // braces
-  ctx.moveTo(54, -10); ctx.lineTo(20, 18);
-  ctx.stroke();
-  // Pitched roof.
-  const rg = ctx.createLinearGradient(0, -60, 0, -8);
-  rg.addColorStop(0, '#7a2f2a');
-  rg.addColorStop(1, '#5a221e');
-  ctx.fillStyle = rg;
-  ctx.beginPath();
-  ctx.moveTo(-64, -8);
-  ctx.lineTo(0, -58);
-  ctx.lineTo(64, -8);
-  ctx.closePath();
-  ctx.fill();
-  // Roof ridge + eave line.
-  ctx.strokeStyle = '#3f1714';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  // Door.
-  ctx.fillStyle = '#4a2f18';
-  roundRect(ctx, -10, 14, 20, 30, 3);
-  ctx.fill();
-  ctx.fillStyle = '#c9a24a';
-  ctx.beginPath();
-  ctx.arc(5, 30, 1.8, 0, Math.PI * 2);
-  ctx.fill();
-  // Windows with cross mullions and a warm glow.
-  for (const wx of [-36, 36]) {
-    ctx.fillStyle = '#ffd98a';
-    roundRect(ctx, wx - 9, -2, 18, 16, 2);
-    ctx.fill();
-    ctx.strokeStyle = '#5a3a24';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(wx - 9, -2, 18, 16);
-    ctx.beginPath();
-    ctx.moveTo(wx, -2); ctx.lineTo(wx, 14);
-    ctx.moveTo(wx - 9, 6); ctx.lineTo(wx + 9, 6);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-/** Draw a crenellated (merlon-toothed) parapet along the top of a tower/wall. */
-function crenellate(
-  ctx: CanvasRenderingContext2D,
-  left: number,
-  top: number,
-  width: number,
-  merlonH: number,
-  color: string,
-): void {
-  ctx.fillStyle = color;
-  const step = width / 5;
-  for (let i = 0; i < 5; i += 2) {
-    ctx.fillRect(left + i * step, top, step, merlonH);
-  }
-}
-
-/**
- * A very large stone castle: a central keep flanked by two crenellated towers
- * over a barbican gate. Footprint is 3×3 (anchor is the top-left cell), so its
- * centre sits one cell right and one cell down from the anchor.
- */
-function drawCastle(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x + TILE, y + TILE);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.32)';
-  ctx.beginPath();
-  ctx.ellipse(0, 62, 78, 14, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  const stone = (x0: number, w: number) => {
-    const g = ctx.createLinearGradient(x0, 0, x0 + w, 0);
-    g.addColorStop(0, '#5a626c');
-    g.addColorStop(0.5, '#828c98');
-    g.addColorStop(1, '#5a626c');
-    return g;
-  };
-
-  // Curtain wall + central keep body.
-  ctx.fillStyle = stone(-58, 116);
-  ctx.fillRect(-58, -8, 116, 68);
-  crenellate(ctx, -58, -18, 116, 10, '#6b7480');
-
-  // Central keep, taller than the wall.
-  ctx.fillStyle = stone(-26, 52);
-  ctx.fillRect(-26, -50, 52, 110);
-  crenellate(ctx, -26, -62, 52, 12, '#77808c');
-
-  // Two flanking corner towers, tallest of all.
-  for (const tx of [-58, 34]) {
-    ctx.fillStyle = stone(tx, 24);
-    ctx.fillRect(tx, -44, 24, 104);
-    crenellate(ctx, tx, -56, 24, 12, '#77808c');
-    // A conical banner-topped turret cap? keep it flat-crenellated; add a slit.
-    ctx.fillStyle = '#20262e';
-    ctx.fillRect(tx + 9, -34, 6, 14);
-  }
-
-  // Stone coursing lines across the keep for texture.
-  ctx.strokeStyle = 'rgba(30,36,44,0.35)';
-  ctx.lineWidth = 1;
-  for (let ly = -40; ly < 56; ly += 12) {
-    ctx.beginPath();
-    ctx.moveTo(-26, ly); ctx.lineTo(26, ly);
-    ctx.stroke();
-  }
-
-  // Barbican gate: dark arched opening with a portcullis.
-  ctx.fillStyle = '#14171c';
-  ctx.beginPath();
-  ctx.moveTo(-16, 60);
-  ctx.lineTo(-16, 18);
-  ctx.arc(0, 18, 16, Math.PI, 0);
-  ctx.lineTo(16, 60);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = '#8b929b';
-  ctx.lineWidth = 2;
-  for (const gx of [-9, 0, 9]) {
-    ctx.beginPath(); ctx.moveTo(gx, 6); ctx.lineTo(gx, 58); ctx.stroke();
-  }
-  for (const gy of [18, 30, 44]) {
-    ctx.beginPath(); ctx.moveTo(-15, gy); ctx.lineTo(15, gy); ctx.stroke();
-  }
-
-  // Arrow-slit windows on the keep.
-  ctx.fillStyle = '#20262e';
-  for (const wy of [-30, -8]) {
-    ctx.fillRect(-4, wy, 8, 14);
-  }
-
-  // A pennant flying from the keep.
-  ctx.strokeStyle = '#c9a24a';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, -62); ctx.lineTo(0, -80);
-  ctx.stroke();
-  ctx.fillStyle = '#8e1f2d';
-  ctx.beginPath();
-  ctx.moveTo(0, -80);
-  ctx.lineTo(18, -75);
-  ctx.lineTo(0, -70);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-}
-
-/** A stone village well with a shingled roof and a bucket on a rope. */
-function drawWell(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(0, 20, 22, 7, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Circular stone rim.
-  ctx.fillStyle = '#7d8792';
-  ctx.beginPath();
-  ctx.ellipse(0, 12, 20, 10, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#20262e';
-  ctx.beginPath();
-  ctx.ellipse(0, 11, 14, 6, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Stone coursing on the rim.
-  ctx.strokeStyle = 'rgba(30,36,44,0.4)';
-  ctx.lineWidth = 1;
-  for (const a of [-1, -0.4, 0.4, 1]) {
-    ctx.beginPath();
-    ctx.moveTo(a * 18, 6);
-    ctx.lineTo(a * 15, 15);
-    ctx.stroke();
-  }
-  // Two upright posts.
-  ctx.fillStyle = '#6e4a26';
-  ctx.fillRect(-18, -30, 5, 34);
-  ctx.fillRect(13, -30, 5, 34);
-  // Shingled peaked roof.
-  const rg = ctx.createLinearGradient(0, -44, 0, -26);
-  rg.addColorStop(0, '#7a2f2a');
-  rg.addColorStop(1, '#5a221e');
-  ctx.fillStyle = rg;
-  ctx.beginPath();
-  ctx.moveTo(-26, -26);
-  ctx.lineTo(0, -46);
-  ctx.lineTo(26, -26);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = '#3f1714';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  // Crossbar + bucket on a rope.
-  ctx.fillStyle = '#4a3320';
-  ctx.fillRect(-16, -26, 32, 4);
-  ctx.strokeStyle = '#c9b48c';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, -22);
-  ctx.lineTo(0, -6);
-  ctx.stroke();
-  ctx.fillStyle = '#5a3a1e';
-  roundRect(ctx, -6, -6, 12, 9, 2);
-  ctx.fill();
-  ctx.fillStyle = '#3a2a1c';
-  ctx.fillRect(-6, -6, 12, 2);
-  ctx.restore();
-}
-
-/**
- * A market stall: a striped-awning trestle piled with produce. Footprint is 2×1
- * (anchor is the left cell), so its centre sits half a cell right of the anchor.
- */
-function drawMarketStall(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.28)';
-  roundRect(ctx, -40, 16, 80, 10, 5);
-  ctx.fill();
-  // Back support posts.
-  ctx.fillStyle = '#5a3a1e';
-  ctx.fillRect(-38, -34, 5, 52);
-  ctx.fillRect(33, -34, 5, 52);
-  // Counter / table.
-  ctx.fillStyle = '#7a5230';
-  roundRect(ctx, -40, 2, 80, 16, 3);
-  ctx.fill();
-  ctx.fillStyle = '#5f3f24';
-  ctx.fillRect(-40, 14, 80, 4);
-  // Produce piles on the counter.
-  const heap = (hx: number, col: string) => {
-    ctx.fillStyle = col;
-    for (const [dx, dy] of [[-4, 0], [4, 0], [0, -4], [-2, -1], [2, -1]] as const) {
-      ctx.beginPath();
-      ctx.arc(hx + dx, -1 + dy, 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  };
-  heap(-24, '#d24b3a');
-  heap(-2, '#e2963a');
-  heap(20, '#5fa03a');
-  // Striped awning.
-  const stripeW = 76 / 6;
-  for (let i = 0; i < 6; i++) {
-    ctx.fillStyle = i % 2 === 0 ? '#c94b3a' : '#efe6d2';
-    ctx.beginPath();
-    ctx.moveTo(-38 + i * stripeW, -34);
-    ctx.lineTo(-38 + (i + 1) * stripeW, -34);
-    ctx.lineTo(-38 + (i + 1) * stripeW, -20);
-    ctx.lineTo(-38 + i * stripeW, -20);
-    ctx.closePath();
-    ctx.fill();
-  }
-  // Scalloped awning hem.
-  ctx.fillStyle = '#a53a2c';
-  for (let i = 0; i < 6; i++) {
-    ctx.beginPath();
-    ctx.arc(-38 + (i + 0.5) * stripeW, -20, stripeW / 2, 0, Math.PI);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-/** A wrought-iron street lamp with a glowing lantern head. */
-function drawLamppost(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(0, 22, 12, 4, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Base + fluted post.
-  ctx.fillStyle = '#2b3038';
-  roundRect(ctx, -7, 16, 14, 8, 2);
-  ctx.fill();
-  ctx.fillStyle = '#3a414b';
-  ctx.fillRect(-3, -22, 6, 40);
-  ctx.fillStyle = '#4a525d';
-  ctx.fillRect(-3, -22, 2, 40);
-  // Scroll bracket + crossarm.
-  ctx.strokeStyle = '#2b3038';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(0, -22);
-  ctx.lineTo(0, -30);
-  ctx.stroke();
-  // Lantern housing.
-  ctx.fillStyle = '#2b3038';
-  ctx.beginPath();
-  ctx.moveTo(-9, -30);
-  ctx.lineTo(9, -30);
-  ctx.lineTo(6, -46);
-  ctx.lineTo(-6, -46);
-  ctx.closePath();
-  ctx.fill();
-  // Cap.
-  ctx.beginPath();
-  ctx.moveTo(-7, -46);
-  ctx.lineTo(7, -46);
-  ctx.lineTo(0, -53);
-  ctx.closePath();
-  ctx.fill();
-  // Warm glass glow.
-  ctx.shadowColor = '#ffca66';
-  ctx.shadowBlur = 12;
-  ctx.fillStyle = '#ffe09a';
-  roundRect(ctx, -6, -44, 12, 13, 2);
-  ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.restore();
-}
-
-/** A broad-canopied deciduous tree. */
-function drawTree(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(0, 22, 20, 6, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Trunk.
-  ctx.fillStyle = '#5a3f28';
-  ctx.fillRect(-5, 0, 10, 22);
-  ctx.fillStyle = '#6e4f32';
-  ctx.fillRect(-5, 0, 4, 22);
-  // Leafy canopy — clustered blobs, darker base then lit top.
-  const blobs: [number, number, number][] = [
-    [-13, -6, 15], [13, -6, 15], [0, -18, 18], [-8, -20, 12], [9, -19, 12],
-  ];
-  ctx.fillStyle = '#2f6a2f';
-  for (const [bx, by, r] of blobs) {
-    ctx.beginPath();
-    ctx.arc(bx, by, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.fillStyle = '#3f8a3a';
-  for (const [bx, by, r] of blobs) {
-    ctx.beginPath();
-    ctx.arc(bx - 3, by - 4, r * 0.72, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // Sun-dappled highlights.
-  ctx.fillStyle = 'rgba(150,210,110,0.6)';
-  for (const [hx, hy] of [[-6, -22], [6, -14], [-12, -8]] as const) {
-    ctx.beginPath();
-    ctx.arc(hx, hy, 3, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-/** A neatly trimmed garden hedge. */
-function drawHedge(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.28)';
-  roundRect(ctx, -20, 12, 40, 8, 4);
-  ctx.fill();
-  // Body of the hedge — rounded top.
-  ctx.fillStyle = '#2f6a34';
-  roundRect(ctx, -20, -12, 40, 28, 10);
-  ctx.fill();
-  // Lit crown.
-  ctx.fillStyle = '#3f8a42';
-  roundRect(ctx, -18, -12, 36, 12, 8);
-  ctx.fill();
-  // Foliage dabs for texture.
-  ctx.fillStyle = 'rgba(120,180,90,0.5)';
-  for (const [dx, dy] of [[-13, -6], [-4, -8], [6, -6], [14, -5], [0, 0], [-9, 2], [10, 2]] as const) {
-    ctx.beginPath();
-    ctx.arc(dx, dy, 3, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-/**
- * A wooden merchant's cart with a canvas cover. Footprint is 2×1 (anchor is the
- * left cell), so its centre sits half a cell right of the anchor.
- */
-function drawCart(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  roundRect(ctx, -36, 16, 72, 9, 4);
-  ctx.fill();
-  // Wheels.
-  ctx.fillStyle = '#3a2a1c';
-  for (const wx of [-22, 22]) {
-    ctx.beginPath();
-    ctx.arc(wx, 14, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#5f3f24';
-    ctx.beginPath();
-    ctx.arc(wx, 14, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#3a2a1c';
-    ctx.lineWidth = 1.5;
-    for (const a of [0, 1, 2, 3]) {
-      ctx.beginPath();
-      ctx.moveTo(wx, 14);
-      ctx.lineTo(wx + Math.cos((a * Math.PI) / 2) * 8, 14 + Math.sin((a * Math.PI) / 2) * 8);
-      ctx.stroke();
-    }
-    ctx.fillStyle = '#3a2a1c';
-  }
-  // Cart bed.
-  ctx.fillStyle = '#7a5230';
-  roundRect(ctx, -34, -2, 68, 14, 2);
-  ctx.fill();
-  ctx.fillStyle = '#5f3f24';
-  ctx.fillRect(-34, 8, 68, 4);
-  // Plank lines.
-  ctx.strokeStyle = 'rgba(50,34,20,0.4)';
-  ctx.lineWidth = 1;
-  for (const px of [-20, -6, 8, 22]) {
-    ctx.beginPath();
-    ctx.moveTo(px, -2);
-    ctx.lineTo(px, 12);
-    ctx.stroke();
-  }
-  // Canvas cover / arched tilt over the back.
-  ctx.fillStyle = '#d9cdb0';
-  ctx.beginPath();
-  ctx.moveTo(-30, -2);
-  ctx.quadraticCurveTo(-8, -30, 14, -2);
-  ctx.closePath();
-  ctx.fill();
-  // Canvas ribbing.
-  ctx.strokeStyle = 'rgba(120,105,75,0.5)';
-  ctx.lineWidth = 1;
-  for (const rx of [-18, -4, 8]) {
-    ctx.beginPath();
-    ctx.moveTo(rx, -2);
-    ctx.quadraticCurveTo(rx + 2, -18, rx + 6, -2);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-/** A wooden signpost with two pointing direction boards. */
-function drawSignpost(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(0, 22, 10, 4, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Post.
-  ctx.fillStyle = '#6e4a26';
-  ctx.fillRect(-3, -26, 6, 48);
-  ctx.fillStyle = '#5a3a1e';
-  ctx.fillRect(1, -26, 2, 48);
-  // Two arrow boards pointing opposite ways.
-  const board = (top: number, dir: number, col: string) => {
-    ctx.fillStyle = col;
-    ctx.beginPath();
-    if (dir > 0) {
-      ctx.moveTo(-2, top);
-      ctx.lineTo(16, top);
-      ctx.lineTo(22, top + 5);
-      ctx.lineTo(16, top + 10);
-      ctx.lineTo(-2, top + 10);
-    } else {
-      ctx.moveTo(2, top);
-      ctx.lineTo(-16, top);
-      ctx.lineTo(-22, top + 5);
-      ctx.lineTo(-16, top + 10);
-      ctx.lineTo(2, top + 10);
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(50,34,20,0.5)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-  };
-  board(-24, 1, '#a9803f');
-  board(-8, -1, '#96703a');
-  ctx.restore();
-}
-
-/**
- * A tall, narrow row townhouse with a steep gable. Footprint is 2×2 (anchor is
- * the top-left cell), so its centre sits half a cell right and down.
- */
-function drawTownhouse(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.save();
-  ctx.translate(x, y);
-  // Ground shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(0, 44, 42, 11, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Plaster wall.
-  const wg = ctx.createLinearGradient(-32, 0, 32, 0);
-  wg.addColorStop(0, '#b9a680');
-  wg.addColorStop(0.5, '#d4c39a');
-  wg.addColorStop(1, '#b9a680');
-  ctx.fillStyle = wg;
-  ctx.fillRect(-32, -22, 64, 66);
-  ctx.strokeStyle = '#5a3a24';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(-32, -22, 64, 66);
-  // Exposed corner timbers.
-  ctx.fillStyle = '#5a3a24';
-  ctx.fillRect(-32, -22, 4, 66);
-  ctx.fillRect(28, -22, 4, 66);
-  // Steep gable roof (overhangs the wall).
-  const rg = ctx.createLinearGradient(0, -58, 0, -22);
-  rg.addColorStop(0, '#66463a');
-  rg.addColorStop(1, '#48302a');
-  ctx.fillStyle = rg;
-  ctx.beginPath();
-  ctx.moveTo(-38, -20);
-  ctx.lineTo(0, -60);
-  ctx.lineTo(38, -20);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = '#331f1a';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  // Gable window (attic).
-  ctx.fillStyle = '#ffd98a';
-  roundRect(ctx, -6, -34, 12, 12, 2);
-  ctx.fill();
-  ctx.strokeStyle = '#5a3a24';
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(-6, -34, 12, 12);
-  // Upper-storey windows.
-  for (const wx of [-17, 17]) {
-    ctx.fillStyle = '#ffd98a';
-    roundRect(ctx, wx - 8, -14, 16, 16, 2);
-    ctx.fill();
-    ctx.strokeStyle = '#5a3a24';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(wx - 8, -14, 16, 16);
-    ctx.beginPath();
-    ctx.moveTo(wx, -14); ctx.lineTo(wx, 2);
-    ctx.moveTo(wx - 8, -6); ctx.lineTo(wx + 8, -6);
-    ctx.stroke();
-  }
-  // Door.
-  ctx.fillStyle = '#4a2f18';
-  roundRect(ctx, -9, 16, 18, 28, 3);
-  ctx.fill();
-  ctx.fillStyle = '#c9a24a';
-  ctx.beginPath();
-  ctx.arc(5, 30, 1.6, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawPath(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
-  ctx.save();
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  // Paint layer by layer across all lanes so converging lanes' borders never
-  // overdraw another lane's fill. A themed level (e.g. the Throne Room's carpet)
-  // can override these layers; otherwise the default dirt track is used.
-  const layers: [string, number][] = themeFor(engine)?.path ?? DEFAULT_PATH_LAYERS;
-  // Each lane draws only its revealed fraction (1 for normal lanes); a lane
-  // opening mid-battle rolls out from its spawn like a carpet.
-  const laneShapes = engine.lanes.map((lane, i) => {
-    const frac = engine.laneRevealFraction(i);
-    if (frac <= 0) return null;
-    return frac >= 1 ? lane.waypoints : partialPolyline(lane.waypoints, frac);
-  });
-  for (const [color, width] of layers) {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    for (const pts of laneShapes) {
-      if (pts) strokePolyline(ctx, pts);
-    }
-  }
   ctx.restore();
 }
 
@@ -1756,7 +664,7 @@ function drawLaneFlow(
   ctx.lineCap = 'round';
 
   // Marching-ants dashed guide line running the whole route.
-  ctx.strokeStyle = 'rgba(120, 200, 255, 0.5)';
+  ctx.strokeStyle = 'rgba(255, 226, 160, 0.45)';
   ctx.lineWidth = 3;
   ctx.setLineDash([9, 15]);
   ctx.lineDashOffset = -t;
@@ -1776,7 +684,9 @@ function drawLaneFlow(
   }
 
   const spacing = 40;
-  ctx.strokeStyle = 'rgba(160, 218, 255, 0.95)';
+  ctx.strokeStyle = 'rgba(255, 236, 190, 0.95)';
+  ctx.shadowColor = 'rgba(255, 190, 90, 0.8)';
+  ctx.shadowBlur = 6;
   ctx.lineWidth = 3;
   for (let d = t % spacing; d < total; d += spacing) {
     // Locate the segment containing arc-distance `d`.
@@ -1840,172 +750,215 @@ function drawPlacementHints(
   ctx.restore();
 }
 
-function drawTowers(
+/**
+ * Shared compositor settings for a board figure: ink outline, the stage's rim
+ * light, form shading, and (on sunlit stages) a cast shadow along the sun.
+ */
+function boardStyle(st: BoardState, accent: string, boss = false): FigureStyle {
+  const rim = LIGHT[st.atmo.light].core;
+  const sun = st.atmo.sun;
+  return {
+    accent,
+    outline: 0.95,
+    rim,
+    rimAlpha: 0.45 + 0.25 * st.atmo.darkness,
+    shading: 1,
+    headY: boss ? -40 : -20,
+    feetY: 12,
+    box: boss ? BOSS_BOX : DEFAULT_BOX,
+    cast: sun
+      ? { dx: Math.cos(sun.angle) * 0.55, dy: Math.max(0.12, Math.sin(sun.angle) * 0.4), alpha: 0.28 }
+      : undefined,
+  };
+}
+
+/** Soft contact shadow pooled under a figure's feet (local origin = figure). */
+function contactShadow(ctx: CanvasRenderingContext2D, y: number, rx: number, ry: number, alpha = 1): void {
+  const g = ctx.createRadialGradient(0, y, 0, 0, y, rx);
+  g.addColorStop(0, `rgba(8,5,14,${0.55 * alpha})`);
+  g.addColorStop(0.55, `rgba(8,5,14,${0.32 * alpha})`);
+  g.addColorStop(1, 'rgba(8,5,14,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.ellipse(0, y, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/**
+ * One deployed champion: contact shadow, aura tells, then the figure through
+ * the compositor with idle breathing, a weight-shift sway, an anticipation lean
+ * before each strike and an eased lunge/follow-through after it.
+ */
+function drawTower(
   ctx: CanvasRenderingContext2D,
   engine: GameEngine,
   ui: RenderUiState,
+  st: BoardState,
+  t: Tower,
 ): void {
-  for (const t of engine.towers) {
-    const { x, y } = t.pos;
-    const selected = t.uid === ui.selectedTowerUid;
+  const { x, y } = t.pos;
+  const selected = t.uid === ui.selectedTowerUid;
+  const hovered = !selected && ui.hoverCol === t.col && ui.hoverRow === t.row;
+  const time = st.vfx.time;
 
-    if (selected && !t.def.generator) {
-      // Reach circle (all AoE types can pivot within this radius).
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(x, y, t.range, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.06)';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-      ctx.setLineDash([4, 4]);
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.restore();
-    }
+  // Resolve this tower's aim (live target first, else its last aim point) for
+  // both the attack lunge and which way a drawn figure faces.
+  const target =
+    t.targetUid != null
+      ? engine.enemies.find((e) => e.uid === t.targetUid && !e.dead)
+      : undefined;
+  const aimPt = target?.pos ?? t.aimTarget ?? null;
+  const faceLeft = aimPt ? aimPt.x < x : false;
+  let ux = 0;
+  let uy = 0;
+  if (target) {
+    const d = Math.hypot(target.pos.x - x, target.pos.y - y) || 1;
+    ux = (target.pos.x - x) / d;
+    uy = (target.pos.y - y) / d;
+  }
 
-    // Resolve this tower's aim (live target first, else its last aim point) for
-    // both the attack lunge and which way a drawn figure faces.
-    const target =
-      t.targetUid != null
-        ? engine.enemies.find((e) => e.uid === t.targetUid && !e.dead)
-        : undefined;
-    const aimPt = target?.pos ?? t.aimTarget ?? null;
-    const faceLeft = aimPt ? aimPt.x < x : false;
+  // Lunge after a strike (eased: snaps out, settles back) and an anticipation
+  // lean *away* from the target in the last instant before the next blow.
+  let ox = 0;
+  let oy = 0;
+  let squash = 0;
+  const strike = Math.max(0, Math.min(1, t.attackAnim / 0.18));
+  if (strike > 0 && target) {
+    const push = ease.outCubic(strike) * 5;
+    ox += ux * push;
+    oy += uy * push;
+    squash -= 0.04 * strike;
+  } else if (target && t.cooldown > 0 && t.cooldown < 0.14 && t.charge <= 0) {
+    const wind = 1 - t.cooldown / 0.14;
+    const back = ease.inCubic(wind) * 1.8;
+    ox -= ux * back;
+    oy -= uy * back;
+    squash += 0.035 * wind;
+  }
 
-    // Aim direction for a small lunge on attack.
-    let ox = 0;
-    let oy = 0;
-    if (t.attackAnim > 0 && target) {
-      const dx = target.pos.x - x;
-      const dy = target.pos.y - y;
-      const d = Math.hypot(dx, dy) || 1;
-      const push = (t.attackAnim / 0.18) * 5;
-      ox = (dx / d) * push;
-      oy = (dy / d) * push;
-    }
+  // Idle life: breathing (a gentle rise and settle about the feet) and a slow
+  // weight shift. Damped while the champion is mid-attack.
+  const phase = t.uid * 1.37;
+  const idle = strike > 0 || t.charge > 0 ? 0.3 : 1;
+  const breath = Math.sin(time * 2.1 + phase) * idle;
+  const sway = Math.sin(time * 0.85 + phase * 0.7) * 0.35 * idle;
 
-    // Better Morale (Swordsman): a golden pulse whose strength grows with the
-    // number of adjacent allies boosting this tower.
-    const moraleStacks = t.adjacentDamageMult > 0 ? t.adjacentAllies : 0;
+  // Better Morale (Swordsman): a golden pulse whose strength grows with the
+  // number of adjacent allies boosting this tower.
+  const moraleStacks = t.adjacentDamageMult > 0 ? t.adjacentAllies : 0;
 
+  ctx.save();
+  ctx.translate(x + ox, y + oy);
+  if (moraleStacks > 0) {
+    const osc = moralePulse();
+    const amp = Math.min(0.06, 0.02 + 0.012 * (moraleStacks - 1));
+    const s = 1 + amp * osc;
+    ctx.scale(s, s);
+    drawMoraleGlow(ctx, moraleStacks);
+  }
+  contactShadow(ctx, 10.5, 15, 6);
+  // The player's own champion gets a thin outline around its foot shadow, tinted
+  // from its portrait's outfit colour — a subtle "this hero is yours" marker.
+  // While its ability haste is active (the Bow's Quickdraw) the ring *flares*.
+  if (t.def.visual.shape.startsWith('player-')) {
+    const accent = t.def.visual.playerConfig?.outfitColor ?? t.def.visual.color;
+    const flaring = t.abilitySpeedBuffTimer > 0;
+    const pulse = flaring ? moralePulse() : 0;
     ctx.save();
-    ctx.translate(x + ox, y + oy);
-    // A subtle scale pulse of the whole tower while the morale buff is active;
-    // each stack widens the pulse a little.
-    if (moraleStacks > 0) {
-      const osc = moralePulse(); // 0..1
-      const amp = Math.min(0.06, 0.02 + 0.012 * (moraleStacks - 1));
-      const s = 1 + amp * osc;
-      ctx.scale(s, s);
-    }
-    // Base pad — its shadow glows gold while the Better Morale aura is active
-    // (drawn under the pad so the glow reads as a warm pool at the unit's feet).
-    if (moraleStacks > 0) drawMoraleGlow(ctx, moraleStacks);
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.strokeStyle = shade(accent, flaring ? 0.5 : 0.2);
+    ctx.lineWidth = flaring ? 2.4 + pulse * 1.6 : 1.6;
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = flaring ? 14 + pulse * 12 : 6;
     ctx.beginPath();
-    ctx.ellipse(0, 10, 15, 6, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // The player's own champion gets a thin outline around its foot shadow, tinted
-    // from its portrait's outfit colour — a subtle "this hero is yours" marker that
-    // sets it apart from the summoned roster. Lightened so it reads against the
-    // dark pad, with a soft same-colour glow.
-    if (t.def.visual.shape.startsWith('player-')) {
-      const accent = t.def.visual.playerConfig?.outfitColor ?? t.def.visual.color;
-      // While the champion's own ability haste is active (the Bow's Quickdraw)
-      // the outline *flares*: brighter, thicker, glowing and pulsing, with an
-      // extra outer ring — a unique tell distinct from the Bard's floating notes.
-      const flaring = t.abilitySpeedBuffTimer > 0;
-      const pulse = flaring ? moralePulse() : 0; // 0..1 shared board clock
-      ctx.save();
-      ctx.strokeStyle = shade(accent, flaring ? 0.5 : 0.2);
-      ctx.lineWidth = flaring ? 2.4 + pulse * 1.6 : 1.6;
-      ctx.shadowColor = accent;
-      ctx.shadowBlur = flaring ? 14 + pulse * 12 : 6;
+    ctx.ellipse(0, 10, 15 + (flaring ? 2 + pulse * 2 : 0), 6 + (flaring ? 1 + pulse : 0), 0, 0, Math.PI * 2);
+    ctx.stroke();
+    if (flaring) {
+      ctx.globalAlpha = 0.3 + 0.3 * pulse;
+      ctx.lineWidth = 1.4;
       ctx.beginPath();
-      ctx.ellipse(0, 10, 15 + (flaring ? 2 + pulse * 2 : 0), 6 + (flaring ? 1 + pulse : 0), 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 10, 20 + pulse * 5, 8.5 + pulse * 2.5, 0, 0, Math.PI * 2);
       ctx.stroke();
-      if (flaring) {
-        // A fainter, wider outer halo pulsing in the champion's colour.
-        ctx.globalAlpha = 0.3 + 0.3 * pulse;
-        ctx.lineWidth = 1.4;
-        ctx.beginPath();
-        ctx.ellipse(0, 10, 20 + pulse * 5, 8.5 + pulse * 2.5, 0, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.restore();
     }
-
-    if (hasSprite(t.def.visual.shape)) {
-      // Procedural figure in place of the flat disc + emoji token. `anim` eases
-      // with the attack (1 just after a strike -> 0 at rest); each sprite reads
-      // it its own way (bowstring snap, sword swing). While a throw is playing,
-      // drive the sprite from the longer `throwAnim` instead so the Spearman's
-      // flung javelin (Javelin Toss) stays visible past the throw beam. While a
-      // charged attack winds up, ramp the same value 0->1 across the charge so
-      // the caster visibly gathers the attack (the Wizard raising his staff).
-      const throwing = t.throwAnim > 0;
-      const charging = t.charge > 0 && t.chargeMax > 0;
-      const anim = charging
-        ? 1 - t.charge / t.chargeMax
-        : throwing
-          ? t.throwAnim / THROW_ANIM_TIME
-          : Math.max(0, Math.min(1, t.attackAnim / 0.18));
-      // The "empowered" flourish marks a champion whose signature upgrade is
-      // bought — faint wind motes for the Wizard (Wind Slice → cone), and arcane
-      // sparkles off the Elf's bow once she buys Chain Enchantment (which lifts
-      // her bounce count above the base). Each sprite reads the flag its own way.
-      const empowered =
-        t.aoe === 'cone' ||
-        (t.def.visual.shape === 'elf' && t.bounces > (t.def.bounces ?? 0));
-      drawUnitSprite(
-        ctx,
-        t.def.visual.shape,
-        t.def.visual.color,
-        faceLeft,
-        anim,
-        throwing,
-        empowered,
-        t.def.visual.playerConfig,
-      );
-      // The Magic adventurer visibly gathers its orb during the wind-up: a
-      // growing ball of the caster's own colour cupped in the raised hands, in
-      // front of the figure on the side it faces. It grows with the charge, then
-      // launches as a projectile the moment the cast releases.
-      if (t.aoe === 'circle' && t.charge > 0 && t.chargeMax > 0) {
-        const grow = 1 - t.charge / t.chargeMax; // 0 at cast start → 1 at release
-        const accent = t.def.visual.playerConfig?.outfitColor ?? t.def.visual.color;
-        const cx = (faceLeft ? -1 : 1) * (12 + 1.6 * grow);
-        drawChargingOrb(ctx, cx, -4.5, 1.2 + 4.3 * grow, accent, grow);
-      }
-    } else {
-      // Body disc.
-      ctx.fillStyle = t.def.visual.color;
-      ctx.beginPath();
-      ctx.arc(0, 0, 15, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-      ctx.stroke();
-      // Icon.
-      ctx.font = '17px serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(t.def.visual.icon, 0, 1);
-    }
-    // Preload status gem (Crossbow's Quick Loader): a small diamond tucked at
-    // the tower's foot — black when empty, blue-green when a spare is ready.
-    if (t.preloadMax > 0) drawPreloadGem(ctx, t.preloaded > 0);
-    // A Wizard's Guiding Gale wraps the champion in a small swirling wind —
-    // drawn over the figure so it reads as enveloping the unit, not a foot pool.
-    if (t.rangeBuffed) drawWindShroud(ctx);
     ctx.restore();
+  }
 
-    // Music notes orbiting a champion currently hastened by a Bard's tune —
-    // drawn in world space (outside the tower's lunge/scale transform) so they
-    // circle steadily around its head. Tinted the Bard's colour, not the buffed
-    // unit's, so every buffed ally floats the same minstrel-pink notes.
+  // Breathing + sway + squash about the feet.
+  ctx.translate(sway, 11);
+  ctx.scale(FIGURE_SCALE * (1 - 0.008 * breath - squash * 0.5), FIGURE_SCALE * (1 + 0.018 * breath + squash));
+  ctx.translate(0, -11);
+
+  if (t.rangeBuffed) drawGale(ctx, 'back', t.uid * 0.37);
+  if (hasSprite(t.def.visual.shape)) {
+    // `anim` eases with the attack (1 just after a strike → 0 at rest); each
+    // sprite reads it its own way (bowstring snap, sword swing). A throw drives
+    // it from the longer `throwAnim`; a charge ramps it 0→1 across the wind-up.
+    const throwing = t.throwAnim > 0;
+    const charging = t.charge > 0 && t.chargeMax > 0;
+    const rawAnim = charging
+      ? ease.inOutSine(1 - t.charge / t.chargeMax)
+      : throwing
+        ? t.throwAnim / THROW_ANIM_TIME
+        : ease.outQuad(strike);
+    // Quantized so attack poses reuse cached frames (12 steps is smooth at 0.18s).
+    const anim = Math.round(rawAnim * 12) / 12;
+    // The "empowered" flourish marks a champion whose signature upgrade is
+    // bought — wind motes for the Wizard (Wind Slice → cone), arcane sparkles
+    // off the Elf's bow once Chain Enchantment lifts her bounce count.
+    const empowered =
+      t.aoe === 'cone' ||
+      (t.def.visual.shape === 'elf' && t.bounces > (t.def.bounces ?? 0));
+    const style = boardStyle(st, t.def.visual.playerConfig?.outfitColor ?? t.def.visual.color);
+    if (selected) {
+      style.ink = INK.select;
+      style.glow = 2.4;
+    } else if (hovered) {
+      style.rimAlpha = (style.rimAlpha ?? 0.5) + 0.3;
+    }
+    // Empowered Wizard/Elf flourishes animate from inside the sprite: no cache.
+    const live = empowered && (t.def.visual.shape === 'elf' || t.def.visual.shape === 'wizard');
+    paintFigure(
+      ctx,
+      (g) =>
+        drawUnitSprite(g, t.def.visual.shape, t.def.visual.color, faceLeft, anim, throwing, empowered, t.def.visual.playerConfig),
+      style,
+      live
+        ? undefined
+        : `u|${t.def.visual.shape}|${t.def.visual.color}|${faceLeft ? 1 : 0}|${anim}|${throwing ? 1 : 0}|${empowered ? 1 : 0}|${cfgKey(t.def.visual.playerConfig)}`,
+    );
+    // The Magic adventurer visibly gathers its orb during the wind-up.
+    if (t.aoe === 'circle' && charging) {
+      const grow = 1 - t.charge / t.chargeMax;
+      const accent = t.def.visual.playerConfig?.outfitColor ?? t.def.visual.color;
+      const cx = (faceLeft ? -1 : 1) * (12 + 1.6 * grow);
+      drawChargingOrb(ctx, cx, -4.5, 1.2 + 4.3 * grow, accent, grow);
+    }
+  } else {
+    // Emoji fallback token: a lit disc with an inked rim.
+    const g = ctx.createRadialGradient(-4, -5, 2, 0, 0, 15);
+    g.addColorStop(0, shade(t.def.visual.color, 0.3));
+    g.addColorStop(1, shade(t.def.visual.color, -0.2));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, 15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = selected ? INK.select : INK.base;
+    ctx.stroke();
+    ctx.font = '17px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(t.def.visual.icon, 0, 1);
+  }
+  if (t.preloadMax > 0) drawPreloadGem(ctx, t.preloaded > 0);
+  if (t.rangeBuffed) drawGale(ctx, 'front', t.uid * 0.37);
+  ctx.restore();
+}
+
+/** Post-lighting champion tells (Bard notes circle the head). */
+function drawTowerOverlays(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
+  for (const t of engine.towers) {
     if (t.attackSpeedBuffTimer > 0) {
-      drawBuffNotes(ctx, x, y, t.attackSpeedBuffColor || t.def.visual.color);
+      drawBuffNotes(ctx, t.pos.x, t.pos.y, t.attackSpeedBuffColor || t.def.visual.color);
     }
   }
 }
@@ -2024,8 +977,7 @@ function drawBuffNotes(
   y: number,
   color: string,
 ): void {
-  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  const t = now / 620;
+  const t = now() / 620;
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -2092,49 +1044,80 @@ function drawWardGlow(ctx: CanvasRenderingContext2D, r: number): void {
 }
 
 /**
- * A pulsing arcane-cyan glow pooled in the tower's ground shadow — the visual
- * tell that this unit's range is being lifted by a Wizard's Guiding Gale.
- * Styled like the Better Morale glow but in the Wizard's cyan so the two auras
- * read apart. Non-stacking, so it has a single fixed intensity. Drawn in the
- * tower's local space (origin at the tower centre), beneath the base pad.
+ * Guiding Gale: the wind lifting this champion's range. Three tapered ribbons
+ * spiral up from the feet past the head, each fading in low and out high, with
+ * a mote riding its leading edge, over a faint swirl on the ground. Every orbit
+ * is split by depth: the `back` layer (drawn before the figure) holds the half
+ * of each loop passing behind the body plus the ground swirl, and the `front`
+ * layer (after the figure) the half crossing in front, so the wind wraps the
+ * champion instead of sitting on top of it. Drawn in the figure's scaled local
+ * space (feet ≈ y 11, head ≈ y −16); `seed` desyncs neighbouring champions.
  */
-/**
- * A small swirling wind wrapping a champion whose range is being lifted by a
- * Wizard's Guiding Gale. Drawn over the figure (origin at the tower centre) as a
- * few faint cyan crescent gusts orbiting the body at different radii/phases,
- * plus a couple of drifting motes — so the unit looks caught in a light breeze
- * rather than standing over a glowing pool. Animated from wall-clock time so the
- * gusts rotate continuously.
- */
-function drawWindShroud(ctx: CanvasRenderingContext2D): void {
-  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  const t = now / 1000;
+const GALE_GUSTS = [
+  { phase: 0, rx: 13.5, width: 1.8, spin: 3.1 },
+  { phase: 0.34, rx: 15.5, width: 1.5, spin: 2.7 },
+  { phase: 0.67, rx: 12, width: 1.35, spin: 3.4 },
+];
+const GALE_RISE = 0.38; // lifecycles per second (feet → above the head)
+const GALE_SEGS = 14;
+
+function drawGale(ctx: CanvasRenderingContext2D, layer: 'back' | 'front', seed: number): void {
+  const time = now() / 1000;
   ctx.save();
-  ctx.strokeStyle = '#bfeef0';
   ctx.lineCap = 'round';
-  // Three curved gusts circling the figure — each at its own radius, vertical
-  // squash (so they hug the body as ellipses), speed and starting phase.
-  const gusts = [
-    { rx: 15, ry: 17, spin: 1.7, phase: 0, span: 0.8, width: 1.6 },
-    { rx: 12, ry: 20, spin: -2.2, phase: 2.1, span: 0.6, width: 1.3 },
-    { rx: 17, ry: 13, spin: 2.7, phase: 4.2, span: 0.55, width: 1.1 },
-  ];
-  for (const g of gusts) {
-    const a = t * g.spin + g.phase;
-    // A soft flicker so each gust breathes in and out of view.
-    ctx.globalAlpha = 0.28 + 0.22 * (0.5 + 0.5 * Math.sin(t * 2 + g.phase));
-    ctx.lineWidth = g.width;
-    ctx.beginPath();
-    ctx.ellipse(0, -3, g.rx, g.ry, 0, a, a + g.span);
-    ctx.stroke();
-    // A little tail-mote flung off the leading edge of the gust.
-    const ex = Math.cos(a + g.span) * g.rx;
-    const ey = -3 + Math.sin(a + g.span) * g.ry;
-    ctx.globalAlpha *= 0.9;
-    ctx.beginPath();
-    ctx.arc(ex, ey, 0.9, 0, Math.PI * 2);
-    ctx.fillStyle = '#dff7f8';
-    ctx.fill();
+  if (layer === 'back') {
+    // A slow swirl of air stirring the ground at the champion's feet.
+    ctx.strokeStyle = '#9fecea';
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < 2; i++) {
+      const a = time * 1.6 + seed + i * Math.PI;
+      ctx.globalAlpha = 0.2;
+      ctx.beginPath();
+      ctx.ellipse(0, 10.5, 15 - i * 3, 5 - i, 0, a, a + 1.9);
+      ctx.stroke();
+    }
+  }
+  for (const g of GALE_GUSTS) {
+    const u = (((time * GALE_RISE + g.phase + seed) % 1) + 1) % 1; // 0..1 lifecycle
+    const fade = Math.sin(Math.PI * u);
+    if (fade < 0.02) continue;
+    const yBase = 10 - u * 30;
+    const rx = g.rx * (0.85 + 0.3 * u);
+    const ry = rx * 0.32;
+    const head = time * g.spin + g.phase * Math.PI * 2 + seed * 3;
+    const pt = (th: number, k: number) => ({ x: Math.cos(th) * rx, y: yBase + Math.sin(th) * ry + k * 4 });
+    // Ribbon: segments from the head back along the orbit, tapering and
+    // fading toward the tail; two passes for a soft halo round a bright core.
+    for (let pass = 0; pass < 2; pass++) {
+      ctx.strokeStyle = pass === 0 ? '#6fe3e0' : '#f2ffff';
+      for (let i = 0; i < GALE_SEGS; i++) {
+        const k0 = i / GALE_SEGS;
+        const k1 = (i + 1) / GALE_SEGS;
+        const t0 = head - k0 * 2.3;
+        const t1 = head - k1 * 2.3;
+        const front = Math.sin((t0 + t1) / 2) > 0;
+        if (front !== (layer === 'front')) continue;
+        const taper = Math.pow(1 - k0, 0.8);
+        const w = g.width * taper * (0.6 + 0.4 * fade);
+        ctx.lineWidth = pass === 0 ? w * 2.2 : w;
+        ctx.globalAlpha = fade * (1 - k0) * (pass === 0 ? 0.13 : 0.48);
+        const p0 = pt(t0, k0);
+        const p1 = pt(t1, k1);
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.stroke();
+      }
+    }
+    // The mote carried on the gust's leading edge.
+    if (Math.sin(head) > 0 === (layer === 'front')) {
+      const m = pt(head + 0.25, 0);
+      ctx.globalAlpha = fade * 0.6;
+      ctx.fillStyle = '#f2ffff';
+      ctx.beginPath();
+      ctx.ellipse(m.x, m.y, 1.2, 0.65, head, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   ctx.restore();
 }
@@ -2319,14 +1302,6 @@ function drawCross(ctx: CanvasRenderingContext2D, s: number): void {
 }
 
 /**
- * The boss seated on his throne, drawn until he actually spawns (rises) on the
- * final wave. It's the boss's own walking sprite in its fully-seated pose,
- * placed exactly where the risen boss will first appear — one `RISE_LIFT` above
- * the reveal lane's spawn cell — so the hand-off to the live, rising enemy is
- * seamless. Shown for any stage with a hidden reveal lane whose boss has a
- * sprite (currently the Throne Room king).
- */
-/**
  * Extra upward draw offset for oversized boss sprites so their feet and shadow
  * land on the path centreline rather than hanging below it (a scaled-up figure
  * reaches further past `pos` than a normal enemy token). Applied to the sprite,
@@ -2348,111 +1323,243 @@ function footLiftFor(id: string): number {
   return 0;
 }
 
-function drawSeatedKing(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
-  if (engine.bossHasSpawned || engine.outcome !== 'playing') return;
+/** Walk view from a travel heading (side profile along rows, front/back on columns). */
+function viewFor(h: { x: number; y: number }): 'side' | 'front' | 'back' {
+  return Math.abs(h.x) >= Math.abs(h.y) ? 'side' : h.y > 0 ? 'front' : 'back';
+}
+
+/**
+ * Where the Throne Room boss sits until he rises: one `RISE_LIFT` above the
+ * hidden reveal lane's spawn cell, so the hand-off to the live, rising enemy is
+ * seamless. Null when no seated boss should be drawn.
+ */
+function seatedKingSpawn(engine: GameEngine): { x: number; y: number } | null {
+  if (engine.bossHasSpawned || engine.outcome !== 'playing') return null;
   const laneIdx = engine.level.lanes.findIndex((l) => l.revealAtWave !== undefined);
-  if (laneIdx < 0) return;
+  if (laneIdx < 0) return null;
+  if (!hasEnemySprite(engine.level.bossId)) return null;
+  return engine.lanes[laneIdx].waypoints[0];
+}
+
+/**
+ * The boss seated on his throne, drawn until he actually spawns (rises) on the
+ * final wave — his own walking sprite in its fully-seated pose, front view.
+ */
+function drawSeatedKing(ctx: CanvasRenderingContext2D, engine: GameEngine, st: BoardState): void {
+  const spawn = seatedKingSpawn(engine);
+  if (!spawn) return;
   const def = getEnemy(engine.level.bossId);
-  if (!hasEnemySprite(def.id)) return;
-  const spawn = engine.lanes[laneIdx].waypoints[0];
   ctx.save();
   ctx.translate(spawn.x, spawn.y - RISE_LIFT - footLiftFor(def.id));
-  // Front view (facing the room), fully seated, at rest.
-  drawEnemySprite(ctx, def.id, def.visual.color, 'front', false, 0, 1);
+  const style = boardStyle(st, def.visual.color, true);
+  style.cast = undefined;
+  paintFigure(ctx, (g) => drawEnemySprite(g, def.id, def.visual.color, 'front', false, 0, 1), style, `e|${def.id}|${def.visual.color}|front|0|0|sit`);
   ctx.restore();
 }
 
-function drawEnemies(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
-  for (const e of engine.enemies) {
-    if (e.dead) continue;
-    // An enemy playing out a special death draws its own sequence (and no health
-    // bar / speech), so branch out before the normal token rendering.
-    if (e.dying) {
-      drawDeathAnimation(ctx, e);
-      continue;
-    }
-    const { x } = e.pos;
-    const R = e.def.radius;
-    // A boss rising off its throne is drawn lifted (its seat height above the
-    // path) easing to 0 as it stands. A tall sprite also gets a fixed foot-lift
-    // so its feet/shadow rest on the path centreline instead of below it.
-    const lift = RISE_LIFT * (e.rise ?? 0);
-    const foot = footLiftFor(e.def.id);
-    const groundY = e.pos.y - foot; // where the shadow (and feet) sit
-    const y = groundY - lift;
+/**
+ * One marching foe: ground shadow (and the Warden's aegis glow), then its walk
+ * figure through the compositor — hit flash, recoil away from the blow with a
+ * squash, a dodge weave, and a threat outline when the cursor is on it.
+ */
+function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardState, e: Enemy): void {
+  const x = e.pos.x;
+  const R = e.def.radius;
+  const boss = e.def.boss;
+  // A boss rising off its throne is drawn lifted (its seat height above the
+  // path) easing to 0 as it stands. A tall sprite also gets a fixed foot-lift
+  // so its feet/shadow rest on the path centreline instead of below it.
+  const lift = RISE_LIFT * (e.rise ?? 0);
+  const groundY = e.pos.y - footLiftFor(e.def.id);
+  const y = groundY - lift;
 
-    // Dodge weave: an evasive enemy slipping a blow sidesteps perpendicular to
-    // its travel and springs back over the anim, with a small nimble hop at the
-    // peak. Purely cosmetic; the whole token (shadow, figure, bar) shifts as one.
-    let dodgeX = 0;
-    let dodgeY = 0;
-    let dodgeHop = 0;
-    if ((e.dodge ?? 0) > 0) {
-      const amt = Math.sin(Math.PI * (1 - e.dodge / DODGE_ANIM_TIME)); // 0→1→0
-      dodgeX = -e.heading.y * amt * DODGE_DIST; // perpendicular to heading
-      dodgeY = e.heading.x * amt * DODGE_DIST;
-      dodgeHop = -amt * 2; // slight upward spring
-    }
+  // Dodge weave: sidestep perpendicular to travel and spring back.
+  let dodgeX = 0;
+  let dodgeY = 0;
+  let dodgeHop = 0;
+  if ((e.dodge ?? 0) > 0) {
+    const amt = Math.sin(Math.PI * (1 - e.dodge / DODGE_ANIM_TIME));
+    dodgeX = -e.heading.y * amt * DODGE_DIST;
+    dodgeY = e.heading.x * amt * DODGE_DIST;
+    dodgeHop = -amt * 2;
+  }
+  const rc = st.vfx.recoilOf(e.uid);
 
-    ctx.save();
-    ctx.translate(x + dodgeX, groundY + dodgeY);
-    // A crimson glow pooled in the shadow marks an enemy shielded by a nearby
-    // protective aura (The Iron Warden's Aegis) — styled like the Swordsman's
-    // Better Morale glow, drawn under the enemy so it reads as a warding halo.
-    if ((e.wardReduction ?? 0) > 0) drawWardGlow(ctx, R);
-    // Shadow (on the ground; tightens a touch while lifted).
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.save();
+  ctx.translate(x + dodgeX + rc.dx * 0.5, groundY + dodgeY + rc.dy * 0.5);
+  if ((e.wardReduction ?? 0) > 0) drawWardGlow(ctx, R);
+  contactShadow(ctx, R * 0.7, R * (1 - 0.25 * (e.rise ?? 0)), R * 0.42, boss ? 1.1 : 0.9);
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(x + dodgeX + rc.dx, y + dodgeY + dodgeHop + rc.dy);
+  {
+    // Board scale + a quick flinch squash about the feet when struck.
+    const s = boss ? 1 : FIGURE_SCALE;
+    ctx.translate(0, 11);
+    ctx.scale(s * (1 + 0.06 * rc.squash), s * (1 - 0.08 * rc.squash));
+    ctx.translate(0, -11);
+  }
+  if (hasEnemySprite(e.def.id)) {
+    const view = viewFor(e.heading);
+    const style = boardStyle(st, e.def.visual.color, boss);
+    style.flash = e.hitFlash > 0 ? Math.min(1, e.hitFlash / 0.12) * 0.75 : 0;
+    if (ui.hoverEnemyUid === e.uid) {
+      style.ink = INK.threat;
+      style.glow = 2;
+    }
+    // A rising boss shouldn't throw a long sun shadow off the throne.
+    if ((e.rise ?? 0) > 0) style.cast = undefined;
+    const rising = (e.rise ?? 0) > 0;
+    const sf = strideFrame(e.def.id, e.dist);
+    const left = e.heading.x < 0;
+    // A speaking boss with a taunt pose (Gowzer) straightens up and twirls a
+    // dagger through his lines: the twirl loops every TAUNT_TWIRL seconds,
+    // quantized to 16 cached frames.
+    const taunting = isSpeaking(e) && TAUNT_POSE.has(e.def.id);
+    const twirl = taunting ? Math.floor(((now() / 1000 / TAUNT_TWIRL) % 1) * 16) / 16 : 0;
+    const pose = taunting ? 1 : (e.rise ?? 0);
+    paintFigure(
+      ctx,
+      (g) => drawEnemySprite(g, e.def.id, e.def.visual.color, view, left, rising ? e.dist : sf.q, pose, twirl),
+      style,
+      rising
+        ? undefined
+        : `e|${e.def.id}|${e.def.visual.color}|${view}|${left ? 1 : 0}|${sf.idx}${taunting ? `|t${twirl}` : ''}`,
+    );
+  } else {
+    // Emoji fallback token: lit disc, inked rim (gold for a boss).
+    const g = ctx.createRadialGradient(-R * 0.3, -R * 0.35, 1, 0, 0, R);
+    g.addColorStop(0, shade(e.def.visual.color, 0.25));
+    g.addColorStop(1, shade(e.def.visual.color, -0.25));
+    ctx.fillStyle = e.hitFlash > 0 ? '#ffffff' : g;
     ctx.beginPath();
-    ctx.ellipse(0, R * 0.7, R * (1 - 0.25 * (e.rise ?? 0)), R * 0.4, 0, 0, Math.PI * 2);
+    ctx.arc(0, 0, R, 0, Math.PI * 2);
     ctx.fill();
-    ctx.restore();
+    ctx.lineWidth = boss ? 3 : 1.6;
+    ctx.strokeStyle = boss ? '#ffd76a' : INK.base;
+    ctx.stroke();
+    ctx.font = `${Math.round(R * 1.2)}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(e.def.visual.icon, 0, 1);
+  }
+  ctx.restore();
+}
 
-    ctx.save();
-    ctx.translate(x + dodgeX, y + dodgeY + dodgeHop);
-
-    if (hasEnemySprite(e.def.id)) {
-      // Procedural walk-figure in place of the disc + emoji token. Pick the view
-      // from the travel heading (side profile when moving along a row, front/back
-      // when moving down/up a column) and drive the stride from distance walked
-      // so the legs move in step with actual motion. Flash white on hit by
-      // tinting the whole figure, matching the disc's hit feedback.
-      const hx = e.heading.x;
-      const hy = e.heading.y;
-      const view = Math.abs(hx) >= Math.abs(hy) ? 'side' : hy > 0 ? 'front' : 'back';
-      const color = e.hitFlash > 0 ? '#ffffff' : e.def.visual.color;
-      drawEnemySprite(ctx, e.def.id, color, view, hx < 0, e.dist, e.rise ?? 0);
-    } else {
-      // Body.
-      ctx.fillStyle = e.hitFlash > 0 ? '#ffffff' : e.def.visual.color;
-      ctx.beginPath();
-      ctx.arc(0, 0, R, 0, Math.PI * 2);
-      ctx.fill();
-      if (e.def.boss) {
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = '#ffd76a';
-        ctx.stroke();
-      }
-      ctx.font = `${Math.round(R * 1.2)}px serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(e.def.visual.icon, 0, 1);
-    }
-    ctx.restore();
-
-    // Health bar.
+/**
+ * Health bars and spawn speech, drawn after lighting so they never sink into a
+ * dark room. A full-health rank-and-file foe shows no bar at all — the board
+ * stays calm until something is actually taking damage.
+ */
+function drawEnemyOverlays(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: RenderUiState): void {
+  for (const e of engine.enemies) {
+    if (e.dead || e.dying) continue;
+    const R = e.def.radius;
+    const y = e.pos.y - footLiftFor(e.def.id) - RISE_LIFT * (e.rise ?? 0);
+    let dodgeX = 0;
+    if ((e.dodge ?? 0) > 0) dodgeX = -e.heading.y * Math.sin(Math.PI * (1 - e.dodge / DODGE_ANIM_TIME)) * DODGE_DIST;
     const pct = Math.max(0, e.health / e.def.health);
-    const w = e.def.boss ? R * 2.4 : R * 1.8;
-    const bx = x + dodgeX - w / 2;
-    const by = y + dodgeY - R - (e.def.boss ? 12 : 8);
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(bx - 1, by - 1, w + 2, 5);
-    ctx.fillStyle = pct > 0.5 ? '#5fd38a' : pct > 0.25 ? '#f2b23c' : '#ff5a5a';
-    ctx.fillRect(bx, by, w * pct, 3);
-
-    // Intro speech bubble: while an enemy is delivering its spawn lines (Gowzer),
-    // float the current line above it.
+    const hovered = ui.hoverEnemyUid === e.uid;
+    const by = y - R - (e.def.boss ? 14 : 9);
+    if (pct < 0.999 || e.def.boss || hovered) {
+      const w = e.def.boss ? R * 2.2 : Math.max(18, R * 1.7);
+      const bx = e.pos.x + dodgeX - w / 2;
+      const h = e.def.boss ? 4 : 3;
+      ctx.save();
+      ctx.fillStyle = 'rgba(8,4,12,0.78)';
+      roundRect(ctx, bx - 1.5, by - 1.5, w + 3, h + 3, 2);
+      ctx.fill();
+      const col = pct > 0.5 ? FEEDBACK.hpHigh : pct > 0.25 ? FEEDBACK.hpMid : FEEDBACK.hpLow;
+      ctx.fillStyle = col;
+      ctx.fillRect(bx, by, w * pct, h);
+      ctx.fillStyle = 'rgba(255,255,255,0.28)';
+      ctx.fillRect(bx, by, w * pct, 1);
+      ctx.restore();
+    }
     const line = currentSpeechLine(e);
-    if (line) drawSpeechBubble(ctx, x + dodgeX, by - 8, line);
+    if (line) drawSpeechBubble(ctx, e.pos.x + dodgeX, by - 8, line);
+  }
+}
+
+/**
+ * A felled foe's short death: knocked back from the killing blow, it toppled
+ * about its feet, flashes white on the instant of death, then sinks and fades
+ * while its shadow thins. Arcane kills dissolve toward violet.
+ */
+function drawCorpse(ctx: CanvasRenderingContext2D, st: BoardState, c: Corpse): void {
+  const e = c.enemy;
+  const R = e.def.radius;
+  const k = c.t / c.max;
+  const fall = ease.outCubic(Math.min(1, k / 0.42));
+  const fade = k < 0.45 ? 1 : 1 - (k - 0.45) / 0.55;
+  const sink = Math.max(0, (k - 0.45) / 0.55) * 4;
+  const groundY = c.y - footLiftFor(e.def.id);
+  const dir = c.kx >= 0 ? 1 : -1;
+  const knock = 7 * ease.outCubic(Math.min(1, k / 0.3));
+
+  ctx.save();
+  ctx.translate(c.x + c.kx * knock, groundY + c.ky * knock * 0.5);
+  contactShadow(ctx, R * 0.7, R * (1 + 0.3 * fall), R * 0.45, fade);
+  ctx.translate(0, sink);
+  // Topple about the feet (the sprite origin sits ~11 above them).
+  const pivot = 11;
+  const s = e.def.boss ? 1 : FIGURE_SCALE;
+  ctx.translate(0, pivot);
+  ctx.rotate(dir * 1.35 * fall);
+  ctx.scale(s, s);
+  ctx.translate(0, -pivot);
+  if (hasEnemySprite(e.def.id)) {
+    const style = boardStyle(st, e.def.visual.color, e.def.boss);
+    style.cast = undefined;
+    style.alpha = Math.max(0, fade);
+    style.flash = k < 0.12 ? (1 - k / 0.12) * 0.9 : 0;
+    if (c.element === 'arcane') {
+      style.tint = '#b48cf0';
+      style.tintAmount = 0.55 * k;
+    }
+    const sf = strideFrame(e.def.id, c.dist);
+    paintFigure(
+      ctx,
+      (g) => drawEnemySprite(g, e.def.id, e.def.visual.color, c.view, c.faceLeft, sf.q, 0),
+      style,
+      style.tint ? undefined : `e|${e.def.id}|${e.def.visual.color}|${c.view}|${c.faceLeft ? 1 : 0}|${sf.idx}`,
+    );
+  } else {
+    ctx.globalAlpha = Math.max(0, fade);
+    ctx.fillStyle = e.def.visual.color;
+    ctx.beginPath();
+    ctx.arc(0, 0, R, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** Enemies with an intro taunt pose, driven by `sit`/`flourish` while speaking. */
+const TAUNT_POSE = new Set(['boss4']);
+const TAUNT_TWIRL = 1.4; // seconds per dagger twirl
+
+/**
+ * Gowzer's feathers torn loose as he falls: a burst flung out from his body
+ * that drifts down rocking side to side and fades. Fully deterministic from
+ * `t` (seconds since the killing blow), so it needs no particle state.
+ */
+const DEATH_FEATHERS = 14;
+const FEATHER_DEATH = new Set(['boss4']);
+function drawFeatherBurst(ctx: CanvasRenderingContext2D, x: number, y: number, t: number, dir: number): void {
+  for (let i = 0; i < DEATH_FEATHERS; i++) {
+    const a = (i / DEATH_FEATHERS) * Math.PI * 2 + i * 0.7;
+    const speed = 14 + ((i * 37) % 11) * 1.6;
+    const out = 1 - Math.exp(-t * 3.2);
+    const life = 2.2 + ((i * 13) % 7) * 0.12;
+    if (t > life) continue;
+    const fx = x + Math.cos(a) * speed * out + dir * t * 4 + Math.sin(t * 3.4 + i) * 2.4;
+    const fy = y - 8 + Math.sin(a) * speed * 0.55 * out - 10 * out + t * t * 3.2;
+    const fade = 1 - t / life;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, fade * 1.4);
+    drawFeather(ctx, fx, fy, 6.2, 1.8, a + Math.sin(t * 4 + i) * 0.7, i % 3 ? '#2b2539' : '#1c1826', i % 3 !== 1 ? '#e2bb55' : undefined, '#6a5d88');
+    ctx.restore();
   }
 }
 
@@ -2462,7 +1569,7 @@ function drawEnemies(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
  * is drawn down into an expanding pool of its own shadow that draws shut over it.
  * Reads `e.deathT` (elapsed seconds); drawn entirely in world space.
  */
-function drawDeathAnimation(ctx: CanvasRenderingContext2D, e: Enemy): void {
+function drawDeathAnimation(ctx: CanvasRenderingContext2D, e: Enemy, st: BoardState): void {
   const x = e.pos.x;
   const R = e.def.radius;
   const foot = footLiftFor(e.def.id);
@@ -2498,7 +1605,6 @@ function drawDeathAnimation(ctx: CanvasRenderingContext2D, e: Enemy): void {
   const pivot = R * 0.7; // roughly the feet, below the sprite's centre origin
   const fallSink = fallEase * R * 0.28;
   ctx.save();
-  ctx.globalAlpha = Math.max(0, 1 - swallow * 1.05);
   ctx.translate(x, groundY + fallSink + swallow * 10); // settle, then sink under
   ctx.translate(0, pivot);
   ctx.rotate(dir * 1.05 * fallEase); // topple to ~60°
@@ -2507,11 +1613,14 @@ function drawDeathAnimation(ctx: CanvasRenderingContext2D, e: Enemy): void {
   ctx.scale(shrink, shrink);
 
   if (hasEnemySprite(e.def.id)) {
-    const hx = e.heading.x;
-    const hy = e.heading.y;
-    const view = Math.abs(hx) >= Math.abs(hy) ? 'side' : hy > 0 ? 'front' : 'back';
-    drawEnemySprite(ctx, e.def.id, e.def.visual.color, view, hx < 0, e.dist, 0);
+    const style = boardStyle(st, e.def.visual.color, e.def.boss);
+    style.cast = undefined;
+    style.alpha = Math.max(0, 1 - swallow * 1.05);
+    style.tint = '#1a0a24';
+    style.tintAmount = 0.6 * swallow;
+    paintFigure(ctx, (g) => drawEnemySprite(g, e.def.id, e.def.visual.color, viewFor(e.heading), e.heading.x < 0, e.dist, 0), style);
   } else {
+    ctx.globalAlpha = Math.max(0, 1 - swallow * 1.05);
     ctx.fillStyle = e.def.visual.color;
     ctx.beginPath();
     ctx.arc(0, 0, R, 0, Math.PI * 2);
@@ -2522,6 +1631,8 @@ function drawDeathAnimation(ctx: CanvasRenderingContext2D, e: Enemy): void {
     ctx.fillText(e.def.visual.icon, 0, 1);
   }
   ctx.restore();
+
+  if (FEATHER_DEATH.has(e.def.id)) drawFeatherBurst(ctx, x, groundY, t, dir);
 
   // Final words: a bubble floating above him, held through the fall and fading
   // out as the shadow swallows him.
@@ -2610,10 +1721,12 @@ function drawShots(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
 }
 
 /**
- * Draw in-flight arrows/bolts — a small arrow at each projectile's current
- * position, pointed at the enemy it is homing toward (or its last known point).
+ * Draw in-flight projectiles — after lighting, so every shot stays legible in a
+ * dark hall. Each has a clear head, a trail and its colour identity: arrows and
+ * bolts streak a faint motion line with a glinting tip; the Elf's shaft trails
+ * arcane motes; the Wizard's gust sheds wisps; the Mage's orb sheds sparks.
  */
-function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
+function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine, vfx: Vfx, dt: number): void {
   for (const p of engine.projectiles) {
     const target = engine.enemies.find((e) => e.uid === p.targetUid && !e.dead);
     const dest = target ? target.pos : p.last;
@@ -2621,6 +1734,9 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine): voi
     // Fading magical tail: draw the arrow's recent positions (world space, before
     // the local rotate/scale) as motes that shrink and dim into the distance.
     if (p.trail && p.trail.length) drawMagicTrail(ctx, p.trail, p.color);
+    if (p.style === 'orb') vfx.trail('orb', p.pos.x, p.pos.y, p.color, dt);
+    else if (p.style === 'magic') vfx.trail('arcane', p.pos.x, p.pos.y, p.color, dt);
+    else if (p.style === 'wind') vfx.trail('wind', p.pos.x, p.pos.y, p.color, dt);
     ctx.save();
     ctx.translate(p.pos.x, p.pos.y);
     ctx.rotate(ang);
@@ -2637,41 +1753,54 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine): voi
       ctx.rotate(-ang);
       drawChargingOrb(ctx, 0, 0, 5.5, p.color, 1);
     } else {
+      // Motion streak: a soft line trailing the shaft, fading to nothing.
+      const sg = ctx.createLinearGradient(-26, 0, -6, 0);
+      sg.addColorStop(0, 'rgba(255,248,230,0)');
+      sg.addColorStop(1, 'rgba(255,248,230,0.45)');
+      ctx.strokeStyle = sg;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(-26, 0);
+      ctx.lineTo(-6, 0);
+      ctx.stroke();
+      // Dark under-line so the shaft reads over bright floors.
+      ctx.strokeStyle = 'rgba(20,12,8,0.55)';
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      ctx.moveTo(-6, 0);
+      ctx.lineTo(5, 0);
+      ctx.stroke();
       // Shaft.
-      ctx.strokeStyle = '#6e4a26';
-      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = '#8a6036';
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(-6, 0);
       ctx.lineTo(4, 0);
       ctx.stroke();
-      // Arrowhead.
-      ctx.fillStyle = '#e8eef6';
+      // Arrowhead with a hot glint.
+      ctx.fillStyle = '#eef3f8';
       ctx.beginPath();
-      ctx.moveTo(4, -1.7);
-      ctx.lineTo(8.5, 0);
-      ctx.lineTo(4, 1.7);
+      ctx.moveTo(3.6, -2);
+      ctx.lineTo(9, 0);
+      ctx.lineTo(3.6, 2);
       ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.beginPath();
+      ctx.arc(8, 0, 1, 0, Math.PI * 2);
       ctx.fill();
       // Fletching, tinted with the champion's colour.
       ctx.strokeStyle = p.color;
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1.3;
       ctx.beginPath();
-      ctx.moveTo(-6, 0);
-      ctx.lineTo(-8.5, -1.8);
-      ctx.moveTo(-6, 0);
-      ctx.lineTo(-8.5, 1.8);
+      ctx.moveTo(-5, 0);
+      ctx.lineTo(-8.5, -2.2);
+      ctx.moveTo(-5, 0);
+      ctx.lineTo(-8.5, 2.2);
       ctx.stroke();
     }
     ctx.restore();
   }
-}
-
-/** A `#rgb`/`#rrggbb` colour as an `rgba(...)` string with the given alpha. */
-function withAlpha(hex: string, alpha: number): string {
-  const c = hex.replace('#', '');
-  const full = c.length === 3 ? c.split('').map((x) => x + x).join('') : c;
-  const n = parseInt(full, 16);
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
 
 /**
@@ -3220,18 +2349,36 @@ function drawBeams(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
   }
 }
 
-function drawFloaters(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
+/**
+ * Floating text: gold, mana, level-ups and callouts from the engine plus the
+ * VFX layer's crit damage numbers. Each pops in (a quick overshoot scale), then
+ * drifts and fades; words set in the title face, numbers in the UI face, all
+ * with a dark ink stroke so they read over any floor.
+ */
+function drawFloaters(ctx: CanvasRenderingContext2D, engine: GameEngine, vfx: Vfx): void {
   ctx.save();
   ctx.textAlign = 'center';
-  for (const f of engine.floaters) {
-    ctx.font = `bold ${f.size ?? 13}px system-ui, sans-serif`;
-    ctx.globalAlpha = Math.min(1, f.ttl / f.maxTtl + 0.2);
-    ctx.fillStyle = f.color;
-    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-    ctx.lineWidth = 3;
-    ctx.strokeText(f.text, f.pos.x, f.pos.y);
-    ctx.fillText(f.text, f.pos.x, f.pos.y);
-  }
+  ctx.textBaseline = 'alphabetic';
+  ctx.lineJoin = 'round';
+  const one = (text: string, x: number, y: number, color: string, size: number, life: number) => {
+    // life: 1 at spawn → 0 at expiry.
+    const age = 1 - life;
+    const pop = age < 0.12 ? ease.outBack(age / 0.12) : 1;
+    const numeric = /^[+-]?\d/.test(text);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(pop, pop);
+    ctx.globalAlpha = Math.min(1, life * 2.2);
+    ctx.font = numeric ? `800 ${size}px ${FONT_UI}` : `700 ${size}px ${FONT_TITLE}`;
+    ctx.strokeStyle = 'rgba(10,6,14,0.85)';
+    ctx.lineWidth = Math.max(2.5, size * 0.24);
+    ctx.strokeText(text, 0, 0);
+    ctx.fillStyle = color;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  };
+  for (const f of engine.floaters) one(f.text, f.pos.x, f.pos.y, f.color, f.size ?? 13, f.ttl / f.maxTtl);
+  for (const f of vfx.texts) one(f.text, f.x, f.y, f.color, f.size, 1 - f.t / f.max);
   ctx.restore();
 }
 

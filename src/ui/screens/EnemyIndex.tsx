@@ -13,6 +13,7 @@ import {
   type EnemyDef,
 } from '../../domain/enemies';
 import { EnemySprite } from '../components/EnemySprite';
+import { Icon } from '../components/Icon';
 
 type Tab = 'normal' | 'boss';
 
@@ -40,7 +41,7 @@ export function EnemyIndex() {
   return (
     <main className="screen">
       <div className="section-title">
-        📖 Enemy Index{' '}
+        <Icon name="bestiary" /> Bestiary{' '}
         <small>{unlockedCount} / {list.length} discovered — tap an entry for details</small>
       </div>
 
@@ -77,7 +78,7 @@ export function EnemyIndex() {
                   borderColor: unlocked ? def.visual.color : undefined,
                 }}
               >
-                {unlocked ? <EnemySprite enemy={def} size={44} /> : '❓'}
+                {unlocked ? <EnemySprite enemy={def} size={44} /> : <EnemySprite enemy={def} size={44} silhouette />}
               </span>
               <span className="ei-name">{unlocked ? def.name : '???'}</span>
               <span className="ei-progress">
@@ -109,12 +110,12 @@ export function EnemyIndex() {
 /** Detailed info sheet for a single unlocked enemy. */
 function EnemyDetail({ def, onClose }: { def: EnemyDef; onClose: () => void }) {
   const rows: { label: string; value: string }[] = [
-    { label: 'Health', value: `❤️ ${def.health.toLocaleString()} HP` },
+    { label: 'Health', value: `${def.health.toLocaleString()} HP` },
     { label: 'Speed', value: `${def.speed} px/s (${speedLabel(def.speed)})` },
     // Bosses omit the castle-damage row (it's an instant loss if they break through).
     ...(def.boss ? [] : [{ label: 'Damage to castle', value: `${def.damageToBase}` }]),
     // Mana a hero recovers for killing it (see the heroes' ability mana pools).
-    ...(def.mana ? [{ label: 'Mana granted', value: `✦ ${def.mana}` }] : []),
+    ...(def.mana ? [{ label: 'Mana granted', value: `${def.mana}` }] : []),
   ];
   if (def.dodgeChance) {
     rows.push({ label: 'Evasion', value: `${Math.round(def.dodgeChance * 100)}% dodge` });
@@ -127,7 +128,7 @@ function EnemyDetail({ def, onClose }: { def: EnemyDef; onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <button className="modal-close" onClick={onClose} aria-label="Close">
-          ✕
+          <Icon name="close" />
         </button>
         <div className="champion-head">
           <div
@@ -138,7 +139,7 @@ function EnemyDetail({ def, onClose }: { def: EnemyDef; onClose: () => void }) {
           </div>
           <div>
             <h2 style={{ textAlign: 'left', color: 'var(--text)' }}>
-              {def.boss && '☠ '}
+              {def.boss && <Icon name="skull" />}
               {def.name}
             </h2>
             <div className="rarity-row" style={{ justifyContent: 'flex-start', marginTop: 4 }}>
@@ -164,13 +165,13 @@ function EnemyDetail({ def, onClose }: { def: EnemyDef; onClose: () => void }) {
           <div className="resist-list">
             {(def.physicalResist ?? 0) > 0 && (
               <div className="resist-line">
-                <span className="resist-chip physical">🛡 Physical</span>
+                <span className="resist-chip physical"><Icon name="shield" /> Physical</span>
                 <span>−{Math.round((def.physicalResist ?? 0) * 100)}% physical damage taken</span>
               </div>
             )}
             {(def.magicResist ?? 0) > 0 && (
               <div className="resist-line">
-                <span className="resist-chip magic">🛡 Magic</span>
+                <span className="resist-chip magic"><Icon name="shield" /> Magic</span>
                 <span>−{Math.round((def.magicResist ?? 0) * 100)}% magic damage taken</span>
               </div>
             )}

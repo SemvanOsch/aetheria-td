@@ -1,3 +1,5 @@
+import { Icon, type IconName } from '../components/Icon';
+
 interface Props {
   onStory: () => void;
 }
@@ -5,22 +7,22 @@ interface Props {
 interface ModeCard {
   id: string;
   name: string;
-  icon: string;
+  icon: IconName;
   desc: string;
   available: boolean;
 }
 
 const MODES: ModeCard[] = [
-  { id: 'story', name: 'Story', icon: '📖', desc: 'Battle through the Castle, Forest and Inn.', available: true },
-  { id: 'endless', name: 'Endless', icon: '♾️', desc: 'Survive as long as you can. Coming soon.', available: false },
-  { id: 'trials', name: 'Trials', icon: '⚔️', desc: 'Curated challenge gauntlets. Coming soon.', available: false },
+  { id: 'story', name: 'Story', icon: 'book', desc: 'Battle through the Castle, Forest and Inn.', available: true },
+  { id: 'endless', name: 'Endless', icon: 'endless', desc: 'Survive as long as you can. Coming soon.', available: false },
+  { id: 'trials', name: 'Trials', icon: 'trophy', desc: 'Curated challenge gauntlets. Coming soon.', available: false },
 ];
 
 export function ModeSelect({ onStory }: Props) {
   return (
     <main className="screen">
       <div className="section-title">
-        ▶ Choose a Mode <small>how do you want to play?</small>
+        <Icon name="swords" /> Choose a Mode <small>how do you want to play?</small>
       </div>
 
       <div className="mode-grid">
@@ -31,10 +33,16 @@ export function ModeSelect({ onStory }: Props) {
             disabled={!m.available}
             onClick={m.available ? onStory : undefined}
           >
-            <div className="mode-icon">{m.icon}</div>
+            <div className="mode-icon">
+              <Icon name={m.icon} />
+            </div>
             <div className="mode-name">{m.name}</div>
             <div className="mode-desc">{m.desc}</div>
-            {!m.available && <div className="mode-soon">🔒 Coming soon</div>}
+            {!m.available && (
+              <div className="mode-soon">
+                <Icon name="lock" /> Coming soon
+              </div>
+            )}
           </button>
         ))}
       </div>

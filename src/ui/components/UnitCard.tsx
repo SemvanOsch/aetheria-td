@@ -3,6 +3,9 @@ import { aoeLabel, formatAttackSpeed, rangeLabel, type UnitDef } from '../../dom
 import { masteryHarvest } from '../../domain/mastery';
 import { RARITIES } from '../../domain/rarity';
 import { UnitSprite } from './UnitSprite';
+import { Icon } from './Icon';
+
+const Coin = () => <Icon name="coin" className="stat-coin" />;
 
 interface Props {
   unit: UnitDef;
@@ -37,11 +40,12 @@ export function UnitCard({
         selected ? 'selected' : '',
       ].join(' ')}
       style={style}
+      data-rarity={unit.rarity}
       onClick={onClick}
       role={onClick ? 'button' : undefined}
     >
-      {owned && <div className="count-badge owned" title="In your collection">✓</div>}
-      <div className="unit-portrait"><UnitSprite unit={unit} size={56} /></div>
+      {owned && <div className="count-badge owned" title="In your collection"><Icon name="check" /></div>}
+      <div className="unit-portrait"><UnitSprite unit={unit} size={84} /></div>
       <div className="unit-name">{unit.name}</div>
       <div className="rarity-row">
         <span className="rarity-tag">{rarity.name}</span>
@@ -55,16 +59,16 @@ export function UnitCard({
           {unit.generator ? (
             <>
               <div className="s">
-                Gold <b>🪙{harvest}</b>
+                Gold <b><Coin />{harvest}</b>
               </div>
               <div className="s">
                 Per wave <b>{unit.generator.timesPerWave}×</b>
               </div>
               <div className="s">
-                Yield <b>🪙{harvest * unit.generator.timesPerWave}</b>
+                Yield <b><Coin />{harvest * unit.generator.timesPerWave}</b>
               </div>
               <div className="s">
-                Cost <b>🪙{unit.cost}</b>
+                Cost <b><Coin />{unit.cost}</b>
               </div>
             </>
           ) : unit.bard ? (
@@ -79,7 +83,7 @@ export function UnitCard({
                 Range <b>{rangeLabel(unit.range)}</b>
               </div>
               <div className="s">
-                Cost <b>🪙{unit.cost}</b>
+                Cost <b><Coin />{unit.cost}</b>
               </div>
             </>
           ) : (
@@ -94,7 +98,7 @@ export function UnitCard({
                 Range <b>{rangeLabel(unit.range)}</b>
               </div>
               <div className="s">
-                Cost <b>🪙{unit.cost}</b>
+                Cost <b><Coin />{unit.cost}</b>
               </div>
             </>
           )}

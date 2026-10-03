@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useGame } from '../../application/gameContext';
 import type { AudioSettings } from '../../application/gameState';
 import { Developer } from './Developer';
+import { Icon } from './Icon';
 
 interface Props {
   onClose: () => void;
@@ -64,17 +65,17 @@ export function Settings({ onClose }: Props) {
   return createPortal(
     <div className="modal-backdrop" onClick={onClose}>
       <div className="panel modal settings-modal" onClick={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose} aria-label="Close">✕</button>
-        <h2>⚙️ Settings</h2>
+        <button className="modal-close" onClick={onClose} aria-label="Close"><Icon name="close" /></button>
+        <h2><Icon name="gear" /> Settings</h2>
 
         <div className="settings-section audio">
           <div className="settings-row-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>🔊 Sound</span>
+            <span><Icon name="sound" /> Sound</span>
             <button
               className={`btn sort-toggle ${audio.muted ? 'off' : ''}`}
               onClick={() => set({ muted: !audio.muted })}
             >
-              {audio.muted ? '🔇 Muted' : '🔈 Mute'}
+              {audio.muted ? <><Icon name="mute" /> Muted</> : <><Icon name="sound" /> Mute</>}
             </button>
           </div>
 
@@ -99,6 +100,13 @@ export function Settings({ onClose }: Props) {
             disabled={audio.muted}
             onChange={(combat) => set({ combat })}
           />
+          <VolumeSlider
+            label="Music"
+            hint="The menu theme and each chapter's battle theme."
+            value={audio.music}
+            disabled={audio.muted}
+            onChange={(music) => set({ music })}
+          />
         </div>
 
         <div className="settings-section">
@@ -108,7 +116,7 @@ export function Settings({ onClose }: Props) {
             account reset.
           </p>
           <button className="btn ghost block" onClick={() => setShowDeveloper(true)}>
-            🛠️ Open Developer Menu
+            <Icon name="hammer" /> Open Developer Menu
           </button>
         </div>
       </div>

@@ -156,7 +156,9 @@ const CASTLE_SPECS: LevelSpec[] = [
     theme: {
       groundEven: '#568042',
       groundOdd: '#506c42',
-      path: [['#0d1526', 44], ['#3a2c22', 36], ['#6b543c', 22]]
+      path: [['#2a2116', 44], ['#5a4530', 36], ['#7a6046', 22]],
+      floor: 'grass',
+      pathKind: 'dirt',
     },
     decor: [
       { kind: 'castle', col: 12, row: 0 },
@@ -186,9 +188,11 @@ const CASTLE_SPECS: LevelSpec[] = [
     subtitle: 'Guards scramble from the feast to stop you.',
     baseHealth: 10, gem: 150,
     theme: {
-      groundEven: '#423a2e',
-      groundOdd: '#4a4234',
+      groundEven: '#4a3a2a',
+      groundOdd: '#55432f',
       path: [['#b8912f', 44], ['#7d1f27', 36], ['#9a2a33', 22]],
+      floor: 'wood',
+      pathKind: 'carpet',
     },
     decor: [
       { kind: 'diningTable', col: 10, row: 8 },
@@ -216,9 +220,11 @@ const CASTLE_SPECS: LevelSpec[] = [
     subtitle: 'Loyalists flood the hall to turn you back.',
     baseHealth: 10, gem: 150,
     theme: {
-      groundEven: '#2b3352',
-      groundOdd: '#323a5c',
+      groundEven: '#3a4160',
+      groundOdd: '#454d6e',
       path: [['#c9a24a', 44], ['#26386f', 36], ['#33498a', 22]],
+      floor: 'marble',
+      pathKind: 'carpet',
     },
     decor: [
       { kind: 'bookshelf', col: 0, row: 0 },
@@ -250,8 +256,10 @@ const CASTLE_SPECS: LevelSpec[] = [
     baseHealth: 10, gem: 150,
     theme: {
       groundEven: '#2e2540',
-      groundOdd: '#352b4a',
+      groundOdd: '#382d4c',
       path: [['#c9a24a', 44], ['#3d2a6b', 36], ['#523a8a', 22]],
+      floor: 'flagstone',
+      pathKind: 'carpet',
     },
     decor: [
       { kind: 'bed', col: 7, row: 0 },
@@ -282,9 +290,11 @@ const CASTLE_SPECS: LevelSpec[] = [
     subtitle: 'His throne, ringed by loyal guards.',
     baseHealth: 10, gem: 150,
     theme: {
-      groundEven: '#262230',
-      groundOdd: '#2d2838',
+      groundEven: '#2c2430',
+      groundOdd: '#352a38',
       path: [['#c9a24a', 44], ['#7d1f27', 36], ['#9a2a33', 22]],
+      floor: 'stone',
+      pathKind: 'carpet',
     },
     decor: [
       { kind: 'throne', col: 6, row: 1 },
@@ -336,7 +346,9 @@ const CAPITAL_SPECS: LevelSpec[] = [
     theme: {
       groundEven: '#568042',
       groundOdd: '#506c42',
-      path: [['#0d1526', 44], ['#3a2c22', 36], ['#6b543c', 22]]
+      path: [['#2a2116', 44], ['#5a4530', 36], ['#7a6046', 22]],
+      floor: 'grass',
+      pathKind: 'dirt',
     },
     decor: [
       { kind: 'castle', col: 12, row: 0 },

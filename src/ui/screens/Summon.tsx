@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useGame } from '../../application/gameContext';
 import { ownsUnit } from '../../application/gameState';
 import { canAffordSummon, DUPLICATE_REFUND, SUMMON_COST } from '../../application/summon';
@@ -6,17 +6,31 @@ import { ALL_RARITIES, RARITIES } from '../../domain/rarity';
 import { getUnit, summonableUnits } from '../../domain/units';
 import type { SummonOutcome } from '../../application/summon';
 import { UnitCard } from '../components/UnitCard';
+import { UnitSprite } from '../components/UnitSprite';
 import { Gems } from '../components/Currency';
+import { Icon } from '../components/Icon';
+import { SummonFx, type SummonPhase } from '../components/SummonFx';
 import { playSummonSound } from '../summonAudio';
 
-type Stage = 'idle' | 'charging' | 'revealed';
+/**
+ * Ceremony timeline (ms from pressing Summon). The room darkens and energy
+ * spirals into the orb; a flash; the champion stands as a silhouette in the
+ * rarity's light; it resolves and its name is announced.
+ */
+const T_FLASH = 1400;
+const T_SILHOUETTE = 1520;
+const T_REVEAL = 2300;
 
 export function Summon() {
   const { state, summon, summonCost } = useGame();
-  const [stage, setStage] = useState<Stage>('idle');
+  const [phase, setPhase] = useState<SummonPhase>('idle');
   const [result, setResult] = useState<SummonOutcome | null>(null);
+  const timers = useRef<number[]>([]);
+
+  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
 
   const affordable = canAffordSummon(state.gems);
+  const busy = phase === 'charging' || phase === 'flash' || phase === 'silhouette';
 
   // Drop rates read straight from the rarity table: each available rarity's
   // share of the total available weight, so this stays honest as new rarities
@@ -30,76 +44,122 @@ export function Summon() {
   const comingSoon = ALL_RARITIES.filter((r) => !r.available && r.summonable).map((r) => r.name);
 
   const doSummon = () => {
-    if (stage === 'charging' || !affordable) return;
+    if (busy || !affordable) return;
     const outcome = summon();
     if (!outcome) return;
     setResult(outcome);
-    setStage('charging');
+    setPhase('charging');
     // The orb channels gems — a rising hum leading into the reveal.
     playSummonSound('charge');
-    // Brief charge-up, then reveal with a rarity-scaled chime flourish.
-    window.setTimeout(() => {
-      setStage('revealed');
+    const at = (ms: number, fn: () => void) => timers.current.push(window.setTimeout(fn, ms));
+    at(T_FLASH, () => {
+      setPhase('flash');
       playSummonSound('reveal', RARITIES[outcome.rarity].order);
-    }, 850);
+    });
+    at(T_SILHOUETTE, () => setPhase('silhouette'));
+    at(T_REVEAL, () => setPhase('revealed'));
   };
+
+  const rarity = result ? RARITIES[result.rarity] : null;
+  const unit = result ? getUnit(result.unit.id)! : null;
+  const style = { '--rarity': rarity?.color ?? '#a9b8ff', '--ray-strength': 0.25 + (rarity?.order ?? 0) * 0.18 } as CSSProperties;
 
   return (
     <main className="screen">
       <div className="section-title" style={{ justifyContent: 'space-between' }}>
-        <span>✨ Summoning Altar</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Icon name="orb" style={{ color: 'var(--gold)' }} /> Summoning Altar
+        </span>
         <Gems amount={state.gems} />
       </div>
 
-      <div className="panel">
+      <div className={`panel ornate summon-altar ${phase} ${result?.rarity ?? ''}`} style={style}>
         <div className="summon-stage">
-          {stage === 'idle' && (
-            <div>
-              <div className="summon-orb">🔮</div>
-              <p style={{ marginTop: 16, color: 'var(--text-dim)' }}>
-                Channel gems into the orb to call forth a champion.
-              </p>
+          <SummonFx phase={phase} color={rarity?.color ?? '#a9b8ff'} tier={rarity?.order ?? 0} />
+          <div className="summon-dim" />
+
+          {(phase === 'idle' || phase === 'charging' || phase === 'flash') && (
+            <div className="summon-idle">
+              <div className={`summon-orb ${phase === 'charging' || phase === 'flash' ? 'charging' : ''}`}>
+                <Icon name="sparkle" />
+              </div>
+              {phase === 'idle' && (
+                <p className="summon-hint">Channel gems into the orb to call forth a champion.</p>
+              )}
             </div>
           )}
 
-          {stage === 'charging' && <div className="summon-orb charging">🌀</div>}
-
-          {stage === 'revealed' && result && <RevealedUnit outcome={result} />}
+          {(phase === 'silhouette' || phase === 'revealed') && result && unit && rarity && (
+            <div className={`reveal ${phase}`}>
+              <div className="reveal-hero">
+                <div className="summon-rays" />
+                <div className={`reveal-figure ${phase === 'silhouette' ? 'silhouette' : ''}`}>
+                  <UnitSprite unit={unit} size={180} />
+                </div>
+                {/* Laid out from the silhouette on (hidden) so the figure never
+                    shifts: the caption just fades in as the colour resolves. */}
+                <div className={`reveal-caption ${phase === 'revealed' ? 'shown' : ''}`} aria-hidden={phase !== 'revealed'}>
+                  <div className="reveal-rarity">{rarity.name}</div>
+                  <div className="reveal-name">{unit.name}</div>
+                  <p className="reveal-note">
+                    {result.duplicate ? (
+                      <>
+                        Another <b>{unit.name}</b> answers the call.
+                      </>
+                    ) : (
+                      <>
+                        A <b>{rarity.name}</b> champion joins your ranks.
+                      </>
+                    )}
+                  </p>
+                  {result.duplicate && (
+                    <p style={{ marginTop: 6, fontSize: 13, color: '#9fd8ff', fontWeight: 600, display: 'flex', gap: 10, justifyContent: 'center', alignItems: 'center' }}>
+                      <span>
+                        <Icon name="gem" /> {Math.round(SUMMON_COST * DUPLICATE_REFUND)} refunded
+                      </span>
+                      <span style={{ color: 'var(--gold-hi)' }}>
+                        <Icon name="star" /> +{result.duplicateExp} mastery EXP
+                      </span>
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="summon-flash" />
         </div>
 
-        <div className="panel-pad" style={{ borderTop: '1px solid var(--border)' }}>
+        <div className="panel-pad" style={{ borderTop: '1px solid var(--border)', position: 'relative', zIndex: 1 }}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
-            <button
-              className="btn primary big"
-              onClick={doSummon}
-              disabled={!affordable || stage === 'charging'}
-            >
-              {stage === 'charging' ? 'Summoning…' : `Summon · 💎${summonCost}`}
+            <button className="btn primary big" onClick={doSummon} disabled={!affordable || busy}>
+              {busy ? (
+                'Summoning…'
+              ) : (
+                <>
+                  <Icon name="sparkle" /> Summon · <Icon name="gem" /> {summonCost}
+                </>
+              )}
             </button>
-            {stage === 'revealed' && (
-              <button className="btn ghost" onClick={() => setStage('idle')}>
-                Again
-              </button>
-            )}
           </div>
           {!affordable && (
             <p style={{ textAlign: 'center', color: 'var(--red)', marginTop: 12, fontSize: 13 }}>
               Not enough gems. Clear realms to earn more.
             </p>
           )}
-          <p style={{ textAlign: 'center', color: 'var(--text-faint)', marginTop: 10, fontSize: 12.5 }}>
+          <p className="drop-rates">
             Drop rates · {dropRates}
-            {comingSoon.length > 0 && (
-              <span style={{ opacity: 0.5 }}> ({comingSoon.join(' · ')} coming soon)</span>
-            )}
+            {comingSoon.length > 0 && <span style={{ opacity: 0.6 }}> ({comingSoon.join(' · ')} coming soon)</span>}
             <br />
             Duplicates refund {Math.round(DUPLICATE_REFUND * 100)}% of the gem cost and grant the champion mastery EXP.
           </p>
         </div>
       </div>
 
-      <div className="section-title" style={{ marginTop: 28 }}>
-        🎴 Your Collection <small>{state.ownedUnits.length} / {summonableUnits().length} champions</small>
+      <div className="section-title" style={{ marginTop: 30 }}>
+        <Icon name="helm" /> Your Collection{' '}
+        <small>
+          {state.ownedUnits.length} / {summonableUnits().length} champions
+        </small>
       </div>
       {state.ownedUnits.length === 0 ? (
         <div className="panel empty-note">No champions yet. Summon one above!</div>
@@ -113,31 +173,5 @@ export function Summon() {
         </div>
       )}
     </main>
-  );
-}
-
-function RevealedUnit({ outcome }: { outcome: SummonOutcome }) {
-  const rarity = RARITIES[outcome.rarity];
-  const unit = getUnit(outcome.unit.id)!;
-  const style = { '--rarity': rarity.color } as CSSProperties;
-  return (
-    <div className="reveal" style={style}>
-      <div className="reveal-glow" style={{ display: 'inline-block' }}>
-        <div style={{ maxWidth: 220, margin: '0 auto' }}>
-          <UnitCard unit={unit} owned />
-        </div>
-      </div>
-      <p style={{ marginTop: 14, fontWeight: 700, color: rarity.color }}>
-        {outcome.duplicate
-          ? `Another ${unit.name} — already in your ranks!`
-          : `A ${rarity.name} ${unit.name} joins your ranks!`}
-      </p>
-      {outcome.duplicate && (
-        <p style={{ marginTop: 4, fontSize: 13, color: '#6fd6ff', fontWeight: 600 }}>
-          💎 {Math.round(SUMMON_COST * DUPLICATE_REFUND)} gems refunded · ⭐ +
-          {outcome.duplicateExp} {unit.name} mastery EXP
-        </p>
-      )}
-    </div>
   );
 }
