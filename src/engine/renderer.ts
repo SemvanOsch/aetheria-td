@@ -908,6 +908,12 @@ function drawTower(
       t.aoe === 'cone' ||
       (t.def.visual.shape === 'elf' && t.bounces > (t.def.bounces ?? 0));
     const style = boardStyle(st, t.def.visual.playerConfig?.outfitColor ?? t.def.visual.color);
+    // The player's adventurer often shows bare, dark hair, which the full rim and
+    // head lift wash to grey; give it the journal portrait's softer light.
+    if (t.def.visual.playerConfig) {
+      style.rimAlpha = (style.rimAlpha ?? 0.55) * 0.25;
+      style.shading = 0.5;
+    }
     if (selected) {
       style.ink = INK.select;
       style.glow = 2.4;

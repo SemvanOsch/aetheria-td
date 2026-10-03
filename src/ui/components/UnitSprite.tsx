@@ -40,7 +40,9 @@ export function UnitSprite({ unit, size = 48, animate = true }: Props) {
     cv.width = Math.round(size * dpr);
     cv.height = Math.round(size * dpr);
     const accent = playerConfig?.outfitColor ?? color;
-    const style = portraitStyle(accent);
+    // The player's adventurer gets the journal portrait's faint rim and head
+    // lift: the full champion light reads as a grey cap on dark, bare hair.
+    const style = isPlayer ? { ...portraitStyle(accent), rimAlpha: 0.07, shading: 0.5 } : portraitStyle(accent);
     const key = `p|${shape}|${color}|${playerConfig ? JSON.stringify(playerConfig) : ''}`;
     const phase = (shape.length * 1.7) % 6.28;
 

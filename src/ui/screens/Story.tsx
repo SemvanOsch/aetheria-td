@@ -94,7 +94,7 @@ export function Story({ section, onSelectSection, onPlay, onEditTeam, onBack }: 
                 <span className="campaign-tab-chip">Coming soon</span>
               ) : (
                 enterable && (
-                  <span className="campaign-tab-chip">
+                  <span className="campaign-tab-chip progress">
                     {done}/{levels.length}
                   </span>
                 )

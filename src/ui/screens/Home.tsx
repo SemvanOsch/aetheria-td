@@ -35,7 +35,7 @@ type Target = 'summon' | 'play' | 'journal' | 'continue';
 /** How long each object's lead-in plays before its destination opens: the
  *  orb charges up (zooming in as it does), the map is leaned
  *  over, the journal is a straight zoom. */
-const LEAVE_MS: Record<Target, number> = { summon: 1450, play: 1850, journal: 650, continue: 650 };
+const LEAVE_MS: Record<Target, number> = { summon: 1450, play: 1850, journal: 650, continue: 1700 };
 
 /**
  * The home screen: an adventurer's desk at night. Three objects on it are the

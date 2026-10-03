@@ -1077,8 +1077,29 @@ button:disabled .icon {
 }
 /* Only Continue (into a battle) dissolves through a veil; the orb, map and
    journal simply zoom, their screens opening over the blurred desk. */
+/* Continue: an unhurried lean in toward the pinned note while the room darkens
+   around it (1.2s), a 0.2s lock on the note itself, then a last quick fade to
+   black; the battle then fades up out of the dark. */
+.desk-stage.leaving.to-continue {
+  transform: scale(1.6);
+  transition: transform 1.2s cubic-bezier(0.45, 0, 0.3, 1);
+}
 .desk-veil.tint-continue {
-  background: radial-gradient(circle at var(--zx) var(--zy), rgba(255, 196, 120, 0.4) 0%, #1a0f08 50%, #080403 100%);
+  background: radial-gradient(circle at var(--zx) var(--zy), transparent 0%, transparent 8%, rgba(8, 4, 3, 0.82) 38%, #080403 75%);
+}
+.desk-veil.tint-continue.on {
+  transition: opacity 1s ease-out 0.2s;
+}
+.desk-veil.tint-continue::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: #080403;
+  opacity: 0;
+}
+.desk-veil.tint-continue.on::after {
+  opacity: 1;
+  transition: opacity 0.3s ease-in 1.4s;
 }
 
 /* ---- The wall: boards, raised panels, the window between its drapes ---- */
@@ -3423,6 +3444,16 @@ button.cd-mastery:hover {
   color: var(--text-faint);
   background: rgba(255, 255, 255, 0.06);
 }
+/* Stages cleared: a solid dark pill with bright figures, so the count stays
+   legible over the blurred desk behind the tabs. */
+.campaign-tab-chip.progress {
+  color: var(--gold);
+  background: rgba(10, 8, 14, 0.72);
+  border: 1px solid rgba(232, 191, 94, 0.35);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
 
 .campaign-body {
   display: grid;
@@ -3849,6 +3880,8 @@ button.cd-mastery:hover {
   max-width: 1180px;
   margin: 0 auto;
   padding: 14px;
+  /* The battle fades up out of the dark rather than popping in. */
+  animation: page-in 0.9s ease-out both;
 }
 /* The battle has no backdrop canvas: a deep vignette keeps focus on the board. */
 .game-wrap::before {
