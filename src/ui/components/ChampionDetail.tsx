@@ -1,40 +1,13 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import {
-  aoeLabel,
-  attackTypeLabel,
-  damageTypeLabel,
-  formatAttackSpeed,
-  rangeLabel,
-  upgradeEffectLabel,
-  type UnitDef,
-} from '../../domain/units';
-import {
-  masteryAttackSpeedMult,
-  masteryBounceDamageMult,
-  masteryFinalBounceDamageMult,
-  masteryDamageMult,
-  masteryGenerateMult,
-  masteryHarvest,
-  masteryRangeMult,
-  masteryThrow,
-  masteryUpgradeCost,
-  masteryUpgradeDeltas,
-} from '../../domain/mastery';
-import { critChanceFor, critMultiplierFor } from '../../domain/combat';
+import { attackTypeLabel, damageTypeLabel, upgradeEffectLabel, type UnitDef } from '../../domain/units';
+import { masteryThrow, masteryUpgradeCost, masteryUpgradeDeltas } from '../../domain/mastery';
 import { playerChampionPath } from '../../domain/playerChampion';
 import { proficiencyDef } from '../../domain/proficiency';
-import { BOUNCE_DAMAGE_MULTS } from '../../engine/GameEngine';
 import { RARITIES } from '../../domain/rarity';
+import { championRole, championStatTiles } from '../championStats';
 import { UnitSprite } from './UnitSprite';
 import { Icon } from './Icon';
-
-/** "5%", "12.5%", "20%" — trims trailing zeros. */
-function critChanceLabel(chance: number): string {
-  return `${+(chance * 100).toFixed(2)}%`;
-}
-
-const pct = (f: number) => `${+(f * 100).toFixed(1)}%`;
 
 interface Props {
   unit: UnitDef;
@@ -46,12 +19,6 @@ interface Props {
   /** Open this champion's mastery skill-tree menu. */
   onOpenMastery: () => void;
   onClose: () => void;
-}
-
-interface StatTile {
-  label: string;
-  value: string;
-  sub?: string;
 }
 
 /**
@@ -73,79 +40,9 @@ export function ChampionDetail({
   // Hero champions level up in-stage with wave-clear EXP (auto), not gold.
   const isHero = unit.rarity === 'hero';
   const path = playerChampionPath(unit.id);
-  // Combat stats with permanent mastery multipliers (damage / speed / range).
-  const damage = Math.round(unit.damage * masteryDamageMult(unit.id, purchased));
-  const attackSpeed = unit.attackSpeed * masteryAttackSpeedMult(unit.id, purchased);
-  const range = Math.round(unit.range * masteryRangeMult(unit.id, purchased));
-  // Per-arrow DPS; a burst shooter (the Bow adventurer) shows the volley size as
-  // an "×N" beside it rather than folding it into the number.
-  const burst = unit.burst ?? 1;
-  const dps = damage * attackSpeed;
   const thrown = masteryThrow(unit.id, purchased);
-  // Generator yields with permanent mastery bonuses (e.g. Better Soil) applied.
-  const harvest = unit.generator ? masteryHarvest(unit.generator.amount, unit.id, purchased) : 0;
-  const genBoosted = unit.generator != null && masteryGenerateMult(unit.id, purchased) > 1;
-  // Bouncing-projectile champions (the Elf): the damage fraction each leap deals,
-  // reflecting any mastery override (Resonant Enchantment) or the engine default.
-  const bounces = unit.bounces ?? 0;
-  const bounceFraction = masteryBounceDamageMult(unit.id, purchased) || BOUNCE_DAMAGE_MULTS[0];
-  // An extra, weaker final leap from mastery (the Elf's Parting Shot), if learned.
-  const finalBounceFraction = masteryFinalBounceDamageMult(unit.id, purchased);
-
-  const cost: StatTile = {
-    label: 'Cost · Limit',
-    value: `${unit.cost > 0 ? unit.cost : 'Free'} · ${unit.deployLimit}`,
-    sub: unit.cost > 0 ? 'gold · per stage' : 'per stage',
-  };
-  const tiles: StatTile[] = unit.generator
-    ? [
-        { label: 'Harvest', value: `${harvest}`, sub: genBoosted ? 'gold · mastery boosted' : 'gold' },
-        { label: 'Harvests', value: `${unit.generator.timesPerWave}×`, sub: 'per wave' },
-        { label: 'Gold / wave', value: `${harvest * unit.generator.timesPerWave}` },
-        cost,
-      ]
-    : unit.bard
-      ? [
-          { label: 'Tempo buff', value: `+${Math.round((unit.bard.attackSpeedMult - 1) * 100)}%`, sub: 'attack speed' },
-          { label: 'Allies', value: `${unit.bard.targets}`, sub: 'in range' },
-          { label: 'Duration', value: `${unit.bard.duration}s`, sub: `plays every ${unit.bard.every}s` },
-          { label: 'Range', value: `${range}`, sub: rangeLabel(range) },
-          cost,
-        ]
-      : [
-          { label: 'Damage', value: `${damage}`, sub: unit.damageType ? damageTypeLabel(unit.damageType).toLowerCase() : 'per hit' },
-          { label: 'Attack speed', value: `${formatAttackSpeed(attackSpeed)}/s` },
-          { label: 'Range', value: `${range}`, sub: rangeLabel(range) },
-          {
-            label: 'DPS',
-            value: `${dps.toFixed(0)}${burst > 1 ? ` ×${burst}` : ''}`,
-            sub:
-              unit.aoe === 'line'
-                ? 'per enemy in line'
-                : unit.aoe === 'circle'
-                  ? 'per enemy in blast'
-                  : burst > 1
-                    ? `${burst}-arrow burst`
-                    : 'per target',
-          },
-          { label: 'Crit', value: critChanceLabel(critChanceFor(unit, purchased)), sub: `×${critMultiplierFor(unit, purchased)} damage` },
-          ...(bounces > 0
-            ? [
-                {
-                  label: 'Bounces',
-                  value: `${bounces} × ${pct(bounceFraction)}`,
-                  sub: finalBounceFraction > 0 ? `final leap ${pct(finalBounceFraction)}` : 'damage per leap',
-                },
-              ]
-            : []),
-          ...(unit.maxMana ? [{ label: 'Mana', value: `${unit.maxMana}`, sub: 'refilled by kills' }] : []),
-          cost,
-        ];
-
-  const role = unit.generator ? 'Economy' : unit.bard ? 'Support' : aoeLabel(unit.aoe);
-  const attackLine = [unit.attackType && attackTypeLabel(unit.attackType), role, unit.damageType && damageTypeLabel(unit.damageType)]
-    .filter(Boolean)
-    .join(' · ');
+  const tiles = championStatTiles(unit, purchased);
+  const role = championRole(unit);
 
   const notes: ReactNode[] = [];
   if (unit.aoe === 'line')
@@ -214,9 +111,6 @@ export function ChampionDetail({
                 </div>
               ))}
             </div>
-            <p className="cd-attack">
-              <b>Attack:</b> {attackLine}
-            </p>
             {notes.map((n, i) => (
               <p key={i} className="cd-note">
                 <Icon name="info" /> {n}
@@ -248,7 +142,7 @@ export function ChampionDetail({
                       </div>
                       <div className="cd-level-eff">
                         {effect && <b>{effect}</b>}
-                        {effect && u.description ? ' — ' : ''}
+                        {effect && u.description ? ' - ' : ''}
                         {u.description}
                       </div>
                       {u.ability && (

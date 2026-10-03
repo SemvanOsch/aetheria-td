@@ -126,7 +126,7 @@ function buildBladeChampion(
     aoe: 'single',
     attackType: 'melee',
     damageType: 'physical',
-    cost: 0, // The player's hero deploys free — it's locked to the team and unsellable.
+    cost: 0,
     deployLimit: 1,
     maxMana: HERO_BASE_MANA,
     upgrades: [
@@ -149,15 +149,14 @@ function buildBladeChampion(
         // the hero pools to auto-level into this tier.
         name: 'Cyclone Slash',
         description:
-          'Unlocks Cyclone Slash — an activated whirlwind of steel that cuts ' +
-          'every foe within reach at once. Trigger it from its icon, then wait ' +
-          'for it to recharge.',
+          'Unlocks Cyclone Slash - an activated whirlwind of steel that cuts ' +
+          'every foe within reach at once.',
         cost: 100,
         ability: {
           id: 'cyclone-slash',
           name: 'Cyclone Slash',
           description:
-            'A whirling cyclone — strikes every enemy in range for ' +
+            'A whirling cyclone - strikes every enemy in range for ' +
             '1.5× the champion’s damage.',
           damageMult: 1.5,
           cooldown: 12,
@@ -208,19 +207,19 @@ function buildBowChampion(
     attackType: 'ranged',
     damageType: 'physical',
     burst: 3,
-    cost: 0, // The player's hero deploys free — it's locked to the team and unsellable.
+    cost: 0,
     deployLimit: 1,
     maxMana: HERO_BASE_MANA,
     upgrades: [
       {
         name: 'Keen Broadheads',
-        description: 'Sharper arrowheads bite deeper — every arrow of the volley.',
+        description: 'Sharper arrowheads bite deeper.',
         cost: 30,
         damage: 4,
       },
       {
-        name: 'Longbow Draw',
-        description: 'A fuller draw sends every arrow of the volley flying farther.',
+        name: 'Stronger String',
+        description: 'Stronger String sends arrows flying farther.',
         cost: 35,
         range: 22,
       },
@@ -230,15 +229,14 @@ function buildBowChampion(
         // EXP threshold the hero pools to auto-level into this tier.
         name: 'Quickdraw',
         description:
-          'Unlocks Quickdraw — an activated burst of blistering draw speed, ' +
-          'loosing volleys far faster for a short spell. Trigger it from its ' +
-          'icon, then wait for it to recharge.',
+          'Unlocks Quickdraw - an activated burst of blistering draw speed, ' +
+          'loosing volleys far faster for a short duration.',
         cost: 85,
         ability: {
           id: 'quickdraw',
           name: 'Quickdraw',
           description:
-            'A blur of arrows — 2.5× attack speed for 6s. Recharges over 15s.',
+            'A blur of arrows - 2.5× attack speed for 6s.',
           speedMult: 2.5,
           duration: 6,
           cooldown: 15,
@@ -278,13 +276,12 @@ function buildMagicChampion(
     id,
     name,
     description:
-      'A staff-less mage who gathers a magic orb in bare hands and hurls it to ' +
+      'A staff-less mage who gathers magic and hurls it to ' +
       'burst over a cluster of foes.',
     // The exclusive Champion rarity — the player's own adventurer, never summoned.
     rarity: 'hero',
     // Damage dealt to every enemy caught in the orb's detonation.
     damage: 16,
-    // Deliberately slow — the orb takes a moment to charge before each cast.
     attackSpeed: 0.55,
     range: 104,
     targeting: 'first',
@@ -292,7 +289,7 @@ function buildMagicChampion(
     burstRadius: 46,
     attackType: 'ranged',
     damageType: 'magic',
-    cost: 0, // The player's hero deploys free — it's locked to the team and unsellable.
+    cost: 0,
     deployLimit: 1,
     maxMana: HERO_BASE_MANA,
     upgrades: [
@@ -304,7 +301,7 @@ function buildMagicChampion(
       },
       {
         name: 'Swift Casting',
-        description: 'A practised hand gathers the orb faster — quicker bursts.',
+        description: 'A practised hand gathers the orb faster for quicker bursts.',
         cost: 65,
         attackSpeed: 0.2,
       },
@@ -314,16 +311,14 @@ function buildMagicChampion(
         // auto-level into this tier.
         name: 'Mana Ray',
         description:
-          'Unlocks Mana Ray — channels a continuous beam of raw mana, locked ' +
-          'where it is first aimed, searing every foe that walks through it. ' +
-          'The mage cannot cast orbs while the beam burns.',
+          'Unlocks Mana Ray - channels a continuous beam of raw mana, searing every foe that walks through it.',
         cost: 125,
         ability: {
           id: 'mana-ray',
           name: 'Mana Ray',
           description:
             'Channels a fixed beam for 3s, striking every enemy in its line for ' +
-            '1.25× damage every 0.5s. No orb-casting while it burns.',
+            '1.25× damage every 0.5s.',
           damageMult: 1.25,
           duration: 3,
           aoeWidth: 18,

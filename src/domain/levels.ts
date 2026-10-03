@@ -12,6 +12,7 @@
 import { type Cell, type Vec2, cellCenter, expandPathCells, cellKey } from './grid';
 import { bossIdForLevel } from './enemies';
 import type { BoardTheme, DecorProp } from './decor';
+import type { Atmosphere } from './atmosphere';
 
 export type SectionId = 'castle' | 'capital' | 'forest' | 'inn';
 
@@ -96,6 +97,11 @@ export interface LevelDef {
   theme?: BoardTheme;
   /** Optional cosmetic props drawn beneath gameplay tokens. */
   decor?: DecorProp[];
+  /**
+   * Optional mood override, winning over the id-keyed tables in
+   * `domain/atmosphere.ts` — the Level Designer previews a mood this way.
+   */
+  atmosphere?: Atmosphere;
 }
 
 const DEFAULT_SPACING = 0.85;

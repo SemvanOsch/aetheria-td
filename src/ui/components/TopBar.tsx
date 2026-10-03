@@ -10,16 +10,17 @@ import { Crest } from './Crest';
 interface Props {
   active: Screen;
   onNavigate: (screen: Screen) => void;
+  /** Open the journal on its Champions bookmark. */
+  onChampions: () => void;
 }
 
 const TABS: { id: Screen; label: string; icon: IconName }[] = [
   { id: 'home', label: 'Home', icon: 'keep' },
   { id: 'modes', label: 'Play', icon: 'swords' },
   { id: 'summon', label: 'Summon', icon: 'orb' },
-  { id: 'collection', label: 'Champions', icon: 'helm' },
 ];
 
-export function TopBar({ active, onNavigate }: Props) {
+export function TopBar({ active, onNavigate, onChampions }: Props) {
   const { state } = useGame();
   const [showSettings, setShowSettings] = useState(false);
   const [showPatchNotes, setShowPatchNotes] = useState(false);
@@ -42,6 +43,11 @@ export function TopBar({ active, onNavigate }: Props) {
             <span className="nav-label">{t.label}</span>
           </button>
         ))}
+        {/* Champions live in the journal now; this opens it on their bookmark. */}
+        <button className="nav-btn" onClick={onChampions} aria-label="Champions">
+          <Icon name="helm" />
+          <span className="nav-label">Champions</span>
+        </button>
       </nav>
       <Gems amount={state.gems} />
       <button

@@ -98,8 +98,8 @@ export interface PropInfo {
 
 /** Human labels + display order for the Level Designer's prop tabs. */
 export const PROP_CATEGORIES: { id: PropCategory; label: string }[] = [
-  { id: 'castle', label: '🏰 Castle' },
-  { id: 'capital', label: '🏙️ Capital' },
+  { id: 'castle', label: 'Castle' },
+  { id: 'capital', label: 'Capital' },
 ];
 
 /** The ordered prop palette the Level Designer offers. */

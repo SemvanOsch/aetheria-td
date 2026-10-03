@@ -58,7 +58,7 @@ export interface Atmosphere {
 }
 
 /** Section fallbacks: a stage with no authored mood inherits its chapter's. */
-const SECTION_MOODS: Record<SectionId, Atmosphere> = {
+export const SECTION_MOODS: Record<SectionId, Atmosphere> = {
   castle: {
     ambient: '#140c1e',
     darkness: 0.42,
@@ -105,7 +105,7 @@ const SECTION_MOODS: Record<SectionId, Atmosphere> = {
 };
 
 /** Authored moods, keyed by level id. */
-const STAGE_MOODS: Record<number, Atmosphere> = {
+export const STAGE_MOODS: Record<number, Atmosphere> = {
   // Castle Door — the courtyard at golden dusk: low warm sun raking across the
   // grass, the keep's windows already lit, leaves skittering on the wind.
   1: {

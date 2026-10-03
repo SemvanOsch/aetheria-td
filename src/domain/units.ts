@@ -382,7 +382,7 @@ export const UNITS: Record<string, UnitDef> = {
       },
       {
         name: 'Flurry of Blows',
-        description: 'Strikes faster and hits far harder.',
+        description: 'Strikes much faster.',
         cost: 45,
         attackSpeed: 0.6,
       },
@@ -393,7 +393,7 @@ export const UNITS: Record<string, UnitDef> = {
     id: 'spearman',
     name: 'Spearman',
     description:
-      'Drives a long spear clean through a rank of foes — every enemy in a straight line takes the hit.',
+      'Drives a long spear clean through a rank of foes, every enemy in a straight line takes the hit.',
     rarity: 'common',
     damage: 28,
     attackSpeed: 0.6,
@@ -427,7 +427,7 @@ export const UNITS: Record<string, UnitDef> = {
     id: 'wizard',
     name: 'Wizard',
     description:
-      'A storm-caller who hurls tight bullets of screaming wind. Each gust flies far and strikes hard — a rare talent among the ranks.',
+      'A storm-caller who hurls tight bullets of screaming wind. Each gust flies far and strikes hard - a rare talent among the ranks.',
     rarity: 'rare',
     damage: 24,
     attackSpeed: 1.1,
@@ -457,7 +457,7 @@ export const UNITS: Record<string, UnitDef> = {
       {
         name: 'Wind Slice',
         description:
-          'Stops hurling single gusts and instead carves a sweeping slice of wind — every foe in the arc to the end of his range is cut at once.',
+          'Stops hurling single gusts and instead carves a sweeping slice of wind.',
         cost: 220,
         damage: 24,
         attackSpeed: -0.5,
@@ -470,7 +470,7 @@ export const UNITS: Record<string, UnitDef> = {
     id: 'elf',
     name: 'Elf',
     description:
-      'A woodland archer who enchants every shaft she looses. Each arrow strikes true, then leaps onward to bite another nearby foe — a rare gift of the greenwood.',
+      'A woodland archer who enchants every shaft she looses. Each arrow strikes true, then leaps onward to bite another nearby foe - a rare gift of the greenwood.',
     rarity: 'rare',
     damage: 12,
     attackSpeed: 1.1,
@@ -491,14 +491,14 @@ export const UNITS: Record<string, UnitDef> = {
       },
       {
         name: 'Arcane Draw',
-        description: 'A swifter draw and a longer, truer reach.',
+        description: 'A swifter draw and a longer reach.',
         cost: 65,
         attackSpeed: 0.25,
         range: 20,
       },
       {
         name: 'Chain Enchantment',
-        description: 'The enchantment ripples further — each arrow leaps to one more nearby foe.',
+        description: 'The enchantment ripples further - each arrow leaps to one more nearby foe.',
         cost: 80,
         bounces: 1,
       },
@@ -509,7 +509,7 @@ export const UNITS: Record<string, UnitDef> = {
     id: 'farmer',
     name: 'Farmer',
     description:
-      'Tends the land instead of fighting — reaps gold every wave. Place it somewhere safe and let the coin roll in.',
+      'Tends the land instead of fighting - reaps gold every wave.',
     rarity: 'common',
     // Non-combat: harvests gold rather than attacking.
     damage: 0,
@@ -541,7 +541,7 @@ export const UNITS: Record<string, UnitDef> = {
     id: 'bard',
     name: 'Bard',
     description:
-      'A wandering minstrel who never draws a blade. Every few beats he strikes up a rousing tune, spurring two nearby champions to strike faster for a while.',
+      'A wandering minstrel who never draws a blade. Every few beats he strikes up a rousing tune, spurring nearby champions to strike faster for a while.',
     rarity: 'common',
     // Non-combat: plays buffs rather than attacking.
     damage: 0,
@@ -550,7 +550,7 @@ export const UNITS: Record<string, UnitDef> = {
     targeting: 'first',
     aoe: 'single',
     attackType: 'support',
-    bard: { every: 10, targets: 2, attackSpeedMult: 1.2, duration: 8 },
+    bard: { every: 10, targets: 2, attackSpeedMult: 1.2, duration: 6 },
     cost: 60,
     deployLimit: 2,
     upgrades: [

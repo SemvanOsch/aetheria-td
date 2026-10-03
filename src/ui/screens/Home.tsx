@@ -4,11 +4,9 @@ import {
   MAX_TEAM_SIZE,
   hasAffordableMasteryUpgrade,
   isLevelUnlocked,
-  isEnemyUnlocked,
   masteryExp,
 } from '../../application/gameState';
 import { canAffordSummon } from '../../application/summon';
-import { BOSS_ENEMIES, REGULAR_ENEMIES } from '../../domain/enemies';
 import { JOURNAL_CHAPTERS, unlockedChapterCount } from '../../domain/journal';
 import { LEVELS, SECTIONS, getSection, levelsForSection } from '../../domain/levels';
 import { summonableUnits } from '../../domain/units';
@@ -23,8 +21,6 @@ interface Props {
   onPlay: () => void;
   onContinue: (levelId: number) => void;
   onSummon: () => void;
-  onCollection: () => void;
-  onEnemyIndex: () => void;
   onJournal: () => void;
 }
 
@@ -36,7 +32,7 @@ const WEAPON: Record<Proficiency, PlayerWeapon> = { sword: 'dual-swords', bow: '
  * shortcut tiles to every hub (each with a live status line), and the
  * campaign's progress chapter by chapter.
  */
-export function Home({ onPlay, onContinue, onSummon, onCollection, onEnemyIndex, onJournal }: Props) {
+export function Home({ onPlay, onContinue, onSummon, onJournal }: Props) {
   const { state } = useGame();
   const player = state.player;
   const prof = player ? proficiencyDef(player.proficiency) : null;
@@ -52,8 +48,6 @@ export function Home({ onPlay, onContinue, onSummon, onCollection, onEnemyIndex,
 
   const slain = Object.values(state.enemyKills).reduce((s, n) => s + n, 0);
   const totalKinds = summonableUnits().length + 1; // + the player's own champion
-  const foes = [...REGULAR_ENEMIES, ...BOSS_ENEMIES];
-  const discovered = foes.filter((e) => isEnemyUnlocked(state, e)).length;
   const chapters = unlockedChapterCount(cleared);
   const unread = chapters - state.readChapters.filter((c) => c < chapters).length;
   const masteryReady = state.ownedUnits.some((id) => hasAffordableMasteryUpgrade(state, id));
@@ -132,30 +126,15 @@ export function Home({ onPlay, onContinue, onSummon, onCollection, onEnemyIndex,
           onClick={onSummon}
         />
         <Tile
-          icon="helm"
-          hue="#e8bf5e"
-          title="Champions & Mastery"
-          line={`Team of ${state.team.length} / ${MAX_TEAM_SIZE}`}
-          sub="Spend battle EXP on permanent skill trees"
-          ready={masteryReady ? 'Skill upgrade available' : undefined}
-          onClick={onCollection}
-        />
-        <Tile
           icon="journal"
           hue="#d9a066"
           title="Adventurer's Journal"
-          line={`${chapters} / ${JOURNAL_CHAPTERS.length} chapters unlocked`}
-          sub="A chapter for every stage you clear"
-          ready={unread > 0 ? `${unread} unread` : undefined}
+          line={`${chapters} / ${JOURNAL_CHAPTERS.length} chapters · team of ${state.team.length} / ${MAX_TEAM_SIZE}`}
+          sub="Your story, your champions and the bestiary"
+          ready={
+            unread > 0 ? `${unread} unread` : masteryReady ? 'Skill upgrade available' : undefined
+          }
           onClick={onJournal}
-        />
-        <Tile
-          icon="bestiary"
-          hue="#ff8a7a"
-          title="Bestiary"
-          line={`${discovered} / ${foes.length} foes discovered`}
-          sub="Learn every enemy's tricks"
-          onClick={onEnemyIndex}
         />
       </div>
 

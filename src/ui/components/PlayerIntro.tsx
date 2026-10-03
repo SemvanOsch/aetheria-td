@@ -12,6 +12,8 @@ import { PlayerSpriteCreator } from './PlayerSpriteCreator';
 import { Crest } from './Crest';
 import { Icon, type IconName } from './Icon';
 import { CompassRose, CoverCorner, Flourish, PageCorners, WaxSeal } from './JournalArt';
+import { JournalChampions } from './JournalChampions';
+import { JournalBestiary } from './JournalBestiary';
 import type { PlayerWeapon } from '../../engine/sprites';
 import { playIntroSound } from '../introAudio';
 import { JOURNAL_CHAPTERS, chapterPageTexts, unlockedChapterCount } from '../../domain/journal';
@@ -45,7 +47,19 @@ interface Props {
   readChapters?: number[];
   /** Called when a chapter finishes typing out for the first time ever. */
   onChapterRead?: (index: number) => void;
+  /** The bookmark the journal opens on (review mode; default the profile). */
+  initialSection?: JournalSection;
+  /** Marks the Champions bookmark (a skill-tree upgrade is affordable). */
+  championsMark?: boolean;
 }
+
+/**
+ * The journal's three bookmarks: the adventurer's own pages (identification
+ * and lore), their champions, and the bestiary.
+ */
+export type JournalSection = 'profile' | 'champions' | 'bestiary';
+
+const SECTION_ORDER: JournalSection[] = ['profile', 'champions', 'bestiary'];
 
 /** Cinematic phases: black → book opens → interactive page → book closes. */
 type Phase = 'intro' | 'opening' | 'page' | 'closing';
@@ -123,9 +137,12 @@ export function PlayerIntro({
   stagesCleared = 0,
   readChapters,
   onChapterRead,
+  initialSection = 'profile',
+  championsMark = false,
 }: Props) {
   const isReview = review != null;
   const [phase, setPhase] = useState<Phase>('intro');
+  const [section, setSection] = useState<JournalSection>(isReview ? initialSection : 'profile');
   const [showCreator, setShowCreator] = useState(false);
 
   // After confirming the first-launch identification the journal stays open on
@@ -169,6 +186,18 @@ export function PlayerIntro({
     const leafIdx = leaves.findIndex((l) => l.chapter === chapterIndex);
     if (leafIdx < 0) return;
     goToPage(2 + leafIdx);
+  };
+
+  // Bookmarks: flip to another section of the book.
+  const goToSection = (target: JournalSection) => {
+    if (target === section) return;
+    playIntroSound('pageTurn');
+    sweepLeaf(SECTION_ORDER.indexOf(target) > SECTION_ORDER.indexOf(section) ? 'next' : 'prev');
+    setSection(target);
+  };
+  const turnLeaf = (dir: 'next' | 'prev') => {
+    playIntroSound('pageTurn');
+    sweepLeaf(dir);
   };
 
   // Portrait state: the confirmed sprite, plus a transient "ink drawing itself"
@@ -450,11 +479,43 @@ export function PlayerIntro({
             <div className="cover-strap" aria-hidden="true" />
           </div>
 
+          {/* Bookmarks peeking out of the top of the book (navigable journal). */}
+          {navigable && phase === 'page' && (
+            <div className="journal-bookmarks" role="tablist" aria-label="Journal sections">
+              {SECTION_ORDER.map((id) => {
+                const label =
+                  id === 'profile' ? writtenName || review?.name || 'Adventurer' : id === 'champions' ? 'Champions' : 'Bestiary';
+                const marked =
+                  id === 'profile'
+                    ? leaves.some((l) => !revealedLeaves.has(leafKey(l)))
+                    : id === 'champions' && championsMark;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={section === id}
+                    className={`journal-bookmark ${id}${section === id ? ' active' : ''}`}
+                    onClick={() => goToSection(id)}
+                  >
+                    <Icon name={id === 'profile' ? 'quill' : id === 'champions' ? 'helm' : 'bestiary'} />
+                    <span className="journal-bookmark-label">{label}</span>
+                    {marked && <i className="journal-bookmark-dot" aria-label="Something new" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {/* The open two-page spread, on its leather boards. */}
-          <div className="book-spread">
+          <div className={`book-spread sec-${section}`}>
             <div className="book-boards" aria-hidden="true" />
             <div className="book-ribbon" aria-hidden="true" />
-            {navigable && page === 1 ? (
+            {navigable && section === 'champions' ? (
+              <JournalChampions ready={phase === 'page'} onTurn={turnLeaf} />
+            ) : navigable && section === 'bestiary' ? (
+              <JournalBestiary ready={phase === 'page'} onTurn={turnLeaf} />
+            ) : navigable && page === 1 ? (
               /* ---- Chapters index ---- */
               <>
                 <div className="book-page left" key="chapters-left">
@@ -812,12 +873,12 @@ export function PlayerIntro({
 
             {/* Page-turn arrows (navigable book). Each shows only when there is
                 a page to move to in that direction. */}
-            {navigable && phase === 'page' && page > 0 && (
+            {navigable && section === 'profile' && phase === 'page' && page > 0 && (
               <button className="journal-arrow left" onClick={() => turnPage('prev')} aria-label="Previous page">
                 <Icon name="back" />
               </button>
             )}
-            {navigable && phase === 'page' && page < lastPage && (
+            {navigable && section === 'profile' && phase === 'page' && page < lastPage && (
               <button className="journal-arrow right" onClick={() => turnPage('next')} aria-label="Next page">
                 <Icon name="forward" />
               </button>

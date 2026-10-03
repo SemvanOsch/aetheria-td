@@ -20,6 +20,18 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-10-03 · The Journal Hub',
+    changes: [
+      'The Adventurer’s Journal is now home to your champions and the bestiary. Three silk bookmarks along the top of the book switch between your own pages (identification and lore, named after you), Champions and the Bestiary, and a gold dot on a bookmark shows when something new is waiting.',
+      'Champions, redrawn as journal pages: the selected champion sits in an arched plate with its traits, description and a handwritten ledger of its battle stats, plus buttons to enlist it, open its skill tree or read its full record. The facing page holds your company (drag to reorder, × to remove) and the roster, nine to a page, with wax seals on team members and sepia sketches for champions you haven’t recruited yet.',
+      'The Bestiary moves into the journal too: foes and bosses on their own tabs, undiscovered foes as dark silhouettes with an unlock bar, and each recorded foe written up as field notes with its numbers, resistances, its special trick and its lore.',
+      'The home screen’s Champions and Bestiary tiles are gone, leaving Summon and the Journal side by side. The top bar’s Champions tab and the campaign’s Edit team button now open the journal on the Champions bookmark.',
+      'Revamped Level Designer (Settings → Developer): a live preview drawn exactly like the real battle board (lighting, weather, flickering props), start from any existing stage, four tool panels (Path, Props, Ground, Mood), hover previews that show whether a prop fits, floor and path materials and colours, a preview of any stage’s mood, smarter warnings, and exported code that includes the floor and path materials.',
+      'Bard: his tune now lasts 6 seconds instead of 8.',
+      'The Bow hero’s second level is now called Stronger String, and many champion, ability and skill-tree descriptions were tightened up.',
+    ],
+  },
+  {
     version: '2026-10-03 · The Great Revamp',
     changes: [
       'A full visual overhaul of the battle board: painted stone, wood and grass floors with worn paths, real-time lighting (torches, candles, windows and moonlight pooling in dark rooms), a mood of its own for every stage, depth-sorted props that fade when a figure walks behind them, and new effects — sparks, slash arcs, impact rings, corpses, screen shake (off with reduced motion) and soft cast shadows.',

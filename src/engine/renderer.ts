@@ -147,7 +147,7 @@ function stateFor(engine: GameEngine): BoardState {
     for (const c of meta.chimneys ?? []) chimneys.push({ x: a.x + c.dx, y: a.y + c.dy });
   }
   st = {
-    atmo: atmosphereFor(engine.level.id, engine.level.section),
+    atmo: engine.level.atmosphere ?? atmosphereFor(engine.level.id, engine.level.section),
     terrain: null,
     terrainKey: '',
     lighting: new Lighting(),

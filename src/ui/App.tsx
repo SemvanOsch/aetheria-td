@@ -7,15 +7,13 @@ import { Summon } from './screens/Summon';
 import { ModeSelect } from './screens/ModeSelect';
 import { Story } from './screens/Story';
 import { GameScreen } from './screens/GameScreen';
-import { Collection } from './screens/Collection';
-import { EnemyIndex } from './screens/EnemyIndex';
-import { PlayerIntro } from './components/PlayerIntro';
+import { PlayerIntro, type JournalSection } from './components/PlayerIntro';
 import { Backdrop } from './components/Backdrop';
 import { useGame } from '../application/gameContext';
-import { hasCompletedIntro } from '../application/gameState';
+import { hasAffordableMasteryUpgrade, hasCompletedIntro } from '../application/gameState';
 import { getLevel, type SectionId } from '../domain/levels';
 
-export type Screen = 'home' | 'summon' | 'collection' | 'enemies' | 'modes' | 'story' | 'game';
+export type Screen = 'home' | 'summon' | 'modes' | 'story' | 'game';
 
 export function App() {
   const { state, setPlayerProfile, markChapterRead } = useGame();
@@ -24,8 +22,9 @@ export function App() {
   const [storySection, setStorySection] = useState<SectionId | null>(null);
   // Bumped to force a fresh GameScreen mount when retrying a stage.
   const [retryNonce, setRetryNonce] = useState(0);
-  // Replay the journal cinematic on demand (read-only review of the adventurer).
-  const [showJournal, setShowJournal] = useState(false);
+  // The journal, open on one of its bookmarks: the adventurer's own pages,
+  // their champions (and team), or the bestiary. Null while it's closed.
+  const [journal, setJournal] = useState<JournalSection | null>(null);
 
   // Keep the shared audio bus in sync with the persisted volume settings, so
   // sliders in Settings take effect immediately and the saved levels apply on
@@ -92,28 +91,30 @@ export function App() {
       {/* The living night backdrop sits behind every menu (the battle board
           paints its own world, so it's skipped there). */}
       {screen !== 'game' && <Backdrop />}
-      {screen !== 'game' && <TopBar active={navActive} onNavigate={(s) => (s === 'modes' ? goPlay() : setScreen(s))} />}
+      {screen !== 'game' && (
+        <TopBar
+          active={navActive}
+          onNavigate={(s) => (s === 'modes' ? goPlay() : setScreen(s))}
+          onChampions={() => setJournal('champions')}
+        />
+      )}
 
       {screen === 'home' && (
         <Home
           onPlay={goPlay}
           onContinue={startLevel}
           onSummon={() => setScreen('summon')}
-          onCollection={() => setScreen('collection')}
-          onEnemyIndex={() => setScreen('enemies')}
-          onJournal={() => setShowJournal(true)}
+          onJournal={() => setJournal('profile')}
         />
       )}
       {screen === 'summon' && <Summon />}
-      {screen === 'collection' && <Collection />}
-      {screen === 'enemies' && <EnemyIndex />}
       {screen === 'modes' && <ModeSelect onStory={() => setScreen('story')} />}
       {screen === 'story' && (
         <Story
           section={storySection}
           onSelectSection={setStorySection}
           onPlay={startLevel}
-          onEditTeam={() => setScreen('collection')}
+          onEditTeam={() => setJournal('champions')}
           onBack={goPlay}
         />
       )}
@@ -127,21 +128,25 @@ export function App() {
         />
       )}
 
-      {/* On-demand replay of the journal cinematic, filled with the saved
-          adventurer (review mode — no ID to fill in again). */}
-      {showJournal && state.player && (
+      {/* The journal, filled with the saved adventurer (review mode — no ID to
+          fill in again), opened on the bookmark that was asked for. */}
+      {journal && state.player && (
         <PlayerIntro
           review={{
             name: state.player.name,
             sprite: state.player.sprite,
             proficiency: state.player.proficiency,
           }}
+          initialSection={journal}
+          championsMark={
+            state.prefs.showMasteryMarks && state.ownedUnits.some((id) => hasAffordableMasteryUpgrade(state, id))
+          }
           stagesCleared={state.completedLevels.length}
           readChapters={state.readChapters}
           onChapterRead={markChapterRead}
           onClose={(name, sprite, proficiency) => {
             setPlayerProfile(name, sprite, proficiency);
-            setShowJournal(false);
+            setJournal(null);
           }}
         />
       )}

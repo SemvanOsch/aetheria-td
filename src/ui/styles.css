@@ -453,233 +453,387 @@ button:disabled .icon {
 }
 
 /* ------------------------------------------------------ level designer */
-.level-designer-modal {
-  max-width: 680px;
+/* Tool panels on the left, the live battle render on the right, the
+   exportable level code underneath. */
+.modal.level-designer-modal {
+  max-width: 1240px;
   position: relative;
 }
-.ld-grid {
-  display: grid;
-  margin: 14px auto 0;
-  position: relative;
-  border: 2px solid var(--border-strong);
-  border-radius: 8px;
-  overflow: hidden;
-  background: #0d1526;
-  max-width: 100%;
-}
-.ld-cell {
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  background: #223350;
-  padding: 0;
-  cursor: pointer;
-  transition: background 0.08s ease;
-}
-.ld-cell.off {
-  background: #131c2e;
-}
-.ld-cell.path {
-  background: #4a382c;
-}
-.ld-cell:hover {
-  background: rgba(242, 193, 78, 0.35);
-}
-.ld-overlay {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.ld-legend {
+.ld-head {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
+  justify-content: space-between;
   gap: 16px;
-  margin-top: 12px;
-  font-size: 12.5px;
-  color: var(--text-dim);
+  flex-wrap: wrap;
+  padding-right: 40px;
+  margin-bottom: 16px;
 }
-.ld-legend .dot {
-  display: inline-block;
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  margin-right: 5px;
-  vertical-align: -1px;
-  border: 1px solid #0d1526;
-}
-.ld-legend .dot.start {
-  background: #5fd38a;
-}
-.ld-legend .dot.end {
-  background: #6fd6ff;
-}
-.ld-legend .dot.turn {
-  background: #f2b23c;
-}
-.ld-legend .ld-count {
-  margin-left: auto;
+.ld-eyebrow {
+  font-size: 11px;
   font-weight: 700;
-  color: var(--text);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
-.ld-warn {
-  color: var(--gold);
-  margin-top: 8px;
+.modal .ld-title {
+  margin: 2px 0 0;
+  justify-content: flex-start;
+  text-align: left;
+  font-size: 26px;
 }
-.ld-controls {
+.ld-source {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 14px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
-.ld-code-label {
-  display: block;
-  margin-top: 16px;
-  margin-bottom: 6px;
+.ld-source select {
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--well);
+}
+.ld-body {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+/* Side panels. */
+.ld-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ld-panels {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--well);
+  border: 1px solid var(--hairline);
+}
+.ld-panels button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 4px;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.ld-panels button .icon {
+  font-size: 17px;
+}
+.ld-panels button:hover {
+  color: var(--text);
+}
+.ld-panels button.active {
+  color: var(--gold-hi);
+  background: linear-gradient(180deg, rgba(232, 191, 94, 0.18), rgba(232, 191, 94, 0.06));
+  box-shadow: inset 0 0 0 1px rgba(232, 191, 94, 0.35);
+}
+.ld-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--well);
+  max-height: 560px;
+  overflow-y: auto;
+}
+.ld-help,
+.ld-note {
+  margin: 0;
   font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+.ld-note {
+  color: var(--gold);
+}
+.ld-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.btn.ld-small {
+  padding: 7px 12px;
+  font-size: 11.5px;
+  letter-spacing: 0.05em;
+}
+.ld-legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 12px;
   color: var(--text-dim);
 }
-.ld-code-label code {
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.06);
-  padding: 1px 5px;
-  border-radius: 5px;
-  font-size: 12px;
+.ld-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
-.ld-code {
-  width: 100%;
-  resize: vertical;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.35);
-  color: var(--text);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+.ld-legend .dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid #0c0e1c;
+}
+.ld-legend .dot.start {
+  background: #7fd38a;
+}
+.ld-legend .dot.turn {
+  background: #e8bf5e;
+}
+.ld-legend .dot.end {
+  background: #6fb6ff;
+}
+.ld-subtabs {
+  display: flex;
+  gap: 6px;
+}
+.ld-subtabs button,
+.ld-choice button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--hairline);
+  font: inherit;
   font-size: 12.5px;
-  line-height: 1.5;
+  font-weight: 700;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
 }
-.ld-tools {
+.ld-subtabs button.active,
+.ld-choice button.active {
+  color: var(--gold-hi);
+  border-color: rgba(232, 191, 94, 0.5);
+  background: rgba(232, 191, 94, 0.12);
+}
+.ld-choice {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: 12px 0 4px;
 }
-.ld-tool {
+.ld-props {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.ld-prop {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  width: 58px;
-  padding: 5px 2px 4px;
-  border-radius: 9px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
+  padding: 6px 4px 7px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  background: radial-gradient(circle at 50% 35%, #2a2e4c, #0c0e1c 85%);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
   color: var(--text-dim);
   cursor: pointer;
-  transition: border-color 0.1s ease, background 0.1s ease, color 0.1s ease;
+  transition: border-color 0.15s ease, transform 0.15s var(--ease-out);
 }
-.ld-tool:hover {
-  border-color: var(--border-strong);
-  color: var(--text);
+.ld-prop:hover {
+  transform: translateY(-2px);
+  border-color: var(--border);
 }
-.ld-tool.active {
+.ld-prop.active {
+  color: var(--gold-hi);
   border-color: var(--gold);
-  background: rgba(242, 193, 78, 0.12);
-  color: var(--text);
-}
-.ld-tool-glyph {
-  font-size: 24px;
-  line-height: 40px;
-  height: 40px;
-}
-.ld-tool-label {
-  font-size: 10.5px;
-  font-weight: 600;
+  box-shadow: 0 0 12px rgba(232, 191, 94, 0.3);
 }
 .ld-prop-icon {
-  display: block;
+  width: 54px;
+  height: 57px;
 }
-.ld-prop-tabs {
+.ld-field-label {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.ld-color {
   display: flex;
-  gap: 4px;
-  margin: 10px 0 0;
-  border-bottom: 1px solid var(--border);
-}
-.ld-prop-tab {
-  padding: 6px 14px;
-  border: 1px solid var(--border);
-  border-bottom: none;
-  border-radius: 9px 9px 0 0;
-  background: rgba(255, 255, 255, 0.02);
-  color: var(--text-dim);
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transform: translateY(1px);
-  transition: border-color 0.1s ease, background 0.1s ease, color 0.1s ease;
-}
-.ld-prop-tab:hover {
-  color: var(--text);
-  border-color: var(--border-strong);
-}
-.ld-prop-tab.active {
-  color: var(--text);
-  border-color: var(--gold);
-  background: rgba(242, 193, 78, 0.12);
-}
-.ld-inline-color {
-  display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-dim);
-  margin: 6px 14px 2px 0;
 }
-.ld-inline-color input[type="color"] {
-  width: 34px;
-  height: 24px;
+.ld-color > span {
+  flex: 1;
+}
+.ld-color input[type='color'] {
+  width: 30px;
+  height: 26px;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: none;
   cursor: pointer;
 }
-.ld-inline-color input.ld-hex {
-  width: 74px;
-  height: 24px;
-  padding: 0 6px;
-  border: 1px solid var(--border);
+.ld-color input.ld-hex {
+  width: 84px;
+  padding: 5px 8px;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.25);
-  color: var(--text);
-  font: 600 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  letter-spacing: 0.5px;
-}
-.ld-inline-color input.ld-hex:focus {
-  outline: none;
-  border-color: var(--accent, #f2b23c);
-}
-.ld-theme {
-  margin-top: 14px;
-  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--text);
+  font: 600 12.5px ui-monospace, Consolas, monospace;
 }
-.ld-theme-body {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-top: 4px;
+.ld-color input.ld-hex:focus {
+  outline: none;
+  border-color: var(--gold);
 }
 .ld-check {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text);
   cursor: pointer;
-  margin-right: 14px;
 }
 .ld-check input {
+  accent-color: var(--gold);
+}
+.ld-moods {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ld-moods button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, 0.03);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  color: var(--text-dim);
   cursor: pointer;
+}
+.ld-moods button small {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+.ld-moods button.active {
+  color: var(--gold-hi);
+  border-color: rgba(232, 191, 94, 0.5);
+  background: rgba(232, 191, 94, 0.1);
+}
+.ld-mood-swatch {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* The live board. */
+.ld-stage {
+  min-width: 0;
+}
+.ld-view {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  cursor: crosshair;
+}
+.ld-view.ground,
+.ld-view.mood {
+  cursor: default;
+}
+.ld-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.ld-warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: #ffb36a;
+}
+
+/* Export. */
+.ld-export {
+  margin-top: 16px;
+}
+.ld-export-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+.ld-export code,
+.ld-help code {
+  font-family: ui-monospace, Consolas, monospace;
+  color: var(--gold);
+}
+.ld-code {
+  width: 100%;
+  resize: vertical;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font: 12.5px/1.5 ui-monospace, Consolas, monospace;
+}
+
+@media (max-width: 900px) {
+  .ld-body {
+    grid-template-columns: 1fr;
+  }
+  .ld-panel {
+    max-height: none;
+  }
 }
 
 /* ---------------------------------------------------------- currency */
@@ -794,15 +948,6 @@ button:disabled .icon {
 }
 /* Fixed width so toggling between "Marks On" / "Marks Off" (different text
    widths) doesn't resize the button. */
-.btn.sort-toggle.marks-toggle {
-  min-width: 118px;
-  text-align: center;
-}
-.collection-controls {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
 
 /* ---------------------------------------------------------- panels */
 /* Layered lacquer: a lit top edge, a faint inner hairline, a deep drop. */
@@ -1011,7 +1156,7 @@ button:disabled .icon {
 /* Hub tiles. */
 .home-tiles {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
 .home-tile {
@@ -1173,9 +1318,6 @@ button:disabled .icon {
   .home-next {
     grid-column: 1 / -1;
   }
-  .home-tiles {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 @media (max-width: 560px) {
   .home-hero {
@@ -1206,20 +1348,6 @@ button:disabled .icon {
 .card-grid > div {
   position: relative;
 }
-.mastery-ready-dot {
-  position: absolute;
-  top: -5px;
-  left: -5px;
-  z-index: 3;
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  background: var(--gold, #f2c14e);
-  border: 2px solid var(--bg-0, #0b0e1c);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
-  pointer-events: none;
-  animation: mastery-dot-pulse 2.6s ease-in-out infinite;
-}
 @keyframes mastery-dot-pulse {
   0%, 100% {
     transform: scale(1);
@@ -1231,154 +1359,6 @@ button:disabled .icon {
   }
 }
 
-/* team configuration bar (champions menu) */
-.team-bar {
-  margin-bottom: 18px;
-  padding: 14px 16px;
-  border-radius: var(--radius);
-  background: rgba(95, 211, 138, 0.06);
-  border: 1px solid rgba(95, 211, 138, 0.28);
-}
-.team-bar-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-.team-bar-title {
-  font-size: 15px;
-  font-weight: 800;
-  color: var(--text);
-}
-.team-bar-count {
-  font-weight: 800;
-  color: var(--green);
-}
-.team-slots {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin: 12px 0 8px;
-}
-.team-slot {
-  position: relative;
-  width: 54px;
-  height: 54px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 26px;
-}
-.team-slot.filled {
-  background: rgba(95, 211, 138, 0.14);
-  border: 1px solid rgba(95, 211, 138, 0.5);
-  cursor: grab;
-  transition: filter 0.15s ease, transform 0.12s ease, box-shadow 0.12s ease;
-}
-.team-slot.filled:hover {
-  filter: brightness(1.1);
-}
-.team-slot.filled.dragging {
-  opacity: 0.4;
-  cursor: grabbing;
-}
-.team-slot.filled.drop-target {
-  border-color: var(--gold);
-  box-shadow: 0 0 0 2px var(--gold);
-  transform: translateY(-3px);
-}
-.team-slot.filled:hover .team-slot-x {
-  opacity: 1;
-}
-.team-slot-x {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--danger, #e0574a);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0.5;
-  transition: opacity 0.15s ease;
-}
-.team-slot.empty {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px dashed var(--border);
-  color: var(--text-faint);
-  font-size: 22px;
-}
-/* The personal champion — pinned to the first slot, always deployed. A distinct
-   rose/gold look sets it apart from the swappable member slots, and it isn't
-   grabbable (no drag cursor, no remove ✕). */
-.team-slot.filled.champion-slot {
-  cursor: default;
-  background: linear-gradient(160deg, rgba(255, 84, 112, 0.22), rgba(255, 176, 92, 0.16));
-  border: 1px solid rgba(255, 84, 112, 0.7);
-  box-shadow: 0 0 0 1px rgba(255, 84, 112, 0.3), 0 0 12px rgba(255, 84, 112, 0.35);
-}
-.team-slot.filled.champion-slot:hover {
-  filter: brightness(1.05);
-}
-.team-slot-lock {
-  position: absolute;
-  bottom: -6px;
-  right: -6px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #ff5470;
-  color: #fff;
-  font-size: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-}
-.team-bar-hint {
-  margin: 0;
-}
-.team-toggle {
-  width: 100%;
-  margin-top: 8px;
-  padding: 7px 10px;
-  border-radius: 8px;
-  font-weight: 700;
-  font-size: 12.5px;
-  cursor: pointer;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-.team-toggle:hover:not(:disabled) {
-  background: rgba(95, 211, 138, 0.12);
-  border-color: rgba(95, 211, 138, 0.45);
-  color: var(--text);
-}
-.team-toggle.in {
-  background: rgba(95, 211, 138, 0.16);
-  border-color: rgba(95, 211, 138, 0.5);
-  color: var(--green);
-}
-.team-toggle:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-/* Champion card badge — locked into the team, not a toggle. Reads as its own
-   Champion-rarity rose rather than the dimmed "disabled" look. */
-.team-toggle.champion.locked {
-  opacity: 1;
-  cursor: default;
-  background: linear-gradient(160deg, rgba(255, 84, 112, 0.18), rgba(255, 176, 92, 0.12));
-  border-color: rgba(255, 84, 112, 0.6);
-  color: #ff8095;
-}
 /* Collectible champion card: a double frame (dark outer + rarity inner rule),
    a rarity crest ribbon and gem, an arched portrait window lit from below in
    the rarity colour. Rarity reads at a glance without rainbow chrome: only the
@@ -1512,9 +1492,8 @@ button:disabled .icon {
 .unit-card .rarity-row {
   flex-direction: column;
 }
-/* In the horizontal detail row, drop the rarity tag's vertical margin so it
+/* In the champion sheet's tag row, drop the rarity tag's vertical margin so it
    aligns with the AoE/chip tags instead of sitting lower. */
-.champion-head .rarity-row .rarity-tag,
 .cd-tags .rarity-tag {
   margin: 0;
 }
@@ -2008,12 +1987,6 @@ button.cd-mastery:hover {
   color: var(--text);
   background: rgba(255, 255, 255, 0.08);
 }
-.champion-head {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  margin-bottom: 8px;
-}
 .champion-portrait {
   width: 76px;
   height: 76px;
@@ -2021,34 +1994,10 @@ button.cd-mastery:hover {
   margin: 0;
   flex-shrink: 0;
 }
-.detail-grid {
-  display: grid;
-  gap: 6px;
-}
-.detail-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border);
-  font-size: 13.5px;
-}
 .detail-divider {
   height: 1px;
   margin: 2px 4px;
   background: var(--border);
-}
-.detail-row span {
-  color: var(--text-dim);
-}
-.detail-row b {
-  color: var(--text);
-}
-.not-owned {
-  opacity: 0.55;
-  filter: grayscale(0.5);
 }
 
 /* mastery skill-tree menu (its own modal): a node board on the left, the
@@ -4171,134 +4120,6 @@ button.cd-mastery:hover {
   }
 }
 
-/* ── Enemy Index (bestiary) ─────────────────────────────────────────────── */
-.index-tabs {
-  display: flex;
-  gap: 8px;
-  margin: 4px 0 18px;
-}
-.index-tab.active {
-  color: var(--text);
-  border-color: var(--accent);
-  background: rgba(95, 211, 138, 0.12);
-}
-.enemy-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 12px;
-}
-.enemy-index-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 14px 10px 12px;
-  border-radius: var(--radius);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  cursor: pointer;
-  transition: transform 0.12s ease, border-color 0.12s ease;
-  text-align: center;
-}
-.enemy-index-card:not(.locked):hover {
-  transform: translateY(-2px);
-  border-color: var(--accent);
-}
-.enemy-index-card.locked {
-  cursor: default;
-  opacity: 0.6;
-}
-.enemy-index-card.boss:not(.locked) {
-  border-color: rgba(255, 90, 90, 0.5);
-  background: rgba(255, 90, 90, 0.06);
-}
-.ei-token {
-  width: 52px;
-  height: 52px;
-  display: grid;
-  place-items: center;
-  font-size: 26px;
-  border-radius: 50%;
-  border: 2px solid var(--border);
-  background: rgba(255, 255, 255, 0.04);
-}
-.ei-token.big {
-  width: 64px;
-  height: 64px;
-  font-size: 34px;
-}
-.ei-name {
-  font-weight: 700;
-  font-size: 13px;
-  color: var(--text);
-}
-.ei-progress {
-  font-size: 11px;
-  color: var(--text-dim);
-}
-.ei-bar {
-  width: 100%;
-  height: 5px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.4);
-  overflow: hidden;
-}
-.ei-bar > span {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, var(--accent), #9be86a);
-}
-.enemy-modal {
-  max-width: 440px;
-}
-.enemy-section {
-  margin: 16px 0 8px;
-  font-family: var(--font-title);
-  font-weight: 800;
-  font-size: 13px;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  color: var(--text-dim);
-}
-.resist-list {
-  display: grid;
-  gap: 8px;
-}
-.resist-line {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  color: var(--text-dim);
-}
-.resist-chip {
-  flex: none;
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-}
-.resist-chip.physical {
-  color: #9aa6be;
-  border: 1px solid rgba(154, 166, 190, 0.6);
-  background: rgba(154, 166, 190, 0.14);
-}
-.resist-chip.magic {
-  color: #6ad0ff;
-  border: 1px solid rgba(106, 208, 255, 0.6);
-  background: rgba(106, 208, 255, 0.14);
-}
-.enemy-mechanic,
-.enemy-lore {
-  margin: 0;
-  font-size: 13.5px;
-  line-height: 1.6;
-  color: var(--text-dim);
-}
-.enemy-lore {
-  font-style: italic;
-}
-
 /* ============================================================
    The Adventurer's Journal — first-launch identification + the
    on-demand journal. A tooled-leather book with brass corners,
@@ -4362,7 +4183,8 @@ button.cd-mastery:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 18px 18px 74px;
+  /* Room above the book for its bookmarks. */
+  padding: 64px 18px 74px;
 }
 
 /* The book: a positioned frame. The closed cover is a centred *vertical* book;
@@ -5798,12 +5620,635 @@ button.cd-mastery:hover {
   background: rgba(255, 250, 230, 0.4);
 }
 
+/* ---- Bookmarks: three silk tabs peeking out of the top of the book ---- */
+.journal-bookmarks {
+  position: absolute;
+  top: -50px;
+  left: 34px;
+  z-index: 0;
+  display: flex;
+  gap: 10px;
+  animation: page-in 0.5s ease both;
+}
+.journal-book .book-spread {
+  z-index: 1;
+}
+.journal-bookmark {
+  --bm: #8e2a2f;
+  position: relative;
+  width: 140px;
+  height: 78px;
+  padding: 10px 12px 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 7px;
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: #f6dfa4;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
+  border: none;
+  border-radius: 8px 8px 0 0;
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.05) 0 1px, transparent 1px 3px),
+    linear-gradient(180deg, color-mix(in srgb, var(--bm) 78%, #fff) 0%, var(--bm) 34%, color-mix(in srgb, var(--bm) 62%, #000) 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.35),
+    inset 0 2px 0 rgba(255, 255, 255, 0.16),
+    0 -3px 10px rgba(0, 0, 0, 0.35);
+  filter: brightness(0.74) saturate(0.85);
+  transform: translateY(10px);
+  cursor: pointer;
+  transition: transform 0.22s var(--ease-out), filter 0.2s ease;
+}
+/* Gilt stitching round the tab's edge. */
+.journal-bookmark::before {
+  content: '';
+  position: absolute;
+  inset: 4px 4px -1px;
+  border: 1px dashed rgba(246, 223, 164, 0.38);
+  border-bottom: none;
+  border-radius: 5px 5px 0 0;
+  pointer-events: none;
+}
+.journal-bookmark .icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.journal-bookmark-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.journal-bookmark:hover {
+  filter: brightness(0.9) saturate(0.95);
+  transform: translateY(5px);
+}
+.journal-bookmark.active {
+  z-index: 1;
+  filter: none;
+  transform: translateY(0);
+  color: #ffe9b4;
+}
+.journal-bookmark.champions { --bm: #2d4f86; }
+.journal-bookmark.bestiary { --bm: #3d6a3e; }
+.journal-bookmark-dot {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffcf6a;
+  box-shadow: 0 0 8px #ffcf6a;
+  animation: mastery-dot-pulse 2.6s ease-in-out infinite;
+}
+/* Sheets opened from the journal (champion record, skill tree) sit above it. */
+body:has(.intro-root) > .modal-backdrop {
+  z-index: 120;
+}
+
+/* ---- Champions & Bestiary: an entry plate on the left page ---- */
+.j-entry {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  text-align: center;
+  animation: page-in 0.45s ease both;
+}
+.j-frame {
+  position: relative;
+  flex: none;
+  width: 176px;
+  height: 184px;
+  display: grid;
+  place-items: center;
+  margin-top: 2px;
+  border-radius: 88px 88px 10px 10px;
+  background:
+    radial-gradient(60% 34% at 50% 90%, color-mix(in srgb, var(--rarity, #8a6a3e) 38%, transparent), transparent 75%),
+    radial-gradient(70% 56% at 50% 40%, rgba(255, 250, 232, 0.75), transparent 72%),
+    repeating-linear-gradient(45deg, rgba(107, 83, 53, 0.06) 0 1px, transparent 1px 7px),
+    linear-gradient(180deg, #efdfbb, #dcc293);
+  border: 2px solid var(--ink);
+  box-shadow:
+    inset 0 0 0 4px rgba(255, 250, 232, 0.55),
+    inset 0 0 0 6px var(--ink-soft),
+    0 5px 12px rgba(60, 40, 10, 0.22);
+  overflow: hidden;
+}
+.j-frame .unit-sprite {
+  margin-top: 8px;
+}
+.j-frame.faded .unit-sprite {
+  filter: grayscale(1) sepia(0.55) brightness(0.72);
+  opacity: 0.5;
+}
+.j-entry.boss .j-frame {
+  border-color: #5a1a14;
+  box-shadow:
+    inset 0 0 0 4px rgba(255, 250, 232, 0.55),
+    inset 0 0 0 6px #8a2a22,
+    0 5px 12px rgba(60, 20, 10, 0.3);
+}
+/* A red ink stamp across an unrecruited champion's plate. */
+.j-frame-stamp {
+  position: absolute;
+  bottom: 18px;
+  padding: 2px 9px;
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8a2a22;
+  border: 2px solid #8a2a22;
+  border-radius: 4px;
+  background: rgba(243, 226, 189, 0.7);
+  transform: rotate(-6deg);
+  opacity: 0.85;
+}
+.j-name {
+  margin-top: 4px;
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: 26px;
+  line-height: 1.1;
+  letter-spacing: 0.03em;
+  color: var(--ink);
+}
+.j-traits {
+  font-family: var(--font-story);
+  font-style: italic;
+  font-size: 15px;
+  color: var(--ink-soft);
+}
+.j-desc {
+  max-width: 360px;
+  font-family: var(--font-story);
+  font-size: 15px;
+  line-height: 1.35;
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* The numbers, ruled like a ledger with dotted leaders. */
+.j-ledger {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 22px;
+  row-gap: 3px;
+  margin-top: 4px;
+  padding: 7px 2px;
+  border-top: 1px solid rgba(107, 83, 53, 0.45);
+  border-bottom: 1px solid rgba(107, 83, 53, 0.45);
+  text-align: left;
+}
+.j-ledger-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.j-ledger-row span {
+  font-family: var(--font-title);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.j-ledger-row i {
+  flex: 1;
+  min-width: 8px;
+  border-bottom: 1px dotted rgba(107, 83, 53, 0.6);
+  transform: translateY(-3px);
+}
+.j-ledger-row b {
+  font-family: var(--font-hand);
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.j-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-bottom: 10px;
+}
+.j-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  background: rgba(255, 250, 230, 0.45);
+  border: 1.5px solid var(--ink-soft);
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 2px rgba(255, 250, 232, 0.5), 0 2px 4px rgba(60, 40, 10, 0.15);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+}
+.j-btn:hover:not(:disabled):not(.static) {
+  background: rgba(255, 245, 210, 0.9);
+  border-color: var(--ink);
+  transform: translateY(-1px);
+}
+.j-btn small {
+  font-family: var(--font-hand);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: #7a4f12;
+}
+.j-btn.on {
+  color: #2f5a34;
+  border-color: #4b7a4f;
+  background: rgba(120, 170, 110, 0.2);
+}
+.j-btn.static {
+  cursor: default;
+  color: #7a4f12;
+  border-color: #9a6c22;
+}
+.j-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.j-btn-dot {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #e8a92e;
+  border: 1.5px solid var(--ink);
+  animation: mastery-dot-pulse 2.6s ease-in-out infinite;
+}
+/* A foe's trick and lore: the one part of a page allowed to scroll. */
+.j-notes {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  margin-top: 6px;
+  padding-right: 6px;
+  overflow-y: auto;
+  text-align: left;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-soft) transparent;
+}
+.j-mechanic {
+  font-family: var(--font-story);
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.j-mechanic b {
+  font-family: var(--font-title);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8a2a22;
+}
+.j-lore {
+  margin-top: 6px;
+  font-family: var(--font-story);
+  font-style: italic;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--ink-soft);
+}
+
+/* ---- Champions & Bestiary: the index on the right page ---- */
+.id-flourish.j-tight {
+  margin: 4px auto 10px;
+}
+.j-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.j-row-head .id-label {
+  margin-bottom: 0;
+}
+.j-row-head .id-label em {
+  margin-left: 6px;
+  font-family: var(--font-story);
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.j-count {
+  font-family: var(--font-hand);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.jc-company {
+  margin-bottom: 12px;
+}
+.jc-slots {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+.jc-slot {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--ink-soft);
+  background: radial-gradient(circle at 50% 38%, rgba(255, 250, 232, 0.9), rgba(217, 189, 133, 0.75));
+  box-shadow: inset 0 0 0 3px rgba(255, 250, 232, 0.5), 0 2px 4px rgba(60, 40, 10, 0.25);
+  cursor: grab;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+}
+.jc-slot.empty {
+  border-style: dashed;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-soft);
+  opacity: 0.55;
+  cursor: default;
+}
+.jc-slot.empty .icon {
+  width: 15px;
+  height: 15px;
+}
+.jc-slot.hero {
+  border-color: #9a6c22;
+  box-shadow: inset 0 0 0 3px rgba(242, 193, 78, 0.35), 0 2px 4px rgba(60, 40, 10, 0.25);
+  cursor: default;
+}
+.jc-slot.current {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 3px rgba(255, 250, 232, 0.5), 0 0 0 3px rgba(232, 191, 94, 0.55);
+}
+.jc-slot.dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+.jc-slot.drop-target {
+  transform: translateY(-3px);
+  border-color: #9a6c22;
+}
+.jc-slot-face {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  cursor: inherit;
+}
+.jc-slot-mark {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  font-size: 10px;
+  color: var(--ink-soft);
+  background: var(--parch-0);
+  border: 1px solid var(--ink-soft);
+  border-radius: 50%;
+}
+.jc-slot-mark.remove {
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.jc-slot:hover .jc-slot-mark.remove,
+.jc-slot-mark.remove:focus-visible {
+  opacity: 1;
+}
+.jc-slot-mark.remove:hover {
+  color: #8a2a22;
+  border-color: #8a2a22;
+}
+.jc-roster-head {
+  margin-bottom: 8px;
+}
+.j-tools {
+  display: flex;
+  gap: 4px;
+}
+.j-tools button {
+  padding: 3px 7px;
+  font-family: var(--font-title);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px solid rgba(107, 83, 53, 0.4);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.j-tools button:hover {
+  color: var(--ink);
+  border-color: var(--ink-soft);
+}
+.j-tools button.off {
+  opacity: 0.6;
+}
+.j-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.j-card {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 4px 7px;
+  font: inherit;
+  color: var(--ink);
+  background: rgba(255, 250, 230, 0.32);
+  border: 1px solid rgba(107, 83, 53, 0.35);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+}
+.j-card:hover:not(:disabled) {
+  background: rgba(255, 245, 210, 0.75);
+  border-color: var(--ink-soft);
+  transform: translateY(-1px);
+}
+.j-card.current {
+  background: rgba(232, 191, 94, 0.24);
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px rgba(59, 42, 23, 0.25);
+}
+.j-card.unknown {
+  cursor: default;
+  background: rgba(107, 83, 53, 0.05);
+  border-style: dashed;
+}
+.j-card-art {
+  width: 60px;
+  height: 60px;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(50% 22% at 50% 86%, color-mix(in srgb, var(--rarity, #8a6a3e) 40%, transparent), transparent 80%);
+}
+.j-card.unknown .j-card-art {
+  background: none;
+}
+.j-card.faded .j-card-art .unit-sprite {
+  filter: grayscale(1) sepia(0.55) brightness(0.75);
+  opacity: 0.5;
+}
+.j-card-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.2;
+}
+.j-card.faded .j-card-name,
+.j-card.unknown .j-card-name {
+  color: var(--ink-soft);
+}
+.j-card-sub {
+  font-family: var(--font-story);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.j-card-progress {
+  width: 70%;
+  height: 6px;
+  margin-top: 5px;
+  overflow: hidden;
+  border: 1px solid rgba(107, 83, 53, 0.55);
+  border-radius: 3px;
+}
+.j-card-progress span {
+  display: block;
+  height: 100%;
+  background: #8a6a3e;
+}
+.j-card-dot {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #e8a92e;
+  border: 1.5px solid var(--ink);
+  animation: mastery-dot-pulse 2.6s ease-in-out infinite;
+}
+/* A little wax seal on champions in your company. */
+.j-card-stamp {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  color: #f6dfa4;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, #c0494a, #7e1f22 70%);
+  box-shadow: 0 1px 2px rgba(60, 20, 10, 0.4), inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+.jb-tabs {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(107, 83, 53, 0.45);
+}
+.jb-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: -1px;
+  padding: 5px 12px 6px;
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: 12.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 7px 7px 0 0;
+  cursor: pointer;
+}
+.jb-tabs button:hover {
+  color: var(--ink);
+}
+.jb-tabs button.active {
+  color: var(--ink);
+  background: rgba(255, 250, 230, 0.55);
+  border-color: rgba(107, 83, 53, 0.45);
+}
+.jb-tabs .j-count {
+  margin-left: auto;
+  font-size: 18px;
+}
+
+/* Shorter screens: smaller plates and roster art so a page still fits. */
+@media (max-height: 760px) {
+  .j-frame { width: 140px; height: 146px; }
+  .j-frame .unit-sprite { width: 120px !important; height: 120px !important; }
+  .j-desc { -webkit-line-clamp: 2; }
+  .j-card-art { width: 46px; height: 46px; }
+  .j-card-art .unit-sprite { width: 46px !important; height: 46px !important; }
+}
+
 /* ---- Responsive: stack the book to a single page, creator to a column ---- */
 @media (max-width: 760px) {
   .book-page.left { display: none; }
   .book-page.right { border-radius: 6px; padding: 30px 22px 40px; }
   .book-spread::after,
   .book-ribbon { display: none; }
+  /* Champions and Bestiary need both pages: stack them and scroll. */
+  .book-spread.sec-champions,
+  .book-spread.sec-bestiary { flex-direction: column; overflow-y: auto; }
+  .book-spread.sec-champions .book-page,
+  .book-spread.sec-bestiary .book-page { display: block; flex: none; border-radius: 6px; padding: 26px 18px 34px; }
+  .journal-bookmarks { left: 6px; gap: 6px; }
+  .journal-bookmark { width: 108px; font-size: 11.5px; padding: 10px 8px 0; }
   .creator-body { flex-direction: column; align-items: center; }
   .creator-panel { width: 100%; }
   .creator-cats { max-height: none; min-height: 0; }
