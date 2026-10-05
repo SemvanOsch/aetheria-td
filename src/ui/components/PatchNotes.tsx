@@ -20,6 +20,23 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-10-05 · Endless Mode',
+    changes: [
+      'Endless mode is here: clear every stage of a chapter to unlock its endless run (Play → Endless). Each run fields only that chapter’s foes, with tougher ones joining in later waves, in randomly rolled waves that keep growing and get sturdier the longer you last.',
+      'Every 5th endless wave brings a boss — the chapter’s stage bosses in order, looping with more health each lap. Clearing a boss wave pays 50 gems on the spot, and you keep them however the run ends.',
+      'The endless picker shows each chapter’s run with a board preview, your best record, the foes it fields and from which wave, the boss rotation and your team. In battle the HUD shows gems earned and how far off the next boss is; "End run" (click twice to confirm) ends a run on your terms, and the result screen shows waves held, gems won and whether you set a new best.',
+      'Bard skill tree: Lively Tempo (+5% to his attack-speed buff), Carrying Voice (+10% range) and Lingering Melody (his tune lasts 2 seconds longer). His cards, stat sheet and in-stage panel all show the upgraded numbers.',
+      'The Bard now strikes up a short lute phrase — three soft plucked notes from a random tune in a random key — instead of the same rolled chord every time, and his tune no longer draws a ring on the ground.',
+      'Crits are calmer: the CRIT! popup is smaller, the extra gold damage number is gone, and critical hits and kills no longer shake the screen.',
+      'Where enemy paths meet or share a corridor, the ground now paints them as one clean path (no darker overlaps or doubled trim), and the moving arrow trail is drawn once along shared stretches.',
+      'The HUD’s gold, wave and foe counters keep a fixed width, so the bar no longer jumps when a number gains a digit.',
+      'Stage moods are now named presets (golden dusk, feast hall, moonlit hall and more), with a dozen new ones ready for future stages: spring dawn, autumn glade, misty marsh, frozen pass, arcane sanctum, blood moon and others. The Castle Door now uses bright midday and the Capital’s gate golden dusk.',
+      'Level Designer: edit every enemy path (a tab per path; clicking onto another path merges into it so both reach the same castle), with Undo, start from any stage or endless map, preview every mood preset, and export the mood and endless-map code too.',
+      'Sergeants now deal 1 damage to your castle instead of 2.',
+      'Fixed the Summon screen’s collection counter counting champions that can’t be summoned.',
+    ],
+  },
+  {
     version: '2026-10-03 · The Journal Hub',
     changes: [
       'The Adventurer’s Journal is now home to your champions and the bestiary. Three silk bookmarks along the top of the book switch between your own pages (identification and lore, named after you), Champions and the Bestiary, and a gold dot on a bookmark shows when something new is waiting.',

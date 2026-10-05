@@ -298,7 +298,7 @@ function StageBriefing({
 }
 
 /** A still of the stage's board — terrain, path and dressing, as the battle draws it. */
-function BoardPreview({ level }: { level: LevelDef }) {
+export function BoardPreview({ level }: { level: LevelDef }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const ctx = ref.current?.getContext('2d');

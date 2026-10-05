@@ -11,6 +11,7 @@ import { createContext, useContext } from 'react';
 import type { AudioSettings, GameState, UiPrefs } from './gameState';
 import type { PlayerSpriteConfig } from '../domain/playerSprite';
 import type { Proficiency } from '../domain/proficiency';
+import type { SectionId } from '../domain/levels';
 import type { SummonOutcome } from './summon';
 
 export interface GameStore {
@@ -19,6 +20,8 @@ export interface GameStore {
   summon: () => SummonOutcome | null;
   /** Mark a level complete and pay its gem reward (first time only). */
   completeLevel: (levelId: number, gemReward: number) => void;
+  /** Record a finished endless run's waves cleared (keeps the chapter's best). */
+  recordEndlessRun: (section: SectionId, wavesCleared: number) => void;
   /** Bank mastery EXP earned in a stage (unit id → EXP), win or lose. */
   awardMastery: (gains: Record<string, number>) => void;
   /** Bank enemy kills earned in a stage (enemy id → count), for the Enemy Index. */
@@ -46,7 +49,7 @@ export interface GameStore {
   markChapterRead: (index: number) => void;
   /** Wipe all progression back to a fresh account. */
   resetAccount: () => void;
-  /** Add gems (used by the settings grant button). */
+  /** Add gems (the settings grant button; endless boss-wave payouts). */
   grantGems: (amount: number) => void;
   summonCost: number;
 }

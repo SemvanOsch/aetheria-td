@@ -115,7 +115,7 @@ The board is drawn in this order:
 7. **Unlit overlays:** health bars, AoE guides, floating text and boss bars.
 
 ### Stage mood — `domain/atmosphere.ts`
-Darkness, light family, weather, fog, grade, vignette and sun are pure data, keyed by level id, with a fallback mood per chapter:
+Darkness, light family, weather, fog, grade, vignette and sun are pure data. Named presets live in `MOODS` (`goldenDusk`, `feastHall`, `moonlitHall`, `violetChamber`, `crimsonThrone`, `brightMidday`, plus spare presets for new stages such as `springDawn`, `autumnGlade`, `mistyMarsh`, `moonlitNight`, `frozenPass`, `arcaneSanctum`, `sacredChapel`, `emberForge`, `ashenRuins`, `hauntedCrypt`, `bloodMoon`); a stage picks one with `mood: '<name>'` in its `LevelSpec` beside `path`/`theme`/`decor` (the Level Designer exports that line). A stage without `mood` falls back to its chapter's `SECTION_MOODS` entry:
 
 | Chapter | Mood |
 |---|---|
@@ -170,6 +170,7 @@ The Settings sliders map onto those gains.
   - Each type is throttled.
   - Each cue starts `AUDIO_LEAD` ahead of `currentTime` so its attack isn't clipped.
   - `holdAudioAwake()` keeps the output device from sleeping during a battle.
+  - The Bard's `bardPlay` is a short, unhurried lute phrase built from the `pluck` primitive (detuned saw + triangle through a snapping lowpass): three notes 0.2s apart from a random `BARD_PHRASES` motif in a random major key from `BARD_ROOTS`, and nothing after (a closing strum was tried and removed). Keep it sparse and soft — denser runs felt overwhelming.
 
 ---
 

@@ -98,6 +98,12 @@ body,
 #root {
   height: 100%;
 }
+/* Always reserve the scrollbar's space, so a page growing past the window
+   (e.g. the battle's side panel changing) never narrows the layout and makes
+   the board rescale. */
+html {
+  scrollbar-gutter: stable;
+}
 
 body {
   font-family: var(--font);
@@ -461,6 +467,11 @@ button:disabled .icon {
   border: 1px solid var(--border);
   background: var(--well);
 }
+/* Category picker atop the Props / Mood panels (same look as "Start from"). */
+.ld-category select {
+  flex: 1;
+  min-width: 0;
+}
 .ld-body {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
@@ -595,6 +606,21 @@ button:disabled .icon {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+/* Path tabs: each path's colour dot, and its point count. */
+.ld-lane-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--lane);
+  border: 2px solid #0c0e1c;
+}
+.ld-lanes button.active {
+  border-color: var(--lane);
+}
+.ld-lanes button small {
+  font-size: 10.5px;
+  color: var(--text-faint);
 }
 .ld-props {
   display: grid;
@@ -762,6 +788,7 @@ button:disabled .icon {
 }
 .ld-export-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -3875,6 +3902,87 @@ button.cd-mastery:hover {
   text-transform: uppercase;
 }
 
+/* endless picker: a column of chapter runs beside the chosen run's briefing */
+.endless-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.endless-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: transform 0.16s var(--ease-out), border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.endless-card:not(.locked):hover {
+  transform: translateX(3px);
+  border-color: var(--border-strong);
+}
+.endless-card.selected {
+  border-color: var(--accent);
+  box-shadow: var(--inset), 0 0 22px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.endless-card.locked {
+  opacity: 0.5;
+  filter: grayscale(0.8);
+  cursor: not-allowed;
+}
+.endless-card-icon {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  color: var(--accent);
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: radial-gradient(circle at 50% 35%, rgba(232, 191, 94, 0.14), rgba(0, 0, 0, 0.4));
+}
+.endless-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.endless-card-name {
+  font-family: var(--font-title);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+.endless-card-sub {
+  font-size: 13px;
+  color: var(--text-faint);
+}
+/* The wave a foe joins (or a boss arrives) on, pinned to its tile. */
+.endless-wave-tag {
+  position: absolute;
+  right: -6px;
+  bottom: -7px;
+  min-width: 18px;
+  padding: 1px 4px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
+.endless-boss {
+  border-color: rgba(255, 106, 90, 0.35);
+}
+.endless-boss .endless-wave-tag {
+  color: #ffd2cb;
+  border-color: rgba(255, 106, 90, 0.5);
+}
+
 /* ---------------------------------------------------------- game screen */
 .game-wrap {
   max-width: 1180px;
@@ -3899,8 +4007,16 @@ button.cd-mastery:hover {
   margin-bottom: 12px;
 }
 /* Fast-forward toggle sits at the far right of the HUD; lights up gold when on. */
-.ff-toggle {
-  margin-left: auto;
+/* Game-speed toggle, beside the wave button. A fixed width, and the UI font's
+   tabular digits (Cinzel's "1" reads as "I"), so "1×" ↔ "3×" never shifts. */
+.btn.ff-toggle {
+  flex: none;
+  width: 72px;
+  padding: 0;
+  gap: 6px;
+  font-family: var(--font);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
   font-weight: 800;
   letter-spacing: 0.3px;
 }
@@ -3937,6 +4053,36 @@ button.cd-mastery:hover {
 .hud-stat.hud-gold .icon {
   color: var(--gold);
   font-size: 17px;
+}
+/* Endless: gems won this run, and the countdown to the next boss wave. */
+.hud-stat.hud-gems {
+  color: #bfeaff;
+  border-color: rgba(111, 214, 255, 0.4);
+}
+.hud-stat.hud-gems .icon {
+  color: #6fd6ff;
+  font-size: 16px;
+}
+.hud-boss-in {
+  /* Wide enough for both "Boss in N" and "Boss wave", so the HUD holds still. */
+  min-width: 62px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #ff9a8a;
+}
+/* A fixed-width box for each live HUD number (width set inline per stat). */
+.hud-num {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+}
+/* "End run" ↔ "Confirm?" keeps one exact width (both labels fit). */
+.btn.end-run {
+  width: 132px;
+  white-space: nowrap;
+}
+.btn.confirm-end {
+  color: #ffb3a8;
+  border-color: rgba(255, 106, 90, 0.6);
 }
 .base-bar {
   width: 120px;
@@ -4153,6 +4299,38 @@ button.cd-mastery:hover {
   flex-direction: column;
   gap: 12px;
 }
+/* Wave control row: the wave slot stretches, the speed toggle sits at its end. */
+.wave-row {
+  display: flex;
+  gap: 8px;
+  height: 46px;
+}
+/* The wave button and the "in progress" note share one fixed-height slot. */
+.wave-slot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wave-slot > * {
+  flex: 1;
+  margin: 0;
+}
+/* Narrower than a full-width button (the speed toggle shares the row): trim
+   the padding and keep the label on one line so it can't outgrow the slot. */
+.wave-slot > .btn {
+  padding: 0 12px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.wave-progress {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
 .deploy-list {
   display: flex;
   flex-direction: column;
@@ -4167,6 +4345,16 @@ button.cd-mastery:hover {
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 10px;
+}
+/* The hint swaps text while placing; keep it to one line so the bar's height
+   (and with it the page's) never changes. */
+.deploy-bar-head .hint {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .deploy-list.cards {
   flex-direction: row;
@@ -4546,6 +4734,24 @@ button.cd-mastery:hover {
 @media (max-width: 860px) {
   .board-layout {
     grid-template-columns: 1fr;
+  }
+}
+/* Side by side, the side panel takes the board column's height and scrolls
+   within it: its content (the champion panel appearing on deploy, upgrades,
+   abilities) then never changes the page height, which would otherwise nudge
+   the scroll position and make the board jump. */
+@media (min-width: 861px) {
+  .side-panel {
+    contain: size;
+    align-self: stretch;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    /* Room for the panels' drop shadows inside the scroll box. */
+    padding: 2px 4px 8px 2px;
+    margin: -2px -4px -8px -2px;
+  }
+  .side-panel > * {
+    flex-shrink: 0;
   }
 }
 
@@ -6703,4 +6909,136 @@ body:has(.intro-root) > .modal-backdrop {
   .id-portrait-frame.beckon { animation: none; }
   .intro-motes { animation: none; }
   .turning-leaf { display: none; }
+}
+
+/* ============================================================
+   Enemy Stats — developer-only stat sheet (#enemies, see main.tsx)
+   ============================================================ */
+.es-page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 28px 16px 48px;
+}
+.es-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.es-header h1 {
+  font-family: var(--font-title);
+  color: var(--gold);
+  font-size: 28px;
+}
+.es-header a {
+  color: var(--text-dim);
+  text-decoration: none;
+}
+.es-header a:hover {
+  color: var(--gold-hi);
+}
+.es-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.es-tabs button {
+  padding: 8px 16px;
+  color: var(--text-dim);
+  font-weight: 600;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.es-tabs button:hover {
+  color: var(--text);
+}
+.es-tabs button.active {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+.es-section {
+  margin-bottom: 32px;
+}
+.es-section h2 {
+  font-size: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+.es-count {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+.es-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.es-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.es-table th,
+.es-table td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: middle;
+}
+.es-table th {
+  position: sticky;
+  top: 0;
+  background: var(--panel-solid);
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.es-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.es-table th.sortable:hover,
+.es-table th.sorted {
+  color: var(--gold);
+}
+.es-table .num {
+  text-align: right;
+}
+.es-table tbody tr:hover {
+  background: var(--panel-hi);
+}
+.es-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.es-sprite {
+  width: 52px;
+  font-size: 26px;
+  text-align: center;
+}
+.es-name {
+  font-weight: 600;
+}
+.es-id,
+.es-faint {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.es-table th,
+.es-table .num,
+.es-name,
+.es-id {
+  white-space: nowrap;
+}
+.es-mech {
+  color: var(--text-dim);
+  font-size: 13px;
 }

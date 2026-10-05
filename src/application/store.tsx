@@ -26,6 +26,7 @@ import {
   loadState,
   markChapterRead as markChapterReadTx,
   markLevelComplete,
+  recordEndlessRun as recordEndlessRunTx,
   saveState,
   reorderTeam as reorderTeamTx,
   setPlayerProfile as setPlayerProfileTx,
@@ -39,6 +40,7 @@ import {
   type UiPrefs,
 } from './gameState';
 import type { PlayerSpriteConfig } from '../domain/playerSprite';
+import type { SectionId } from '../domain/levels';
 import type { Proficiency } from '../domain/proficiency';
 import { syncPlayerChampions } from '../domain/playerChampion';
 import {
@@ -91,6 +93,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const completeLevel = useCallback(
     (levelId: number, gemReward: number) => {
       commit(markLevelComplete(stateRef.current, levelId, gemReward));
+    },
+    [commit],
+  );
+
+  const recordEndlessRun = useCallback(
+    (section: SectionId, wavesCleared: number) => {
+      commit(recordEndlessRunTx(stateRef.current, section, wavesCleared));
     },
     [commit],
   );
@@ -188,6 +197,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       state,
       summon,
       completeLevel,
+      recordEndlessRun,
       awardMastery,
       awardEnemyKills,
       buyMasteryUpgrade,
@@ -203,7 +213,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       grantGems,
       summonCost: SUMMON_COST,
     }),
-    [state, summon, completeLevel, awardMastery, awardEnemyKills, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, reorderTeam, setPrefs, setAudioSettings, setPlayerProfile, markChapterRead, resetAccount, grantGems],
+    [state, summon, completeLevel, recordEndlessRun, awardMastery, awardEnemyKills, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, reorderTeam, setPrefs, setAudioSettings, setPlayerProfile, markChapterRead, resetAccount, grantGems],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

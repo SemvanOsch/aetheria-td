@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { BOARD_HEIGHT, BOARD_WIDTH, COLS, ROWS, TILE, cellKey, expandPathCells, type Cell } from '../../domain/grid';
 import {
@@ -18,8 +18,9 @@ import {
   type PropCategory,
   type PropKind,
 } from '../../domain/decor';
-import { SECTION_MOODS, STAGE_MOODS, type Atmosphere } from '../../domain/atmosphere';
-import { LEVELS, SECTIONS, getLevel, type LevelDef, type SectionId } from '../../domain/levels';
+import { MOODS as MOOD_PRESETS, SECTION_MOODS, type Atmosphere, type MoodId } from '../../domain/atmosphere';
+import { LEVELS, SECTIONS, type LevelDef, type SectionId } from '../../domain/levels';
+import { ENDLESS_LEVELS, getBattleLevel } from '../../domain/endless';
 import { GameEngine } from '../../engine/GameEngine';
 import { drawBoard, drawProp } from '../../engine/renderer';
 import { Icon, type IconName } from '../components/Icon';
@@ -43,19 +44,75 @@ const PANELS: { id: Panel; label: string; icon: IconName }[] = [
 
 const NO_UI = { hoverCol: -1, hoverRow: -1, selectedUnitId: null, selectedTowerUid: null };
 
-/** Mood presets: every authored stage mood, then each chapter's default. */
-const MOODS: { key: string; label: string; mood: Atmosphere }[] = [
-  ...Object.entries(STAGE_MOODS).map(([id, mood]) => {
-    const lvl = getLevel(Number(id));
-    return { key: `stage-${id}`, label: lvl ? `Stage ${id} · ${lvl.name}` : `Stage ${id}`, mood };
+/** Mood tabs: one per chapter, plus "Other" for presets no stage uses yet. */
+type MoodTab = SectionId | 'other';
+const MOOD_TABS: { id: MoodTab; label: string }[] = [
+  ...SECTIONS.map((s) => ({ id: s.id as MoodTab, label: s.name })),
+  { id: 'other', label: 'Other' },
+];
+
+/**
+ * Mood choices: every named preset (exported as `mood: '<name>'`), then each
+ * chapter's default (exported as nothing — a stage without `mood` gets it).
+ * `tabs` is derived from the chapters of the stages using a preset, so the
+ * sorting never needs maintaining; an unused preset lands in "Other".
+ */
+const MOODS: { key: string; label: string; mood: Atmosphere; preset?: MoodId; tabs: MoodTab[] }[] = [
+  ...SECTIONS.map((s) => ({
+    key: `section-${s.id}`,
+    label: `${s.name} (chapter default)`,
+    mood: SECTION_MOODS[s.id],
+    tabs: [s.id as MoodTab],
+  })),
+  ...(Object.keys(MOOD_PRESETS) as MoodId[]).map((id) => {
+    const users = LEVELS.filter((l) => l.mood === id);
+    const tabs = [...new Set(users.map((l) => l.section as MoodTab))];
+    return {
+      key: id,
+      label: users.length ? `${id} · ${users.map((l) => l.name).join(', ')}` : id,
+      mood: MOOD_PRESETS[id],
+      preset: id,
+      tabs: tabs.length ? tabs : (['other'] as MoodTab[]),
+    };
   }),
-  ...SECTIONS.map((s) => ({ key: `section-${s.id}`, label: `${s.name} (chapter default)`, mood: SECTION_MOODS[s.id] })),
 ];
 
 const isOffBoard = (col: number, row: number) => col < 0 || col >= COLS || row < 0 || row >= ROWS;
 /** Centre of a cell in view pixels (accounting for the off-board ring). */
 const viewCenter = (c: Cell) => ({ x: (c.col + 1) * TILE + TILE / 2, y: (c.row + 1) * TILE + TILE / 2 });
 const title = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** Each path's colour on the designer canvas and in its tab. */
+const LANE_COLORS = ['#e8bf5e', '#6fd6ff', '#ff8a7a', '#c39bff', '#7fd38a', '#f2a65a'];
+const laneColor = (i: number) => LANE_COLORS[i % LANE_COLORS.length];
+
+/** Snap a clicked cell to a straight (horizontal or vertical) move from `last`. */
+const snapFrom = (last: Cell | undefined, c: Cell): Cell =>
+  !last ? c : Math.abs(c.col - last.col) >= Math.abs(c.row - last.row) ? { col: c.col, row: last.row } : { col: last.col, row: c.row };
+
+/** Where cell `c` lies on a path: the index of the turn ending the segment it's on, or -1. */
+function segmentEndAt(path: Cell[], c: Cell): number {
+  for (let i = 0; i + 1 < path.length; i++) {
+    const a = path[i];
+    const b = path[i + 1];
+    const onRow = a.row === b.row && c.row === a.row && c.col >= Math.min(a.col, b.col) && c.col <= Math.max(a.col, b.col);
+    const onCol = a.col === b.col && c.col === a.col && c.row >= Math.min(a.row, b.row) && c.row <= Math.max(a.row, b.row);
+    if (onRow || onCol) return i + 1;
+  }
+  return -1;
+}
+
+/** Another path that cell `c` lies on (for merging the active one into it). */
+function findJoin(lanes: Cell[][], active: number, c: Cell): { lane: number; from: number } | null {
+  for (let i = 0; i < lanes.length; i++) {
+    if (i === active || lanes[i].length < 2) continue;
+    const from = segmentEndAt(lanes[i], c);
+    if (from >= 0) return { lane: i, from };
+  }
+  return null;
+}
+
+const cellList = (path: Cell[]) => `[${path.map((t) => `{ col: ${t.col}, row: ${t.row} }`).join(', ')}]`;
 
 /** A tiny canvas that draws a single prop, for the palette buttons. */
 function PropIcon({ kind, color }: { kind: PropKind; color?: string }) {
@@ -164,7 +221,16 @@ function Choice<T extends string>({ value, options, onChange }: { value: T; opti
  */
 export function LevelDesigner({ onClose }: Props) {
   const [panel, setPanel] = useState<Panel>('path');
-  const [turns, setTurns] = useState<Cell[]>([]);
+  // Every enemy path (lane), as turn points; clicks extend the active one.
+  const [lanes, setLanes] = useState<Cell[][]>([[]]);
+  const [active, setActive] = useState(0);
+  // Earlier `lanes` snapshots, for Undo (a merge undoes in one step).
+  const [history, setHistory] = useState<Cell[][][]>([]);
+  // Clicking onto another path merges into it (copies the rest of its route).
+  const [joinPaths, setJoinPaths] = useState(true);
+  // Which spec the exported path code is shaped for.
+  const [exportFor, setExportFor] = useState<'stage' | 'endless'>('stage');
+  const turns = lanes[active] ?? [];
   const [props, setProps] = useState<DecorProp[]>([]);
   // The prop stamped by clicks while the Props panel is open.
   const [propKind, setPropKind] = useState<PropKind>('pillar');
@@ -174,7 +240,6 @@ export function LevelDesigner({ onClose }: Props) {
   const [copied, setCopied] = useState(false);
   const [source, setSource] = useState('blank');
   const [section, setSection] = useState<SectionId>('castle');
-  const [extraLanes, setExtraLanes] = useState(0);
 
   // Board skin. Off by default so a plain level exports no theme.
   const [themeOn, setThemeOn] = useState(false);
@@ -187,14 +252,19 @@ export function LevelDesigner({ onClose }: Props) {
   const [pathFill, setPathFill] = useState(DEFAULT_PATH_LAYERS[1][0]);
   const [pathCenter, setPathCenter] = useState(DEFAULT_PATH_LAYERS[2][0]);
   const [moodKey, setMoodKey] = useState('section-castle');
+  const [moodTab, setMoodTab] = useState<MoodTab>('castle');
 
   const viewRef = useRef<HTMLCanvasElement>(null);
 
   const pathCells = useMemo(() => {
     const set = new Set<string>();
-    if (turns.length >= 1) for (const c of expandPathCells(turns)) set.add(cellKey(c.col, c.row));
+    for (const lane of lanes) {
+      if (lane.length >= 1) for (const c of expandPathCells(lane)) set.add(cellKey(c.col, c.row));
+    }
     return set;
-  }, [turns]);
+  }, [lanes]);
+  // Paths long enough to walk (two or more points).
+  const drawnLanes = useMemo(() => lanes.filter((l) => l.length >= 2), [lanes]);
 
   const theme = useMemo<BoardTheme | undefined>(() => {
     if (!themeOn) return undefined;
@@ -203,7 +273,8 @@ export function LevelDesigner({ onClose }: Props) {
     return t;
   }, [themeOn, groundEven, groundOdd, floor, pathKind, customPath, pathOuter, pathFill, pathCenter]);
 
-  const mood = (MOODS.find((m) => m.key === moodKey) ?? MOODS[0]).mood;
+  const moodChoice = MOODS.find((m) => m.key === moodKey) ?? MOODS[0];
+  const mood = moodChoice.mood;
 
   // A throwaway engine for the live preview, rebuilt whenever the design
   // changes (id -1: no built-in theme, legacy decor or mood is keyed to it).
@@ -213,20 +284,20 @@ export function LevelDesigner({ onClose }: Props) {
       ...base,
       id: -1,
       section,
-      lanes: turns.length >= 2 ? [{ pathTurns: turns, waves: [] }] : [],
+      lanes: drawnLanes.map((pathTurns) => ({ pathTurns, waves: [] })),
       theme: theme ?? { ...DEFAULT_THEME },
       decor: props,
       atmosphere: mood,
     };
     return new GameEngine(level, 0);
-  }, [turns, props, theme, mood, section]);
+  }, [drawnLanes, props, theme, mood, section]);
 
   // Paint loop: the real board (so flames flicker and weather drifts), framed
   // by the off-board ring, with the path markers and the hover ghost on top.
   const hoverRef = useRef(hover);
   hoverRef.current = hover;
-  const drawState = useRef({ panel, turns, props, propKind, bannerColor, pathCells });
-  drawState.current = { panel, turns, props, propKind, bannerColor, pathCells };
+  const drawState = useRef({ panel, lanes, active, joinPaths, props, propKind, bannerColor, pathCells });
+  drawState.current = { panel, lanes, active, joinPaths, props, propKind, bannerColor, pathCells };
   useEffect(() => {
     const view = viewRef.current?.getContext('2d');
     if (!view) return;
@@ -287,15 +358,17 @@ export function LevelDesigner({ onClose }: Props) {
           }
           view.restore();
         } else if (s.panel === 'path') {
-          const last = s.turns[s.turns.length - 1];
-          let next = h;
+          const cur = s.lanes[s.active] ?? [];
+          const last = cur[cur.length - 1];
+          const next = snapFrom(last, h);
+          const color = laneColor(s.active);
           if (last) {
-            next = Math.abs(h.col - last.col) >= Math.abs(h.row - last.row) ? { col: h.col, row: last.row } : { col: last.col, row: h.row };
             const a = viewCenter(last);
             const b = viewCenter(next);
             view.save();
             view.setLineDash([6, 6]);
-            view.strokeStyle = 'rgba(255, 240, 191, 0.75)';
+            view.strokeStyle = color;
+            view.globalAlpha = 0.8;
             view.lineWidth = 3;
             view.beginPath();
             view.moveTo(a.x, a.y);
@@ -303,48 +376,91 @@ export function LevelDesigner({ onClose }: Props) {
             view.stroke();
             view.restore();
           }
-          view.strokeStyle = 'rgba(255, 240, 191, 0.9)';
+          // Landing on another path: show the merge (its remaining route is
+          // copied onto this one, so both reach the same castle).
+          const join = last && s.joinPaths ? findJoin(s.lanes, s.active, next) : null;
+          if (join) {
+            const target = s.lanes[join.lane];
+            view.save();
+            view.setLineDash([4, 6]);
+            view.strokeStyle = laneColor(join.lane);
+            view.lineWidth = 5;
+            view.globalAlpha = 0.7;
+            view.beginPath();
+            const n = viewCenter(next);
+            view.moveTo(n.x, n.y);
+            for (const t of target.slice(join.from)) {
+              const p = viewCenter(t);
+              view.lineTo(p.x, p.y);
+            }
+            view.stroke();
+            view.setLineDash([]);
+            view.globalAlpha = 1;
+            view.lineWidth = 3;
+            view.beginPath();
+            view.arc(n.x, n.y, 17, 0, Math.PI * 2);
+            view.stroke();
+            view.font = '800 12px Inter, system-ui, sans-serif';
+            view.textAlign = 'center';
+            view.fillStyle = '#fff6dc';
+            view.strokeStyle = '#0c0e1c';
+            view.lineWidth = 3;
+            const label = `Merge into path ${join.lane + 1}`;
+            view.strokeText(label, n.x, n.y - 24);
+            view.fillText(label, n.x, n.y - 24);
+            view.restore();
+          }
+          view.strokeStyle = color;
           view.lineWidth = 2;
           view.strokeRect((next.col + 1) * TILE + 2, (next.row + 1) * TILE + 2, TILE - 4, TILE - 4);
         }
       }
 
-      // Turn markers (bold while editing the path, faint otherwise).
-      const strong = s.panel === 'path';
-      if (s.turns.length >= 2) {
-        view.save();
-        view.globalAlpha = strong ? 0.9 : 0.35;
-        view.strokeStyle = '#e8bf5e';
-        view.lineWidth = 3;
-        view.lineJoin = 'round';
-        view.beginPath();
-        s.turns.forEach((t, i) => {
+      // Every path's route and turn markers, each in its own colour: the one
+      // being edited bold, the others (and all of them outside the Path
+      // panel) faint. The active path draws last so it sits on top.
+      const order = s.lanes.map((_, i) => i).filter((i) => i !== s.active).concat(s.active < s.lanes.length ? [s.active] : []);
+      for (const li of order) {
+        const lane = s.lanes[li];
+        const editing = s.panel === 'path';
+        const strong = editing && li === s.active;
+        const color = laneColor(li);
+        if (lane.length >= 2) {
+          view.save();
+          view.globalAlpha = strong ? 0.9 : editing ? 0.5 : 0.35;
+          view.strokeStyle = color;
+          view.lineWidth = 3;
+          view.lineJoin = 'round';
+          view.beginPath();
+          lane.forEach((t, i) => {
+            const p = viewCenter(t);
+            if (i === 0) view.moveTo(p.x, p.y);
+            else view.lineTo(p.x, p.y);
+          });
+          view.stroke();
+          view.restore();
+        }
+        lane.forEach((t, i) => {
           const p = viewCenter(t);
-          if (i === 0) view.moveTo(p.x, p.y);
-          else view.lineTo(p.x, p.y);
+          const last = i === lane.length - 1;
+          view.save();
+          view.globalAlpha = strong ? 1 : editing ? 0.6 : 0.45;
+          view.fillStyle = i === 0 ? '#7fd38a' : last ? '#6fb6ff' : color;
+          view.strokeStyle = i === 0 || last ? color : '#0c0e1c';
+          view.lineWidth = 2.5;
+          view.beginPath();
+          view.arc(p.x, p.y, strong ? 11 : 9, 0, Math.PI * 2);
+          view.fill();
+          view.stroke();
+          view.fillStyle = '#0c0e1c';
+          view.font = `800 ${strong ? 12 : 10}px Inter, system-ui, sans-serif`;
+          view.textAlign = 'center';
+          view.textBaseline = 'middle';
+          // Spawns are labelled with their path letter, turns with their order.
+          view.fillText(i === 0 ? `P${li + 1}` : String(i + 1), p.x, p.y + 0.5);
+          view.restore();
         });
-        view.stroke();
-        view.restore();
       }
-      s.turns.forEach((t, i) => {
-        const p = viewCenter(t);
-        const last = i === s.turns.length - 1;
-        view.save();
-        view.globalAlpha = strong ? 1 : 0.45;
-        view.fillStyle = i === 0 ? '#7fd38a' : last ? '#6fb6ff' : '#e8bf5e';
-        view.strokeStyle = '#0c0e1c';
-        view.lineWidth = 2.5;
-        view.beginPath();
-        view.arc(p.x, p.y, 11, 0, Math.PI * 2);
-        view.fill();
-        view.stroke();
-        view.fillStyle = '#0c0e1c';
-        view.font = '800 12px Inter, system-ui, sans-serif';
-        view.textAlign = 'center';
-        view.textBaseline = 'middle';
-        view.fillText(String(i + 1), p.x, p.y + 0.5);
-        view.restore();
-      });
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
@@ -359,16 +475,55 @@ export function LevelDesigner({ onClose }: Props) {
 
   const touch = () => setCopied(false);
 
-  /** Extend the path toward a clicked cell, snapping to a horizontal/vertical move. */
-  const addPoint = ({ col, row }: Cell) => {
+  /** Apply a path edit, remembering the previous paths for Undo. */
+  const editLanes = (fn: (prev: Cell[][]) => Cell[][]) => {
+    const next = fn(lanes);
+    if (next === lanes) return;
     touch();
-    setTurns((prev) => {
-      if (prev.length === 0) return [{ col, row }];
-      const last = prev[prev.length - 1];
-      const next: Cell = Math.abs(col - last.col) >= Math.abs(row - last.row) ? { col, row: last.row } : { col: last.col, row };
-      if (next.col === last.col && next.row === last.row) return prev;
-      return [...prev, next];
+    setHistory((h) => [...h.slice(-99), lanes]);
+    setLanes(next);
+  };
+
+  /**
+   * Extend the active path toward a clicked cell, snapping to a horizontal/
+   * vertical move. Landing on another path (with merging on) copies the rest of
+   * that path's route, so the two converge and share its castle.
+   */
+  const addPoint = (c: Cell) =>
+    editLanes((prev) => {
+      const cur = prev[active] ?? [];
+      const last = cur[cur.length - 1];
+      const next = snapFrom(last, c);
+      if (last && next.col === last.col && next.row === last.row) return prev;
+      let path = [...cur, next];
+      const join = last && joinPaths ? findJoin(prev, active, next) : null;
+      if (join) {
+        const tail = prev[join.lane].slice(join.from).filter((t, k) => !(k === 0 && t.col === next.col && t.row === next.row));
+        path = [...path, ...tail.map((t) => ({ ...t }))];
+      }
+      return prev.map((l, i) => (i === active ? path : l));
     });
+
+  const undo = () => {
+    const prev = history[history.length - 1];
+    if (!prev) return;
+    touch();
+    setHistory((h) => h.slice(0, -1));
+    setLanes(prev);
+    setActive((a) => Math.min(a, prev.length - 1));
+  };
+
+  const clearLane = () => editLanes((prev) => prev.map((l, i) => (i === active ? [] : l)));
+
+  const addLane = () => {
+    editLanes((prev) => [...prev, []]);
+    setActive(lanes.length);
+  };
+
+  const removeLane = () => {
+    if (lanes.length <= 1) return clearLane();
+    editLanes((prev) => prev.filter((_, i) => i !== active));
+    setActive((a) => Math.max(0, a - 1));
   };
 
   /** The prop covering a cell (any cell of its footprint), if one does. */
@@ -418,11 +573,13 @@ export function LevelDesigner({ onClose }: Props) {
   const loadSource = (key: string) => {
     setSource(key);
     touch();
+    setHistory([]);
+    setActive(0);
     if (key === 'blank') {
-      setTurns([]);
+      setLanes([[]]);
       setProps([]);
       setThemeOn(false);
-      setExtraLanes(0);
+      setExportFor('stage');
       setGroundEven(DEFAULT_THEME.groundEven);
       setGroundOdd(DEFAULT_THEME.groundOdd);
       setFloor('stone');
@@ -430,15 +587,18 @@ export function LevelDesigner({ onClose }: Props) {
       setCustomPath(false);
       setSection('castle');
       setMoodKey('section-castle');
+      setMoodTab('castle');
       return;
     }
-    const lvl = getLevel(Number(key));
+    const lvl = getBattleLevel(Number(key));
     if (!lvl) return;
-    setTurns(lvl.lanes[0]?.pathTurns.map((t) => ({ ...t })) ?? []);
-    setExtraLanes(Math.max(0, lvl.lanes.length - 1));
+    const loaded = lvl.lanes.map((l) => l.pathTurns.map((t) => ({ ...t })));
+    setLanes(loaded.length > 0 ? loaded : [[]]);
+    setExportFor(lvl.endless ? 'endless' : 'stage');
     setProps((lvl.decor ?? []).map((p) => ({ ...p })));
     setSection(lvl.section);
-    setMoodKey(STAGE_MOODS[lvl.id] ? `stage-${lvl.id}` : `section-${lvl.section}`);
+    setMoodKey(lvl.mood ?? `section-${lvl.section}`);
+    setMoodTab(lvl.section);
     const t = lvl.theme;
     setThemeOn(!!t);
     if (t) {
@@ -457,7 +617,15 @@ export function LevelDesigner({ onClose }: Props) {
 
   const code = useMemo(() => {
     const lines: string[] = [];
-    if (turns.length >= 2) lines.push(`path: [${turns.map((t) => `{ col: ${t.col}, row: ${t.row} }`).join(', ')}],`);
+    // Stage specs take `path` (one lane) or `lanes` (several, each with its own
+    // waves); endless specs take `paths` and roll the waves themselves.
+    if (exportFor === 'endless' && drawnLanes.length > 0) {
+      lines.push(`paths: [\n${drawnLanes.map((l) => `  ${cellList(l)},`).join('\n')}\n],`);
+    } else if (drawnLanes.length === 1) {
+      lines.push(`path: ${cellList(drawnLanes[0])},`);
+    } else if (drawnLanes.length > 1) {
+      lines.push(`lanes: [\n${drawnLanes.map((l) => `  { path: ${cellList(l)}, waves: [] },`).join('\n')}\n],`);
+    }
     if (theme) {
       const parts = [`groundEven: '${theme.groundEven}'`, `groundOdd: '${theme.groundOdd}'`, `floor: '${theme.floor}'`];
       if (theme.path) parts.push(`path: [${theme.path.map(([c, w]) => `['${c}', ${w}]`).join(', ')}]`);
@@ -470,10 +638,11 @@ export function LevelDesigner({ onClose }: Props) {
         .join('\n');
       lines.push(`decor: [\n${items}\n],`);
     }
+    if (moodChoice.preset) lines.push(`mood: '${moodChoice.preset}',`);
     return lines.join('\n');
-  }, [turns, props, theme]);
+  }, [drawnLanes, exportFor, props, theme, moodChoice]);
 
-  const hasContent = turns.length >= 2 || props.length > 0 || themeOn;
+  const hasContent = drawnLanes.length > 0 || props.length > 0 || themeOn || !!moodChoice.preset;
 
   const exportCode = async () => {
     try {
@@ -486,12 +655,21 @@ export function LevelDesigner({ onClose }: Props) {
     }
   };
 
-  const startCell = turns[0];
-  const endCell = turns[turns.length - 1];
-  const startOk = startCell ? isOffBoard(startCell.col, startCell.row) : true;
-  // Ending on the board is fine when a castle or gate prop stands there as the base.
-  const endProp = endCell ? propAt(props, endCell) : undefined;
-  const endOk = endCell ? isOffBoard(endCell.col, endCell.row) || endProp?.kind === 'castle' || endProp?.kind === 'gate' : true;
+  // Per-path sanity: spawns belong on the off-board ring, and so do castles —
+  // unless a castle or gate prop stands at the path's end as the base.
+  const laneIssues = lanes.flatMap((lane, i) => {
+    if (lane.length === 0) return [];
+    const start = lane[0];
+    const end = lane[lane.length - 1];
+    const endProp = propAt(props, end);
+    const startOk = isOffBoard(start.col, start.row);
+    const endOk = isOffBoard(end.col, end.row) || endProp?.kind === 'castle' || endProp?.kind === 'gate';
+    const issues: string[] = [];
+    if (!startOk) issues.push('its spawn (first point) is on the board');
+    if (!endOk) issues.push('its castle (last point) is on the board with no castle or gate prop there');
+    return issues.length ? [`Path ${i + 1}: ${issues.join(', and ')}.`] : [];
+  });
+  const totalPoints = lanes.reduce((n, l) => n + l.length, 0);
   // A castle or gate at the path's end is the base itself, not an obstruction.
   const blocked = props.filter(
     (p) =>
@@ -524,6 +702,11 @@ export function LevelDesigner({ onClose }: Props) {
                   {`Stage ${l.id} · ${l.name}`}
                 </option>
               ))}
+              {ENDLESS_LEVELS.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {`Endless · ${l.name}`}
+                </option>
+              ))}
             </select>
           </label>
         </div>
@@ -547,41 +730,60 @@ export function LevelDesigner({ onClose }: Props) {
 
             {panel === 'path' && (
               <div className="ld-panel">
-                <p className="ld-help">
-                  Click cells to lay the enemy route — each move snaps straight across or down. Start and end on the
-                  dark off-board ring.
-                </p>
+                <div className="ld-choice ld-lanes" role="tablist" aria-label="Paths">
+                  {lanes.map((l, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      role="tab"
+                      aria-selected={i === active}
+                      className={i === active ? 'active' : undefined}
+                      style={{ '--lane': laneColor(i) } as CSSProperties}
+                      onClick={() => setActive(i)}
+                    >
+                      <i className="ld-lane-dot" /> Path {i + 1}
+                      <small>{l.length}</small>
+                    </button>
+                  ))}
+                  <button type="button" onClick={addLane} title="Start another enemy path">
+                    <Icon name="plus" /> Add path
+                  </button>
+                </div>
+                <label className="ld-check">
+                  <input type="checkbox" checked={joinPaths} onChange={(e) => setJoinPaths(e.target.checked)} />
+                  Merge when clicking onto another path
+                </label>
                 <div className="ld-row">
-                  <button className="btn ghost ld-small" onClick={() => (touch(), setTurns((t) => t.slice(0, -1)))} disabled={turns.length === 0}>
-                    <Icon name="undo" /> Undo point
+                  <button className="btn ghost ld-small" onClick={undo} disabled={history.length === 0}>
+                    <Icon name="undo" /> Undo
                   </button>
-                  <button className="btn ghost ld-small" onClick={() => (touch(), setTurns([]))} disabled={turns.length === 0}>
-                    <Icon name="close" /> Clear
+                  <button className="btn ghost ld-small" onClick={clearLane} disabled={turns.length === 0}>
+                    <Icon name="close" /> Clear path
                   </button>
+                  {lanes.length > 1 && (
+                    <button className="btn ghost ld-small" onClick={removeLane}>
+                      <Icon name="close" /> Remove path
+                    </button>
+                  )}
                 </div>
                 <div className="ld-legend">
                   <span><i className="dot start" /> Spawn</span>
                   <span><i className="dot turn" /> Turn</span>
                   <span><i className="dot end" /> Castle</span>
                 </div>
-                {extraLanes > 0 && (
-                  <p className="ld-note">
-                    This stage has {extraLanes} more lane{extraLanes === 1 ? '' : 's'}; only the first is loaded for
-                    editing.
-                  </p>
-                )}
               </div>
             )}
 
             {panel === 'props' && (
               <div className="ld-panel">
-                <div className="ld-subtabs">
-                  {PROP_CATEGORIES.map((cat) => (
-                    <button key={cat.id} type="button" className={propTab === cat.id ? 'active' : undefined} onClick={() => setPropTab(cat.id)}>
-                      <Icon name={cat.id === 'castle' ? 'castle' : 'houses'} /> {cat.label}
-                    </button>
-                  ))}
-                </div>
+                <label className="ld-source ld-category">
+                  <span>Category</span>
+                  <select value={propTab} onChange={(e) => setPropTab(e.target.value as PropCategory)}>
+                    {PROP_CATEGORIES.map((cat) => (
+                      <option key={cat.id} value={cat.id}>{cat.label}</option>
+                    ))}
+                  </select>
+                </label>
                 <div className="ld-props">
                   {PROP_PALETTE.filter((p) => p.category === propTab).map((p) => (
                     <button
@@ -638,12 +840,16 @@ export function LevelDesigner({ onClose }: Props) {
 
             {panel === 'mood' && (
               <div className="ld-panel">
-                <p className="ld-help">
-                  Preview the board under any stage&apos;s lighting, weather and colour grade. Moods live in{' '}
-                  <code>domain/atmosphere.ts</code>, keyed by level id — this choice isn&apos;t exported.
-                </p>
+                <label className="ld-source ld-category">
+                  <span>Category</span>
+                  <select value={moodTab} onChange={(e) => setMoodTab(e.target.value as MoodTab)}>
+                    {MOOD_TABS.map((tab) => (
+                      <option key={tab.id} value={tab.id}>{tab.label}</option>
+                    ))}
+                  </select>
+                </label>
                 <div className="ld-moods">
-                  {MOODS.map((m) => (
+                  {MOODS.filter((m) => m.tabs.includes(moodTab)).map((m) => (
                     <button key={m.key} type="button" className={moodKey === m.key ? 'active' : undefined} onClick={() => setMoodKey(m.key)}>
                       <span className="ld-mood-swatch" style={{ background: `linear-gradient(135deg, ${m.mood.grade ?? m.mood.ambient}, ${m.mood.ambient})`, opacity: 0.5 + m.mood.darkness }} />
                       <span>
@@ -655,6 +861,9 @@ export function LevelDesigner({ onClose }: Props) {
                     </button>
                   ))}
                 </div>
+                {moodTab === 'other' && !MOODS.some((m) => m.tabs.includes('other')) && (
+                  <p className="ld-help">Every preset is in use. New presets added to <code>MOODS</code> show up here until a stage picks them.</p>
+                )}
               </div>
             )}
           </aside>
@@ -678,14 +887,13 @@ export function LevelDesigner({ onClose }: Props) {
                 {hover ? `col ${hover.col}, row ${hover.row}${isOffBoard(hover.col, hover.row) ? ' · off-board' : ''}` : 'Hover the board'}
               </span>
               <span>
-                {turns.length} point{turns.length === 1 ? '' : 's'} · {props.length} prop{props.length === 1 ? '' : 's'}
+                {lanes.length} path{lanes.length === 1 ? '' : 's'} · {totalPoints} point{totalPoints === 1 ? '' : 's'} ·{' '}
+                {props.length} prop{props.length === 1 ? '' : 's'}
               </span>
             </div>
-            {turns.length > 0 && (!startOk || !endOk) && (
+            {laneIssues.length > 0 && (
               <p className="ld-warn">
-                <Icon name="info" /> {!startOk && 'The spawn (point 1) is on the board, not the off-board ring. '}
-                {!endOk && 'The castle (last point) is on the board with no castle or gate prop there. '}
-                Enemies normally enter and exit off-board.
+                <Icon name="info" /> {laneIssues.join(' ')} Enemies normally enter and exit off-board.
               </p>
             )}
             {blocked > 0 && (
@@ -699,9 +907,20 @@ export function LevelDesigner({ onClose }: Props) {
         <div className="ld-export">
           <div className="ld-export-head">
             <span>
-              Level code — paste the <code>path:</code> / <code>theme:</code> / <code>decor:</code> lines into a level
-              spec in <code>domain/levels.ts</code>
+              {exportFor === 'endless' ? (
+                <>
+                  Level code — paste the <code>paths:</code> / <code>theme:</code> / <code>decor:</code> / <code>mood:</code> lines into an
+                  endless spec in <code>domain/endless.ts</code>
+                </>
+              ) : (
+                <>
+                  Level code — paste the <code>{drawnLanes.length > 1 ? 'lanes:' : 'path:'}</code> / <code>theme:</code> /{' '}
+                  <code>decor:</code> / <code>mood:</code> lines into a level spec in <code>domain/levels.ts</code>
+                  {drawnLanes.length > 1 && ' (then fill in each lane’s waves)'}
+                </>
+              )}
             </span>
+            <Choice value={exportFor} options={['stage', 'endless'] as const} onChange={(v) => (touch(), setExportFor(v))} />
             <button className="btn primary ld-small" onClick={exportCode} disabled={!hasContent}>
               <Icon name={copied ? 'check' : 'scroll'} /> {copied ? 'Copied!' : 'Copy code'}
             </button>

@@ -28,6 +28,8 @@ import {
 import { normalizeProficiency, type Proficiency } from '../domain/proficiency';
 import { implementedPlayerChampionId, isPlayerChampionId } from '../domain/playerChampion';
 import { ENEMY_KILLS_TO_UNLOCK, type EnemyDef } from '../domain/enemies';
+import { getSection, levelsForSection, type SectionId } from '../domain/levels';
+import { endlessLevelFor } from '../domain/endless';
 import {
   activeMasteryUpgrades,
   getMasteryUpgrade,
@@ -119,6 +121,8 @@ export interface GameState {
    * opened; thereafter it renders instantly. See domain/journal.
    */
   readChapters: number[];
+  /** Best endless run per chapter: the most waves cleared in a single run. */
+  endlessBest: Partial<Record<SectionId, number>>;
 }
 
 /** Persisted, non-gameplay UI preferences. */
@@ -174,7 +178,7 @@ function normalizeAudio(raw: Partial<AudioSettings> | undefined | null): AudioSe
 
 const STORAGE_KEY = 'state';
 const STARTING_GEMS = 200;
-const CURRENT_VERSION = 15;
+const CURRENT_VERSION = 16;
 
 /** Maximum distinct champions the player may bring into a stage. */
 export const MAX_TEAM_SIZE = 6;
@@ -200,6 +204,7 @@ export function createInitialState(): GameState {
     prefs: { ...DEFAULT_PREFS },
     audio: { ...DEFAULT_AUDIO },
     readChapters: [],
+    endlessBest: {},
   };
 }
 
@@ -241,6 +246,8 @@ export function loadState(): GameState {
   migrated.masteryDisabled = { ...(raw.masteryDisabled ?? {}) };
   // Pre-v9 saves have no per-enemy kill tallies (Enemy Index starts empty).
   migrated.enemyKills = { ...(raw.enemyKills ?? {}) };
+  // Pre-v16 saves have no endless records.
+  migrated.endlessBest = { ...(raw.endlessBest ?? {}) };
   // Pre-v6 saves have no team; seed it from owned units (all were deployable
   // before teams existed). Always normalize to a distinct, owned, capped list
   // with the personal champion (if owned) pinned to the first slot.
@@ -738,4 +745,20 @@ export function isLevelUnlocked(state: GameState, levelId: number): boolean {
 /** How many of the given level ids the player has completed. */
 export function completedCount(state: GameState, levelIds: number[]): number {
   return levelIds.filter((id) => state.completedLevels.includes(id)).length;
+}
+
+/**
+ * A chapter's endless run opens once every stage of that chapter is cleared
+ * (and the chapter has an endless stage and isn't a work in progress).
+ */
+export function isEndlessUnlocked(state: GameState, section: SectionId): boolean {
+  if (getSection(section).wip || !endlessLevelFor(section)) return false;
+  const stages = levelsForSection(section);
+  return stages.length > 0 && completedCount(state, stages.map((l) => l.id)) === stages.length;
+}
+
+/** Record a finished endless run, keeping the chapter's best wave count. */
+export function recordEndlessRun(state: GameState, section: SectionId, wavesCleared: number): GameState {
+  if (wavesCleared <= (state.endlessBest[section] ?? 0)) return state;
+  return { ...state, endlessBest: { ...state.endlessBest, [section]: wavesCleared } };
 }

@@ -5,7 +5,7 @@ import {
   resolvedMasteryUpgrades,
   REPLAY_GEM_REWARD,
 } from '../../application/gameState';
-import { getLevel } from '../../domain/levels';
+import { getBattleLevel, ENDLESS_BOSS_EVERY } from '../../domain/endless';
 import {
   attackTypeLabel,
   damageTypeLabel,
@@ -74,6 +74,8 @@ interface Hud {
   phase: string;
   outcome: Outcome;
   showBossBanner: boolean;
+  /** Endless runs: gems earned so far this run. */
+  gemsEarned: number;
   /** Activated abilities of deployed champions (the Blade's Cyclone Slash). */
   abilities: AbilityHud[];
 }
@@ -122,7 +124,12 @@ function ResistShield({ kind, pct }: { kind: 'physical' | 'magic'; pct: number }
 
 export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   const game = useGame();
-  const level = getLevel(levelId)!;
+  const level = getBattleLevel(levelId)!;
+  const endless = level.endless;
+  // The chapter's endless record going in, so the result can call a new best.
+  const [prevBest] = useState(() => (endless ? game.state.endlessBest[endless.section] ?? 0 : 0));
+  // "End run" asks for a second click before conceding an endless run.
+  const [confirmEnd, setConfirmEnd] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<GameEngine | null>(null);
@@ -196,6 +203,8 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     let raf = 0;
     let last = performance.now();
     let bossBannerUntil = 0;
+    // Endless gems already banked to the save (they bank the moment they're won).
+    let gemsBanked = 0;
 
     const snapshot = (now: number): Hud => ({
       currency: Math.round(engine.currency),
@@ -207,6 +216,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
       phase: engine.phase,
       outcome: engine.outcome,
       showBossBanner: now < bossBannerUntil,
+      gemsEarned: engine.gemsEarned,
       abilities: engine.towers
         .filter((t) => t.ability)
         .map((t) => {
@@ -287,6 +297,13 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
       setHud(snapshot(now));
       updateTooltip();
 
+      // Endless boss-wave gems bank as soon as they're earned, so they're kept
+      // however the run ends.
+      if (engine.gemsEarned > gemsBanked) {
+        game.grantGems(engine.gemsEarned - gemsBanked);
+        gemsBanked = engine.gemsEarned;
+      }
+
       // Settle rewards/progression exactly once when the battle ends.
       if (engine.outcome !== 'playing' && !settledRef.current) {
         settledRef.current = true;
@@ -297,7 +314,11 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
         game.awardEnemyKills(engine.enemyKills);
         // Gold is a per-stage resource and does not persist; only the gem
         // reward is banked, on the first clear.
-        if (engine.outcome === 'won') {
+        // An endless run only ever ends in defeat (or a conceded run); it
+        // records how many waves it cleared.
+        if (endless) {
+          game.recordEndlessRun(endless.section, engine.waveIndex);
+        } else if (engine.outcome === 'won') {
           firstClearRef.current = !game.state.completedLevels.includes(level.id);
           game.completeLevel(level.id, level.gemReward);
         }
@@ -433,6 +454,16 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     engineRef.current?.startWave();
   };
 
+  // Concede an endless run (second click confirms); it settles like a defeat.
+  const endRun = () => {
+    if (!confirmEnd) {
+      setConfirmEnd(true);
+      return;
+    }
+    setConfirmEnd(false);
+    engineRef.current?.surrender();
+  };
+
   const activateAbility = (uid: number) => {
     const engine = engineRef.current;
     if (!engine) return;
@@ -483,18 +514,42 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   return (
     <main className="game-wrap">
       <div className="game-hud">
-        <button className="btn ghost sort-toggle" onClick={onExit}>
-          <Icon name="back" /> Retreat
-        </button>
+        {endless && hud?.outcome === 'playing' ? (
+          <button
+            className={`btn ghost sort-toggle end-run${confirmEnd ? ' confirm-end' : ''}`}
+            onClick={endRun}
+            onBlur={() => setConfirmEnd(false)}
+          >
+            <Icon name="flag" /> {confirmEnd ? 'Confirm?' : 'End run'}
+          </button>
+        ) : (
+          <button className="btn ghost sort-toggle" onClick={onExit}>
+            <Icon name="back" /> Retreat
+          </button>
+        )}
         <div className="hud-stat">
           <span className="lbl">Realm</span> {level.name}
         </div>
+        {endless ? (
+          <>
+            <div className="hud-stat">
+              <span className="lbl">Wave</span>
+              <HudNum value={(hud?.waveIndex ?? 0) + 1} digits={3} />
+              <small className="hud-boss-in">{bossCountdown((hud?.waveIndex ?? 0) + 1)}</small>
+            </div>
+            <div className="hud-stat hud-gems" title="Gems earned this run">
+              <Icon name="gem" /> <HudNum value={hud?.gemsEarned ?? 0} digits={4} />
+            </div>
+          </>
+        ) : (
+          <div className="hud-stat">
+            <span className="lbl">Wave</span>
+            <HudNum value={Math.min((hud?.waveIndex ?? 0) + 1, hud?.totalWaves ?? 0)} digits={2} align="right" /> /{' '}
+            <HudNum value={hud?.totalWaves ?? 0} digits={2} />
+          </div>
+        )}
         <div className="hud-stat">
-          <span className="lbl">Wave</span>
-          {Math.min((hud?.waveIndex ?? 0) + 1, hud?.totalWaves ?? 0)} / {hud?.totalWaves ?? 0}
-        </div>
-        <div className="hud-stat">
-          <span className="lbl">Foes</span> {hud?.enemiesRemaining ?? 0}
+          <span className="lbl">Foes</span> <HudNum value={hud?.enemiesRemaining ?? 0} digits={3} />
         </div>
         <div className="hud-stat">
           <span className="lbl">Castle</span>
@@ -505,19 +560,11 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
               }}
             />
           </div>
-          {hud?.baseHealth ?? 0}
+          <HudNum value={hud?.baseHealth ?? 0} digits={3} />
         </div>
         <div className="hud-stat hud-gold">
-          <Icon name="coin" /> {hud?.currency ?? 0}
+          <Icon name="coin" /> <HudNum value={hud?.currency ?? 0} digits={5} />
         </div>
-        <button
-          className={`btn ff-toggle ${fastForward ? 'active' : ''}`}
-          onClick={() => setFastForward((v) => !v)}
-          title="Fast forward (3× game speed)"
-          aria-pressed={fastForward}
-        >
-          <Icon name="fast" /> {fastForward ? '3×' : '1×'}
-        </button>
       </div>
 
       <div className="board-layout">
@@ -563,7 +610,18 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                   <Icon name="skull" /> A Boss Approaches <Icon name="skull" />
                 </div>
               )}
-              {hud && hud.outcome !== 'playing' && (
+              {hud && hud.outcome !== 'playing' && endless && (
+                <EndlessResultCard
+                  wavesCleared={hud.waveIndex}
+                  gemsEarned={hud.gemsEarned}
+                  newBest={hud.waveIndex > prevBest}
+                  best={Math.max(prevBest, hud.waveIndex)}
+                  onExit={onExit}
+                  onHome={onHome}
+                  onRetry={onRetry}
+                />
+              )}
+              {hud && hud.outcome !== 'playing' && !endless && (
                 <ResultCard
                   outcome={hud.outcome}
                   gemReward={level.gemReward}
@@ -605,6 +663,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                   const dmg = stats?.damage ?? def.damage;
                   const spd = stats?.attackSpeed ?? def.attackSpeed;
                   const rng = stats?.range ?? def.range;
+                  const bard = engine?.deployBard(id) ?? def.bard;
                   return (
                     <button
                       key={id}
@@ -636,10 +695,10 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                             <span className="dst-row"><span>Harvest</span><b><Icon name="coin" />{def.generator.amount}</b></span>
                             <span className="dst-row"><span>Harvests</span><b>{def.generator.timesPerWave}/wave</b></span>
                           </>
-                        ) : def.bard ? (
+                        ) : bard ? (
                           <>
-                            <span className="dst-row"><span>Buff</span><b>+{Math.round((def.bard.attackSpeedMult - 1) * 100)}% SPD</b></span>
-                            <span className="dst-row"><span>Targets</span><b>{def.bard.targets} · {def.bard.duration}s</b></span>
+                            <span className="dst-row"><span>Buff</span><b>+{Math.round((bard.attackSpeedMult - 1) * 100)}% SPD</b></span>
+                            <span className="dst-row"><span>Targets</span><b>{bard.targets} · {bard.duration}s</b></span>
                             <span className="dst-row"><span>Range</span><b>{rng}</b></span>
                           </>
                         ) : (
@@ -660,17 +719,32 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
         </div>
 
         <aside className="side-panel">
-          {canStartWave && (
-            <button className="btn primary block" onClick={startWave}>
-              <Icon name="swords" />
-              {hud && hud.waveIndex === 0 ? 'Start Battle' : 'Next Wave'}
-            </button>
-          )}
-          {hud?.phase === 'wave' && (
-            <div className="panel panel-pad" style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>
-              <Icon name="swords" /> Wave in progress…
+          {/* Wave control: a fixed-height slot (so swapping the wave button
+              for the in-progress note never shifts the panels below) beside
+              the game-speed toggle. */}
+          <div className="wave-row">
+            <div className="wave-slot">
+              {canStartWave && (
+                <button className="btn primary block" onClick={startWave}>
+                  <Icon name="swords" />
+                  {hud && hud.waveIndex === 0 ? 'Start Battle' : 'Next Wave'}
+                </button>
+              )}
+              {hud?.phase === 'wave' && (
+                <div className="panel wave-progress">
+                  <Icon name="swords" /> Wave in progress…
+                </div>
+              )}
             </div>
-          )}
+            <button
+              className={`btn ff-toggle ${fastForward ? 'active' : ''}`}
+              onClick={() => setFastForward((v) => !v)}
+              title="Fast forward (3× game speed)"
+              aria-pressed={fastForward}
+            >
+              <Icon name="fast" /> {fastForward ? '3×' : '1×'}
+            </button>
+          </div>
 
           {!selectedTower && (
             <div className="panel panel-pad" style={{ textAlign: 'center', color: 'var(--text-faint)', fontSize: 13 }}>
@@ -1056,6 +1130,71 @@ function activeBuffsFor(t: Tower): ActiveBuff[] {
     });
   }
   return buffs;
+}
+
+/**
+ * A HUD number in a box wide enough for `digits` digits, so a value gaining a
+ * digit (gold 99 → 100, foes 9 → 10) never resizes its stat and reflows the HUD.
+ */
+function HudNum({ value, digits, align }: { value: number; digits: number; align?: 'right' }) {
+  return (
+    <span className="hud-num" style={{ minWidth: `${digits}ch`, textAlign: align }}>
+      {value}
+    </span>
+  );
+}
+
+/** Endless HUD hint: how far off the next boss wave is (wave `n` is 1-based). */
+function bossCountdown(n: number): string {
+  const left = (ENDLESS_BOSS_EVERY - (n % ENDLESS_BOSS_EVERY)) % ENDLESS_BOSS_EVERY;
+  return left === 0 ? 'Boss wave' : `Boss in ${left}`;
+}
+
+/** The end of an endless run: waves held, gems won, and the chapter record. */
+function EndlessResultCard({
+  wavesCleared,
+  gemsEarned,
+  newBest,
+  best,
+  onExit,
+  onHome,
+  onRetry,
+}: {
+  wavesCleared: number;
+  gemsEarned: number;
+  newBest: boolean;
+  best: number;
+  onExit: () => void;
+  onHome: () => void;
+  onRetry: () => void;
+}) {
+  return (
+    <div className={`panel result-card ${newBest ? 'win' : 'lose'}`}>
+      <h2>
+        <Icon name={newBest ? 'trophy' : 'flag'} /> {newBest ? 'New Record' : 'Run Over'}
+      </h2>
+      <p style={{ color: 'var(--text-dim)' }}>
+        You held the line for {wavesCleared} {wavesCleared === 1 ? 'wave' : 'waves'}.
+      </p>
+      <div className="reward">
+        <div style={{ color: '#6fd6ff' }}>
+          Gems earned · <Icon name="gem" /> {gemsEarned}
+        </div>
+        <div style={{ color: 'var(--text-dim)' }}>Best · {best} waves</div>
+      </div>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+        <button className="btn ghost" onClick={onHome}>
+          Home
+        </button>
+        <button className="btn ghost" onClick={onExit}>
+          Continue
+        </button>
+        <button className="btn primary" onClick={onRetry}>
+          Try again
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function ResultCard({

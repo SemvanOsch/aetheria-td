@@ -534,10 +534,104 @@ function cobbleStone(ctx: Ctx, cx: number, cy: number, step: number, tone: strin
 // Paths
 // ===========================================================================
 
-function polyline(ctx: Ctx, pts: Pt[]): void {
+/**
+ * Stroke every polyline as ONE path, so where strokes overlap (junctions, round
+ * caps) a translucent layer is painted once rather than stacking darker.
+ */
+function strokeAll(ctx: Ctx, strokes: Pt[][]): void {
   ctx.beginPath();
-  ctx.moveTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  for (const pts of strokes) {
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  }
+  ctx.stroke();
+}
+
+/**
+ * Merge lanes into one path network: split every lane into tile-to-tile steps,
+ * drop the steps lanes share (converging lanes run the same corridor), and
+ * re-chain the unique steps into polylines that end at junctions and path
+ * ends. Painting this instead of each lane keeps a shared stretch from being
+ * drawn several times over (stacked shading, doubled trim) and lets crossing
+ * corridors meet cleanly. Chains start at lane spawns where possible, so they
+ * mostly run in the direction of travel.
+ */
+function pathNetwork(lanes: Pt[][]): Pt[][] {
+  const key = (p: Pt) => `${Math.round(p.x)},${Math.round(p.y)}`;
+  const nodes = new Map<string, Pt>();
+  const adj = new Map<string, string[]>();
+  const edges = new Set<string>();
+  const edgeKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  const node = (p: Pt) => {
+    const k = key(p);
+    if (!nodes.has(k)) {
+      nodes.set(k, { x: Math.round(p.x), y: Math.round(p.y) });
+      adj.set(k, []);
+    }
+    return k;
+  };
+  const link = (a: Pt, b: Pt) => {
+    const ka = node(a);
+    const kb = node(b);
+    if (ka === kb || edges.has(edgeKey(ka, kb))) return;
+    edges.add(edgeKey(ka, kb));
+    adj.get(ka)!.push(kb);
+    adj.get(kb)!.push(ka);
+  };
+  for (const pts of lanes) {
+    if (pts.length === 1) node(pts[0]);
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const steps = Math.max(1, Math.round(Math.hypot(b.x - a.x, b.y - a.y) / TILE));
+      for (let s = 0; s < steps; s++) {
+        link(
+          { x: a.x + ((b.x - a.x) * s) / steps, y: a.y + ((b.y - a.y) * s) / steps },
+          { x: a.x + ((b.x - a.x) * (s + 1)) / steps, y: a.y + ((b.y - a.y) * (s + 1)) / steps },
+        );
+      }
+    }
+  }
+
+  const used = new Set<string>();
+  const chains: Pt[][] = [];
+  const walk = (start: string, next: string) => {
+    const chain = [nodes.get(start)!];
+    let prev = start;
+    let cur = next;
+    used.add(edgeKey(prev, cur));
+    for (;;) {
+      chain.push(nodes.get(cur)!);
+      const out = adj.get(cur)!;
+      if (out.length !== 2) break; // a path end or a junction
+      const n = out[0] === prev ? out[1] : out[0];
+      if (used.has(edgeKey(cur, n))) break; // closed a loop
+      used.add(edgeKey(cur, n));
+      prev = cur;
+      cur = n;
+    }
+    chains.push(chain);
+  };
+  const starts = [
+    ...lanes.filter((l) => l.length > 0).map((l) => key(l[0])),
+    ...[...adj.keys()].filter((k) => adj.get(k)!.length !== 2),
+    ...adj.keys(), // anything left is a pure loop
+  ];
+  for (const s of starts) {
+    for (const n of adj.get(s) ?? []) {
+      if (!used.has(edgeKey(s, n))) walk(s, n);
+    }
+  }
+
+  // Drop the in-between points of straight runs (keeps the turns).
+  return chains.map((c) =>
+    c.filter((p, i) => {
+      if (i === 0 || i === c.length - 1) return true;
+      const a = c[i - 1];
+      const b = c[i + 1];
+      return (p.x - a.x) * (b.y - p.y) !== (p.y - a.y) * (b.x - p.x);
+    }),
+  );
 }
 
 /** Points sampled every `step` px along a polyline, with unit tangents. */
@@ -560,7 +654,9 @@ function samples(pts: Pt[], step: number): { x: number; y: number; tx: number; t
  * centre), layer by layer across lanes so converging lanes never overdraw each
  * other's fill, then material detail masked to the path's fill width.
  */
-function paintPaths(ctx: Ctx, lanes: Pt[][], theme: BoardTheme, seed: number): void {
+function paintPaths(ctx: Ctx, laneWaypoints: Pt[][], theme: BoardTheme, seed: number): void {
+  // Paint the merged network, not each lane: shared stretches once, junctions clean.
+  const lanes = pathNetwork(laneWaypoints);
   if (lanes.length === 0) return;
   const layers = theme.path ?? DEFAULT_PATH_LAYERS;
   const kind: PathKind = theme.pathKind ?? 'dirt';
@@ -580,18 +676,12 @@ function paintPaths(ctx: Ctx, lanes: Pt[][], theme: BoardTheme, seed: number): v
   // instead, so it gets a darker rim and no lift).
   ctx.strokeStyle = 'rgba(0,0,0,0.25)';
   ctx.lineWidth = outerW + 6;
-  for (const pts of lanes) {
-    polyline(ctx, pts);
-    ctx.stroke();
-  }
+  strokeAll(ctx, lanes);
 
   layers.forEach(([col, w], li) => {
     ctx.strokeStyle = col;
     ctx.lineWidth = w;
-    for (const pts of lanes) {
-      polyline(ctx, pts);
-      ctx.stroke();
-    }
+    strokeAll(ctx, lanes);
     // Carpet trim rides the border band: laid right after the edge layer so
     // the fill of a crossing segment covers it cleanly.
     if (li === 0 && kind === 'carpet') paintCarpetTrim(ctx, lanes, edgeCol, outerW, fillW);
@@ -615,7 +705,7 @@ function paintPaths(ctx: Ctx, lanes: Pt[][], theme: BoardTheme, seed: number): v
       break;
     case 'dirt':
     default:
-      paintDirtDetail(d, all, fillCol, fillW, r);
+      paintDirtDetail(d, lanes, all, fillCol, fillW, r);
       break;
   }
   // Mask to the fill corridor.
@@ -624,10 +714,7 @@ function paintPaths(ctx: Ctx, lanes: Pt[][], theme: BoardTheme, seed: number): v
   d.lineCap = 'round';
   d.strokeStyle = '#000';
   d.lineWidth = kind === 'dirt' ? outerW : fillW;
-  for (const pts of lanes) {
-    polyline(d as Ctx, pts);
-    d.stroke();
-  }
+  strokeAll(d, lanes);
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(detail, 0, 0);
@@ -639,6 +726,7 @@ function paintPaths(ctx: Ctx, lanes: Pt[][], theme: BoardTheme, seed: number): v
 
 function paintDirtDetail(
   d: Ctx,
+  lanes: Pt[][],
   all: { x: number; y: number; tx: number; ty: number }[],
   fill: string,
   width: number,
@@ -646,16 +734,19 @@ function paintDirtDetail(
 ): void {
   // Ruts: two darker wheel/foot-worn grooves either side of the centreline.
   d.lineCap = 'round';
+  // One run of grooves per stroke, so ruts never jump between separate paths.
   for (const off of [-width * 0.22, width * 0.22]) {
     d.strokeStyle = withAlpha(shade(fill, -0.32), 0.45);
     d.lineWidth = 3.2;
     d.beginPath();
-    all.forEach((s, i) => {
-      const x = s.x - s.ty * off + (r() - 0.5) * 0.8;
-      const y = s.y + s.tx * off + (r() - 0.5) * 0.8;
-      if (i === 0) d.moveTo(x, y);
-      else d.lineTo(x, y);
-    });
+    for (const pts of lanes) {
+      samples(pts, 3).forEach((s, i) => {
+        const x = s.x - s.ty * off + (r() - 0.5) * 0.8;
+        const y = s.y + s.tx * off + (r() - 0.5) * 0.8;
+        if (i === 0) d.moveTo(x, y);
+        else d.lineTo(x, y);
+      });
+    }
     d.stroke();
   }
   // Pebbles, footprints and patchy colour.
@@ -751,22 +842,18 @@ function paintCarpetDetail(
   // Inner border line: a thin gold thread just inside the fill.
   d.lineJoin = 'round';
   d.lineCap = 'round';
-  for (const pts of lanes) {
-    d.strokeStyle = withAlpha(edge, 0.85);
-    d.lineWidth = fillW - 5;
-    polyline(d, pts);
-    d.stroke();
-    d.strokeStyle = fill;
-    d.lineWidth = fillW - 7.5;
-    polyline(d, pts);
-    d.stroke();
-    // Centre runner (re-laid over the weave so it keeps its colour), then the
-    // weave again faintly on top.
-    d.strokeStyle = withAlpha(centre, 0.9);
-    d.lineWidth = centreW;
-    polyline(d, pts);
-    d.stroke();
-  }
+  // Laid layer by layer across every stroke, so where corridors meet one's
+  // fill covers the other's thread instead of a thread cutting across a fill.
+  d.strokeStyle = withAlpha(edge, 0.85);
+  d.lineWidth = fillW - 5;
+  strokeAll(d, lanes);
+  d.strokeStyle = fill;
+  d.lineWidth = fillW - 7.5;
+  strokeAll(d, lanes);
+  // Centre runner (re-laid over the weave so it keeps its colour).
+  d.strokeStyle = withAlpha(centre, 0.9);
+  d.lineWidth = centreW;
+  strokeAll(d, lanes);
   // Pile highlights + scuffed wear.
   for (let i = 0; i < all.length; i += 2) {
     const s = all[i];
@@ -776,10 +863,7 @@ function paintCarpetDetail(
   }
   d.strokeStyle = 'rgba(0,0,0,0.12)';
   d.lineWidth = centreW * 0.55;
-  for (const pts of lanes) {
-    polyline(d, pts);
-    d.stroke();
-  }
+  strokeAll(d, lanes);
 }
 
 /** Decorative gold trim along a carpet's border band: diamonds + dots. */

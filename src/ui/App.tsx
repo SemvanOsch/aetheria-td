@@ -6,13 +6,15 @@ import { DeskBackdrop, Home } from './screens/Home';
 import { Summon } from './screens/Summon';
 import { ModeSelect } from './screens/ModeSelect';
 import { Story } from './screens/Story';
+import { Endless } from './screens/Endless';
 import { GameScreen } from './screens/GameScreen';
 import { PlayerIntro, type JournalSection } from './components/PlayerIntro';
 import { useGame } from '../application/gameContext';
 import { hasAffordableMasteryUpgrade, hasCompletedIntro } from '../application/gameState';
-import { getLevel, type SectionId } from '../domain/levels';
+import { type SectionId } from '../domain/levels';
+import { getBattleLevel } from '../domain/endless';
 
-export type Screen = 'home' | 'summon' | 'modes' | 'story' | 'game';
+export type Screen = 'home' | 'summon' | 'modes' | 'story' | 'endless' | 'game';
 
 export function App() {
   const { state, setPlayerProfile, markChapterRead } = useGame();
@@ -41,7 +43,7 @@ export function App() {
 
   // Background music: the menu theme everywhere outside a battle (the journal
   // intro included), the stage's chapter battle theme inside one.
-  const battleSection = screen === 'game' && activeLevel != null ? getLevel(activeLevel)?.section : undefined;
+  const battleSection = screen === 'game' && activeLevel != null ? getBattleLevel(activeLevel)?.section : undefined;
   useEffect(() => {
     setMusicTrack(battleSection ? battleTrackFor(battleSection) : 'menu');
   }, [battleSection]);
@@ -55,14 +57,16 @@ export function App() {
   const startLevel = (levelId: number) => {
     setActiveLevel(levelId);
     // Remember the chapter so leaving the battle reopens its map.
-    setStorySection(getLevel(levelId)?.section ?? null);
+    setStorySection(getBattleLevel(levelId)?.section ?? null);
     setScreen('game');
   };
 
-  // Returning from a battle goes back to the chapter's map.
+  // Returning from a battle goes back to where it was picked: the chapter's
+  // map, or the endless picker for an endless run.
   const exitLevel = () => {
+    const wasEndless = activeLevel != null && getBattleLevel(activeLevel)?.endless != null;
     setActiveLevel(null);
-    setScreen('story');
+    setScreen(wasEndless ? 'endless' : 'story');
   };
 
   // From a battle result, jump straight back to the home screen.
@@ -109,7 +113,16 @@ export function App() {
         />
       )}
       {screen === 'summon' && <Summon onBack={() => goHomeFrom('summon')} />}
-      {screen === 'modes' && <ModeSelect onStory={() => setScreen('story')} onBack={() => goHomeFrom('play')} />}
+      {screen === 'modes' && (
+        <ModeSelect
+          onStory={() => setScreen('story')}
+          onEndless={() => setScreen('endless')}
+          onBack={() => goHomeFrom('play')}
+        />
+      )}
+      {screen === 'endless' && (
+        <Endless onPlay={startLevel} onEditTeam={() => setJournal('champions')} onBack={goPlay} />
+      )}
       {screen === 'story' && (
         <Story
           section={storySection}

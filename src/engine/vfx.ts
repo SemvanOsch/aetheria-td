@@ -208,8 +208,6 @@ export class Vfx {
   slashes: Slash[] = [];
   pulses: LightPulse[] = [];
   corpses: Corpse[] = [];
-  /** Floating numbers the VFX layer owns (crit damage). */
-  texts: { x: number; y: number; text: string; color: string; size: number; t: number; max: number }[] = [];
   private recoil = new Map<number, Recoil>();
   /** Screen-shake trauma 0..1 (offset ∝ trauma²). */
   private trauma = 0;
@@ -428,12 +426,9 @@ export class Vfx {
       }
     }
     if (e.crit) {
-      if (this.texts.length >= 30) this.texts.shift();
-      this.texts.push({ x: e.x + (this.rand() - 0.5) * 8, y: e.y - 22, text: String(Math.round(e.amount)), color: '#ffcf4a', size: 17, t: 0, max: 0.9 });
       this.ring(hx, hy, 4, 34, 0.32, '#ffd76a', 2.4);
       this.flash(hx, hy, 46, 0.22, '#fff1c4');
       this.pulse(hx, hy, 110, fam.light, 0.7, 0.3);
-      this.shake(0.12);
       this.exposure = Math.min(0.5, this.exposure + 0.08);
     } else if (e.weight > 0.18) {
       this.shake(0.05);
@@ -509,7 +504,7 @@ export class Vfx {
     this.burst('smoke', x, y + 4, 6, radius * 0.8, { life: 0.9, size: 6, grow: 12, color: shade(color, -0.6) });
     this.pulse(x, y, radius * 3.2, fam.light, 1, 0.45);
     this.exposure = Math.min(0.6, this.exposure + 0.12);
-    this.shake(crit ? 0.3 : 0.16);
+    this.shake(0.16);
   }
 
   private onCast(
@@ -543,7 +538,6 @@ export class Vfx {
         this.shake(0.25);
         break;
       case 'bard':
-        this.ring(x, y + 8, 8, radius, 0.9, color, 1.6, 0.5);
         this.burst('mote', x, y - 6, 12, 50, { life: 1, size: 1.6, color, vy: -30 });
         this.pulse(x, y, 90, 'holy', 0.45, 0.8);
         break;
@@ -697,11 +691,6 @@ export class Vfx {
     for (const l of this.pulses) l.t += dt;
     this.pulses = this.pulses.filter((l) => l.t < l.max);
     for (const c of this.corpses) c.t += dt;
-    for (const f of this.texts) {
-      f.t += dt;
-      f.y -= 22 * dt;
-    }
-    this.texts = this.texts.filter((f) => f.t < f.max);
     this.corpses = this.corpses.filter((c) => c.t < c.max);
     for (const [uid, r] of this.recoil) {
       r.t += dt;

@@ -14,8 +14,10 @@
 
 import type { EnemyDef } from './enemies';
 import {
+  effectiveBard,
   effectiveGenerate,
   effectiveStats,
+  type BardDef,
   type UnitDef,
   type UpgradeEffect,
 } from './units';
@@ -148,6 +150,13 @@ export interface MasteryUpgradeDef {
    * Highest wins if several nodes set it. Omit for a node that adds no final leap.
    */
   finalBounceDamageMult?: number;
+  /**
+   * Additive bonus to a Bard's attack-speed buff multiplier (e.g. 0.05 turns a
+   * 1.2× tune into 1.25×). Read through `masteryBard`.
+   */
+  bardSpeedBonus?: number;
+  /** Extra seconds a Bard's tune lasts on each ally. Read through `masteryBard`. */
+  bardDurationBonus?: number;
 }
 
 /**
@@ -375,6 +384,32 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
       major: true,
       exclusiveGroup: 'farming',
       startingGoldBonus: 50,
+    },
+  ],
+  bard: [
+    {
+      id: 'lively_tempo',
+      name: 'Lively Tempo',
+      description: 'A brisker beat stirs the blood - his tune grants +5% more attack speed.',
+      cost: 100,
+      bardSpeedBonus: 0.05,
+    },
+    {
+      id: 'carrying_voice',
+      name: 'Carrying Voice',
+      description: 'He sings out from the chest, reaching allies further afield - +10% range.',
+      cost: 100,
+      requires: 'lively_tempo',
+      rangeMult: 1.1,
+    },
+    {
+      id: 'lingering_melody',
+      name: 'Lingering Melody',
+      description: 'The refrain echoes long after the last chord - his tune lasts 2 seconds longer.',
+      cost: 250,
+      requires: 'carrying_voice',
+      major: true,
+      bardDurationBonus: 2,
     },
   ],
   // The player's Blade adventurer. Keyed by the stable path id (not the player's
@@ -778,6 +813,28 @@ export function masteryUpgradeDeltas(
     // Bounces aren't mastery-scaled, so pass this tier's own delta straight through.
     bounces: unit.upgrades[tier - 1]?.bounces,
   };
+}
+
+/**
+ * A Bard's performance at in-stage upgrade `tier` with permanent mastery bonuses
+ * (tempo, duration) folded in — the single source the engine and every Bard
+ * stat display read. Null for a non-Bard unit.
+ */
+export function masteryBard(
+  unit: UnitDef,
+  tier: number,
+  purchased: readonly string[],
+): BardDef | null {
+  const b = effectiveBard(unit, tier);
+  if (!b) return null;
+  for (const u of masteryTree(unit.id)) {
+    if (!purchased.includes(u.id)) continue;
+    b.attackSpeedMult += u.bardSpeedBonus ?? 0;
+    b.duration += u.bardDurationBonus ?? 0;
+  }
+  // Round away float drift (1.2 + 0.15 + 0.05) so buff comparisons stay exact.
+  b.attackSpeedMult = Math.round(b.attackSpeedMult * 1000) / 1000;
+  return b;
 }
 
 /**

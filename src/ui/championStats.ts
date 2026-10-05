@@ -13,6 +13,7 @@ import {
   masteryGenerateMult,
   masteryHarvest,
   masteryRangeMult,
+  masteryBard,
 } from '../domain/mastery';
 import { critChanceFor, critMultiplierFor } from '../domain/combat';
 import { BOUNCE_DAMAGE_MULTS } from '../engine/GameEngine';
@@ -69,11 +70,12 @@ export function championStatTiles(unit: UnitDef, purchased: string[]): StatTile[
       cost,
     ];
   }
-  if (unit.bard) {
+  const bard = masteryBard(unit, 0, purchased);
+  if (bard) {
     return [
-      { label: 'Tempo buff', value: `+${Math.round((unit.bard.attackSpeedMult - 1) * 100)}%`, sub: 'attack speed' },
-      { label: 'Allies', value: `${unit.bard.targets}`, sub: 'in range' },
-      { label: 'Duration', value: `${unit.bard.duration}s`, sub: `plays every ${unit.bard.every}s` },
+      { label: 'Tempo buff', value: `+${Math.round((bard.attackSpeedMult - 1) * 100)}%`, sub: 'attack speed' },
+      { label: 'Allies', value: `${bard.targets}`, sub: 'in range' },
+      { label: 'Duration', value: `${bard.duration}s`, sub: `plays every ${bard.every}s` },
       { label: 'Range', value: `${range}`, sub: rangeLabel(range) },
       cost,
     ];

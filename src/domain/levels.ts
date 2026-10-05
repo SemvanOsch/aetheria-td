@@ -12,7 +12,8 @@
 import { type Cell, type Vec2, cellCenter, expandPathCells, cellKey } from './grid';
 import { bossIdForLevel } from './enemies';
 import type { BoardTheme, DecorProp } from './decor';
-import type { Atmosphere } from './atmosphere';
+import type { Atmosphere, MoodId } from './atmosphere';
+import type { EndlessRules } from './endless';
 
 export type SectionId = 'castle' | 'capital' | 'forest' | 'inn';
 
@@ -48,6 +49,8 @@ export interface EnemyGroup {
   spacing?: number;
   /** Seconds to wait before this group starts (after the previous one). */
   delay?: number;
+  /** Multiplier on the foe's health (endless-mode scaling). Omit for 1. */
+  healthMult?: number;
 }
 
 export interface WaveDef {
@@ -97,11 +100,19 @@ export interface LevelDef {
   theme?: BoardTheme;
   /** Optional cosmetic props drawn beneath gameplay tokens. */
   decor?: DecorProp[];
+  /** Named mood preset from `domain/atmosphere.ts` (else the chapter default). */
+  mood?: MoodId;
   /**
-   * Optional mood override, winning over the id-keyed tables in
-   * `domain/atmosphere.ts` — the Level Designer previews a mood this way.
+   * Optional literal mood, winning over `mood` — the Level Designer previews
+   * a mood this way.
    */
   atmosphere?: Atmosphere;
+  /**
+   * Present on an endless stage (`domain/endless.ts`): its waves aren't
+   * authored but rolled by the engine from these rules as each one starts, and
+   * it never ends in victory.
+   */
+  endless?: EndlessRules;
 }
 
 const DEFAULT_SPACING = 0.85;
@@ -141,6 +152,12 @@ interface LevelSpec {
   theme?: BoardTheme;
   /** Optional cosmetic props drawn beneath gameplay tokens. */
   decor?: DecorProp[];
+  /**
+   * Lighting mood: a preset name from `MOODS` in `domain/atmosphere.ts`
+   * (darkness, light colour, weather, fog, grade, vignette, sun). Omit to use
+   * the chapter's default mood.
+   */
+  mood?: MoodId;
 }
 
 /**
@@ -159,6 +176,7 @@ const CASTLE_SPECS: LevelSpec[] = [
     name: 'Castle Door',
     subtitle: "Your way into the castle - Guarded by Company 7",
     baseHealth: 10, gem: 150,
+    mood: 'brightMidday',
     theme: {
       groundEven: '#568042',
       groundOdd: '#506c42',
@@ -193,6 +211,7 @@ const CASTLE_SPECS: LevelSpec[] = [
     name: 'Dining Room',
     subtitle: 'Guards scramble from the feast to stop you.',
     baseHealth: 10, gem: 150,
+    mood: 'feastHall',
     theme: {
       groundEven: '#4a3a2a',
       groundOdd: '#55432f',
@@ -225,6 +244,7 @@ const CASTLE_SPECS: LevelSpec[] = [
     name: 'The Grand Hall',
     subtitle: 'Loyalists flood the hall to turn you back.',
     baseHealth: 10, gem: 150,
+    mood: 'moonlitHall',
     theme: {
       groundEven: '#3a4160',
       groundOdd: '#454d6e',
@@ -260,6 +280,7 @@ const CASTLE_SPECS: LevelSpec[] = [
     name: "The King's Chamber",
     subtitle: 'Corner the corrupt king where he hides.',
     baseHealth: 10, gem: 150,
+    mood: 'violetChamber',
     theme: {
       groundEven: '#2e2540',
       groundOdd: '#382d4c',
@@ -295,6 +316,7 @@ const CASTLE_SPECS: LevelSpec[] = [
     name: 'Throne Room',
     subtitle: 'His throne, ringed by loyal guards.',
     baseHealth: 10, gem: 150,
+    mood: 'crimsonThrone',
     theme: {
       groundEven: '#2c2430',
       groundOdd: '#352a38',
@@ -349,6 +371,7 @@ const CAPITAL_SPECS: LevelSpec[] = [
     name: 'Castle Door',
     subtitle: "Your way into the castle - Guarded by Company 7",
     baseHealth: 10, gem: 150,
+    mood: 'goldenDusk',
     theme: {
       groundEven: '#568042',
       groundOdd: '#506c42',
@@ -416,6 +439,7 @@ function buildLevels(specs: LevelSpec[], section: SectionId, color: string): Lev
     color,
     theme: s.theme,
     decor: s.decor,
+    mood: s.mood,
   }));
 }
 

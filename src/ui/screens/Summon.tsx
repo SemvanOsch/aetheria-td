@@ -159,7 +159,7 @@ export function Summon({ onBack }: { onBack: () => void }) {
       <div className="section-title" style={{ marginTop: 30 }}>
         <Icon name="helm" /> Your Collection{' '}
         <small>
-          {state.ownedUnits.length} / {summonableUnits().length} champions
+          {summonableUnits().filter((u) => state.ownedUnits.includes(u.id)).length} / {summonableUnits().length} champions
         </small>
       </div>
       {state.ownedUnits.length === 0 ? (

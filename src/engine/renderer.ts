@@ -25,7 +25,7 @@
  * old one is collected with its engine.
  */
 
-import { BOARD_HEIGHT, BOARD_WIDTH, TILE } from '../domain/grid';
+import { BOARD_HEIGHT, BOARD_WIDTH, TILE, type Vec2 } from '../domain/grid';
 import { DEFAULT_PATH_LAYERS, type BoardTheme } from '../domain/decor';
 import { atmosphereFor, type Atmosphere } from '../domain/atmosphere';
 import { coneAngleDeg, DEFAULT_BURST_RADIUS, getUnit } from '../domain/units';
@@ -147,7 +147,7 @@ function stateFor(engine: GameEngine): BoardState {
     for (const c of meta.chimneys ?? []) chimneys.push({ x: a.x + c.dx, y: a.y + c.dy });
   }
   st = {
-    atmo: engine.level.atmosphere ?? atmosphereFor(engine.level.id, engine.level.section),
+    atmo: engine.level.atmosphere ?? atmosphereFor(engine.level.mood, engine.level.section),
     terrain: null,
     terrainKey: '',
     lighting: new Lighting(),
@@ -230,7 +230,7 @@ export function drawBoard(
   drawEnemyOverlays(ctx, engine, ui);
   drawThrowCharge(ctx, engine, ui);
   drawSelectedAoe(ctx, engine, ui);
-  drawFloaters(ctx, engine, st.vfx);
+  drawFloaters(ctx, engine);
   drawBossBars(ctx, engine);
 }
 
@@ -643,21 +643,64 @@ function partialPolyline(
 function drawPathPreview(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
   if (engine.phase !== 'prep' || engine.waveIndex !== 0) return;
   const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  // Converging lanes share corridors: each lane only draws the stretches no
+  // earlier lane has, so a shared route shows one trail, not one per lane.
+  const drawn = new Set<string>();
   engine.lanes.forEach((lane, i) => {
-    if (engine.laneVisible(i)) drawLaneFlow(ctx, lane.waypoints, now);
+    if (!engine.laneVisible(i)) return;
+    for (const run of unsharedRuns(lane.waypoints, drawn)) drawLaneFlow(ctx, run.pts, now, run.offset);
   });
 }
 
-/** Animate one lane's arrow trail (see `drawPathPreview`). */
+/**
+ * Split a lane into the runs of tile-steps not yet in `drawn` (then add its
+ * steps to it), each with its distance from the lane's spawn so the trail's
+ * rhythm carries on where a branch splits off.
+ */
+function unsharedRuns(pts: Vec2[], drawn: Set<string>): { pts: Vec2[]; offset: number }[] {
+  const key = (p: Vec2) => `${Math.round(p.x)},${Math.round(p.y)}`;
+  const runs: { pts: Vec2[]; offset: number }[] = [];
+  let cur: { pts: Vec2[]; offset: number } | null = null;
+  let dist = 0;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const steps = Math.max(1, Math.round(len / TILE));
+    for (let s = 0; s < steps; s++) {
+      const p = { x: a.x + ((b.x - a.x) * s) / steps, y: a.y + ((b.y - a.y) * s) / steps };
+      const q = { x: a.x + ((b.x - a.x) * (s + 1)) / steps, y: a.y + ((b.y - a.y) * (s + 1)) / steps };
+      const kp = key(p);
+      const kq = key(q);
+      const step = kp < kq ? `${kp}|${kq}` : `${kq}|${kp}`;
+      if (drawn.has(step)) {
+        cur = null;
+      } else {
+        drawn.add(step);
+        if (!cur) runs.push((cur = { pts: [p], offset: dist }));
+        cur.pts.push(q);
+      }
+      dist += len / steps;
+    }
+  }
+  return runs;
+}
+
+/**
+ * Animate one stretch of a lane's arrow trail (see `drawPathPreview`).
+ * `offset` is how far along the lane the stretch starts, keeping its dashes and
+ * chevrons in step with the rest of the route.
+ */
 function drawLaneFlow(
   ctx: CanvasRenderingContext2D,
   pts: { x: number; y: number }[],
   now: number,
+  offset = 0,
 ): void {
   if (pts.length < 2) return;
 
   const speed = 46; // px/sec the trail scrolls toward the base
-  const t = (now / 1000) * speed;
+  const t = (now / 1000) * speed - offset;
 
   ctx.save();
   ctx.lineJoin = 'round';
@@ -688,7 +731,7 @@ function drawLaneFlow(
   ctx.shadowColor = 'rgba(255, 190, 90, 0.8)';
   ctx.shadowBlur = 6;
   ctx.lineWidth = 3;
-  for (let d = t % spacing; d < total; d += spacing) {
+  for (let d = ((t % spacing) + spacing) % spacing; d < total; d += spacing) {
     // Locate the segment containing arc-distance `d`.
     let s = segs[0];
     for (const seg of segs) {
@@ -2356,12 +2399,12 @@ function drawBeams(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
 }
 
 /**
- * Floating text: gold, mana, level-ups and callouts from the engine plus the
- * VFX layer's crit damage numbers. Each pops in (a quick overshoot scale), then
+ * Floating text: gold, mana, level-ups and callouts (CRIT!) from the engine.
+ * Each pops in (a quick overshoot scale), then
  * drifts and fades; words set in the title face, numbers in the UI face, all
  * with a dark ink stroke so they read over any floor.
  */
-function drawFloaters(ctx: CanvasRenderingContext2D, engine: GameEngine, vfx: Vfx): void {
+function drawFloaters(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
@@ -2384,7 +2427,6 @@ function drawFloaters(ctx: CanvasRenderingContext2D, engine: GameEngine, vfx: Vf
     ctx.restore();
   };
   for (const f of engine.floaters) one(f.text, f.pos.x, f.pos.y, f.color, f.size ?? 13, f.ttl / f.maxTtl);
-  for (const f of vfx.texts) one(f.text, f.x, f.y, f.color, f.size, 1 - f.t / f.max);
   ctx.restore();
 }
 

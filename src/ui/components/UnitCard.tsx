@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import { aoeLabel, formatAttackSpeed, rangeLabel, type UnitDef } from '../../domain/units';
-import { masteryHarvest } from '../../domain/mastery';
+import { masteryBard, masteryHarvest } from '../../domain/mastery';
 import { RARITIES } from '../../domain/rarity';
 import { UnitSprite } from './UnitSprite';
 import { Icon } from './Icon';
@@ -28,6 +28,7 @@ export function UnitCard({
 }: Props) {
   const rarity = RARITIES[unit.rarity];
   const style = { '--rarity': rarity.color } as CSSProperties;
+  const bard = masteryBard(unit, 0, masteryPurchased);
   const harvest = unit.generator
     ? masteryHarvest(unit.generator.amount, unit.id, masteryPurchased)
     : 0;
@@ -71,13 +72,13 @@ export function UnitCard({
                 Cost <b><Coin />{unit.cost}</b>
               </div>
             </>
-          ) : unit.bard ? (
+          ) : bard ? (
             <>
               <div className="s">
-                Buff <b>+{Math.round((unit.bard.attackSpeedMult - 1) * 100)}% SPD</b>
+                Buff <b>+{Math.round((bard.attackSpeedMult - 1) * 100)}% SPD</b>
               </div>
               <div className="s">
-                Targets <b>{unit.bard.targets}</b>
+                Targets <b>{bard.targets}</b>
               </div>
               <div className="s">
                 Range <b>{rangeLabel(unit.range)}</b>

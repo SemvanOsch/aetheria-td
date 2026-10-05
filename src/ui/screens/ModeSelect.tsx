@@ -1,7 +1,11 @@
+import { useGame } from '../../application/gameContext';
+import { isEndlessUnlocked } from '../../application/gameState';
+import { SECTIONS } from '../../domain/levels';
 import { Icon, type IconName } from '../components/Icon';
 
 interface Props {
   onStory: () => void;
+  onEndless: () => void;
   /** Back to the home desk. */
   onBack: () => void;
 }
@@ -12,15 +16,28 @@ interface ModeCard {
   icon: IconName;
   desc: string;
   available: boolean;
+  /** Why the mode can't be entered yet (shown under a locked card). */
+  lockLabel?: string;
+  onSelect?: () => void;
 }
 
-const MODES: ModeCard[] = [
-  { id: 'story', name: 'Story', icon: 'book', desc: 'Battle through the Castle, Forest and Inn.', available: true },
-  { id: 'endless', name: 'Endless', icon: 'endless', desc: 'Survive as long as you can. Coming soon.', available: false },
-  { id: 'trials', name: 'Trials', icon: 'trophy', desc: 'Curated challenge gauntlets. Coming soon.', available: false },
-];
+export function ModeSelect({ onStory, onEndless, onBack }: Props) {
+  const { state } = useGame();
+  const endlessOpen = SECTIONS.some((s) => isEndlessUnlocked(state, s.id));
+  const modes: ModeCard[] = [
+    { id: 'story', name: 'Story', icon: 'book', desc: 'Battle through the Castle, Forest and Inn.', available: true, onSelect: onStory },
+    {
+      id: 'endless',
+      name: 'Endless',
+      icon: 'endless',
+      desc: 'Survive as long as you can against ever-stronger waves.',
+      available: endlessOpen,
+      lockLabel: 'Clear a chapter to unlock',
+      onSelect: onEndless,
+    },
+    { id: 'trials', name: 'Trials', icon: 'trophy', desc: 'Curated challenge gauntlets. Coming soon.', available: false, lockLabel: 'Coming soon' },
+  ];
 
-export function ModeSelect({ onStory, onBack }: Props) {
   return (
     <main className="screen">
       <div className="section-title" style={{ gap: 12 }}>
@@ -31,12 +48,12 @@ export function ModeSelect({ onStory, onBack }: Props) {
       </div>
 
       <div className="mode-grid">
-        {MODES.map((m) => (
+        {modes.map((m) => (
           <button
             key={m.id}
             className={`panel mode-card ${m.available ? '' : 'locked'}`}
             disabled={!m.available}
-            onClick={m.available ? onStory : undefined}
+            onClick={m.available ? m.onSelect : undefined}
           >
             <div className="mode-icon">
               <Icon name={m.icon} />
@@ -45,7 +62,7 @@ export function ModeSelect({ onStory, onBack }: Props) {
             <div className="mode-desc">{m.desc}</div>
             {!m.available && (
               <div className="mode-soon">
-                <Icon name="lock" /> Coming soon
+                <Icon name="lock" /> {m.lockLabel}
               </div>
             )}
           </button>

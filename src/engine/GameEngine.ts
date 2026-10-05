@@ -11,7 +11,8 @@
  * for an MVP while still giving attack feedback.
  */
 
-import { getEnemy, resistMultiplier } from '../domain/enemies';
+import { getEnemy, resistMultiplier, type EnemyDef } from '../domain/enemies';
+import { ENDLESS_BOSS_GEMS, generateEndlessWave, isEndlessBossWave } from '../domain/endless';
 import { isPlayerChampionId } from '../domain/playerChampion';
 import { CASTLE_DECOR_CELLS, decorCellKeys } from '../domain/decor';
 import {
@@ -27,6 +28,7 @@ import {
   laneWaypoints,
   lanePathCells,
   levelTotalWaves,
+  type EnemyGroup,
   type LevelDef,
 } from '../domain/levels';
 import { selectTarget, type TargetingType } from '../domain/targeting';
@@ -35,7 +37,6 @@ import {
   DEFAULT_BURST_RADIUS,
   effectiveAbility,
   effectiveAoe,
-  effectiveBard,
   effectiveBounces,
   effectiveGenerate,
   getUnit,
@@ -46,6 +47,7 @@ import {
   expForKill,
   GOLD_PER_EXP,
   masteryAdjacentDamageMult,
+  masteryBard,
   masteryBounceDamageMult,
   masteryFinalBounceDamageMult,
   masteryHarvest,
@@ -96,6 +98,8 @@ interface ScheduledSpawn {
   enemyId: string;
   time: number;
   laneIndex: number;
+  /** Health multiplier from the wave data (endless scaling). */
+  healthMult?: number;
 }
 
 const SELL_REFUND = 0.7;
@@ -354,8 +358,17 @@ export class GameEngine {
    */
   readonly fx: FxEvent[] = [];
 
+  /**
+   * Endless runs only: gems earned so far this run (`ENDLESS_BOSS_GEMS` per
+   * cleared boss wave). The UI banks the increase as it happens, so the gems
+   * are kept however the run ends.
+   */
+  gemsEarned = 0;
+
   private uidCounter = 1;
   private spawnQueue: ScheduledSpawn[] = [];
+  /** Health-scaled enemy defs handed out by `spawnDef`, keyed `id@mult`. */
+  private readonly scaledDefs = new Map<string, EnemyDef>();
   private spawnCursor = 0;
   private waveClock = 0;
 
@@ -440,8 +453,9 @@ export class GameEngine {
     return { waypoints, segments, totalPathLength: acc };
   }
 
+  /** Number of waves in the stage — `Infinity` for an endless run. */
   get totalWaves(): number {
-    return levelTotalWaves(this.level);
+    return this.level.endless ? Infinity : levelTotalWaves(this.level);
   }
 
   /** Enemies still to spawn or alive in the current wave. */
@@ -529,7 +543,7 @@ export class GameEngine {
     const stats = this.towerStats(def, 0);
     const thrown = masteryThrow(def.id, purchased);
     const preloadMax = masteryPreload(def.id, purchased);
-    const bard = effectiveBard(def, 0);
+    const bard = masteryBard(def, 0, purchased);
     // An activated ability is normally unlocked by a later tier, so tier 0 has
     // none; refolded on each tier bump (a hero auto-levelling into it gains it).
     const ability = effectiveAbility(def, 0);
@@ -710,6 +724,12 @@ export class GameEngine {
   deployStats(unitId: string): MasteryStats | null {
     const def = getUnit(unitId);
     return def ? this.towerStats(def, 0) : null;
+  }
+
+  /** A Bard's mastery-adjusted performance at deploy (null for non-Bards). */
+  deployBard(unitId: string) {
+    const def = getUnit(unitId);
+    return def ? masteryBard(def, 0, this.masteryUpgrades[def.id] ?? []) : null;
   }
 
   /** Change a deployed tower's targeting mode. */
@@ -966,7 +986,7 @@ export class GameEngine {
     tower.genAmount = this.genAmountFor(tower.def, tower.upgradeTier);
     // A Bard's performance widens/strengthens with its upgrades (its reach
     // already refolded above via `range`); keep the cadence timer running.
-    const bard = effectiveBard(tower.def, tower.upgradeTier);
+    const bard = masteryBard(tower.def, tower.upgradeTier, this.masteryUpgrades[tower.def.id] ?? []);
     if (bard) {
       tower.bardTargets = bard.targets;
       tower.bardSpeedMult = bard.attackSpeedMult;
@@ -1131,26 +1151,60 @@ export class GameEngine {
 
   private buildSpawnQueue(waveIdx: number): ScheduledSpawn[] {
     const queue: ScheduledSpawn[] = [];
-    // Every lane spawns its own wave `waveIdx` (if it has one) at the same
-    // moment the wave starts, so lanes run in parallel with independent enemies.
-    this.level.lanes.forEach((lane, laneIndex) => {
-      if (!this.laneRevealed[laneIndex]) return; // hidden lanes don't spawn yet
-      const wave = lane.waves[waveIdx];
-      if (!wave) return;
-      let groupStart = 0;
-      for (const group of wave.groups) {
-        const spacing = groupSpacing(group);
-        const start = groupStart + (group.delay ?? 0);
-        for (let i = 0; i < group.count; i++) {
-          queue.push({ enemyId: group.enemyId, time: start + i * spacing, laneIndex });
-        }
-        // Next group begins relative to when this one started (groups overlap
-        // by their delay offsets, matching the data intent).
-        groupStart = start;
-      }
-    });
+    const endless = this.level.endless;
+    if (endless) {
+      // Endless waves aren't authored: roll this one now, and deal its groups
+      // (boss included) out across the visible lanes in turn, starting from a
+      // random lane — a group is never split, and a lone group lands on a
+      // random lane.
+      const visible = this.level.lanes.map((_, i) => i).filter((i) => this.laneRevealed[i]);
+      const wave = generateEndlessWave(endless, waveIdx + 1, this.rng);
+      const first = Math.floor(this.rng() * visible.length);
+      this.queueGroups(queue, wave.groups, (_, gi) => visible[(first + gi) % visible.length]);
+    } else {
+      // Every lane spawns its own wave `waveIdx` (if it has one) at the same
+      // moment the wave starts, so lanes run in parallel with independent enemies.
+      this.level.lanes.forEach((lane, laneIndex) => {
+        if (!this.laneRevealed[laneIndex]) return; // hidden lanes don't spawn yet
+        const wave = lane.waves[waveIdx];
+        if (wave) this.queueGroups(queue, wave.groups, () => laneIndex);
+      });
+    }
     queue.sort((a, b) => a.time - b.time);
     return queue;
+  }
+
+  /** Schedule a wave's groups (see `WaveDef`), each on the lane `laneFor` picks. */
+  private queueGroups(
+    queue: ScheduledSpawn[],
+    groups: EnemyGroup[],
+    laneFor: (group: EnemyGroup, index: number) => number,
+  ): void {
+    let groupStart = 0;
+    groups.forEach((group, gi) => {
+      const spacing = groupSpacing(group);
+      const start = groupStart + (group.delay ?? 0);
+      const laneIndex = laneFor(group, gi);
+      for (let i = 0; i < group.count; i++) {
+        queue.push({ enemyId: group.enemyId, time: start + i * spacing, laneIndex, healthMult: group.healthMult });
+      }
+      // Next group begins relative to when this one started (groups overlap
+      // by their delay offsets, matching the data intent).
+      groupStart = start;
+    });
+  }
+
+  /** An enemy's def for spawning: the catalog entry, or a cached copy with scaled health. */
+  private spawnDef(enemyId: string, healthMult = 1): EnemyDef {
+    const base = getEnemy(enemyId);
+    if (healthMult === 1) return base;
+    const key = `${enemyId}@${healthMult}`;
+    let def = this.scaledDefs.get(key);
+    if (!def) {
+      def = { ...base, health: Math.round(base.health * healthMult) };
+      this.scaledDefs.set(key, def);
+    }
+    return def;
   }
 
   // -------------------------------------------------------------------- update
@@ -1183,8 +1237,8 @@ export class GameEngine {
       this.spawnCursor < this.spawnQueue.length &&
       this.spawnQueue[this.spawnCursor].time <= this.waveClock
     ) {
-      const { enemyId, laneIndex } = this.spawnQueue[this.spawnCursor++];
-      const def = getEnemy(enemyId);
+      const { enemyId, laneIndex, healthMult } = this.spawnQueue[this.spawnCursor++];
+      const def = this.spawnDef(enemyId, healthMult);
       this.enemies.push({
         uid: this.uidCounter++,
         def,
@@ -1854,7 +1908,7 @@ export class GameEngine {
     if (this.fx.length < 400) this.fx.push(e);
   }
 
-  /** Spawn a bold "CRIT!" popup plus a spark burst at a hit position. */
+  /** Spawn a compact "CRIT!" popup plus a spark burst at a hit position. */
   private critFloater(pos: Vec2): void {
     // Upgrade the matching hit event (same frame, same spot) to a crit so the
     // VFX layer can give it the bigger flash; fall back to the latest hit.
@@ -1875,7 +1929,7 @@ export class GameEngine {
       color: '#ff5a6a',
       ttl: 0.85,
       maxTtl: 0.85,
-      size: 19,
+      size: 14,
     });
     // A quick bright ring at the impact for extra punch.
     this.bursts.push({
@@ -2279,6 +2333,19 @@ export class GameEngine {
       this.currency += WAVE_CLEAR_GOLD[this.waveIndex - 1] ?? WAVE_CLEAR_GOLD_DEFAULT;
       // Hero champions earn in-stage EXP each cleared wave and auto-level.
       this.awardHeroExp();
+      // An endless run pays gems for every boss wave it outlasts.
+      if (this.level.endless && isEndlessBossWave(this.waveIndex)) {
+        this.gemsEarned += ENDLESS_BOSS_GEMS;
+        const at = this.baseExits[0];
+        this.floaters.push({
+          pos: { x: at.x, y: at.y - 20 },
+          text: `+${ENDLESS_BOSS_GEMS} gems`,
+          color: '#6fd6ff',
+          ttl: 1.6,
+          maxTtl: 1.6,
+          size: 14,
+        });
+      }
       if (this.waveIndex >= this.totalWaves) {
         // Every wave has been fully cleared (all enemies, boss included) — the
         // realm is won.
@@ -2293,6 +2360,11 @@ export class GameEngine {
     if (this.outcome !== 'playing') return;
     this.outcome = 'won';
     this.phase = 'ended';
+  }
+
+  /** Concede the battle — how the player ends an endless run on their own terms. */
+  surrender(): void {
+    this.lose();
   }
 
   private lose(): void {

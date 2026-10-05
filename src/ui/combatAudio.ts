@@ -94,7 +94,46 @@ function toneGlide(
   osc.stop(t + dur);
 }
 
+/**
+ * A plucked-string note (lute / harp): two slightly detuned bright oscillators
+ * through a lowpass whose cutoff snaps shut, so the attack twangs and the tail
+ * mellows — the way a real string loses its overtones first.
+ */
+function pluck(ac: AudioContext, freq: number, dur: number, gain: number, delay = 0): void {
+  const t = ac.currentTime + AUDIO_LEAD + delay;
+  const lp = ac.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.Q.value = 2;
+  lp.frequency.setValueAtTime(Math.min(9000, freq * 7), t);
+  lp.frequency.exponentialRampToValueAtTime(Math.max(200, freq * 1.3), t + dur * 0.5);
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(gain, t + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  lp.connect(g).connect(dest ?? ac.destination);
+  for (const [type, detune] of [['sawtooth', -6], ['triangle', 5]] as const) {
+    const osc = ac.createOscillator();
+    osc.type = type;
+    osc.frequency.value = freq;
+    osc.detune.value = detune;
+    osc.connect(lp);
+    osc.start(t);
+    osc.stop(t + dur);
+  }
+}
+
 const jit = (base: number, spread: number) => base + (Math.random() * 2 - 1) * spread;
+
+// Bard tune phrases: semitone offsets from the root, each [step, beat]. A few
+// jaunty minstrel motifs so a long stage doesn't hear the same lick every time.
+const BARD_PHRASES: [number, number][][] = [
+  [[0, 0], [4, 1], [7, 2]], // rising call
+  [[7, 0], [9, 1], [7, 2]], // lilting turn
+  [[12, 0], [9, 1], [7, 2]], // gentle fall
+  [[4, 0], [7, 1], [9, 2]], // hopeful lift
+];
+// Major keys the minstrel might strike up in (root Hz).
+const BARD_ROOTS = [392, 440, 523.25]; // G4, A4, C5
 
 // --- per-cue voices -------------------------------------------------------
 // All kept soft; gains are the loudest each cue reaches.
@@ -196,13 +235,14 @@ const VOICES: Record<SfxName, (ac: AudioContext) => void> = {
   // reads as a continuous hum rather than silence. Kept very quiet.
   manaRayTick: (ac) => toneGlide(ac, jit(900, 80), 640, 0.09, 0.016, 'sine'),
 
-  // Bard — a gentle plucked arpeggio (three rising notes) as the minstrel
-  // strikes up his tune. Soft triangle tones staggered a beat apart.
+  // Bard — a short, unhurried lute phrase as the minstrel strikes up: three
+  // spaced, soft notes from a random motif in a random major key.
   bardPlay: (ac) => {
-    const notes = [523.25, 659.25, 783.99]; // C5–E5–G5 major chord, rolled
-    notes.forEach((f, i) =>
-      toneGlide(ac, jit(f, 6), jit(f, 6), 0.22, 0.028, 'triangle', i * 0.09),
-    );
+    const root = BARD_ROOTS[Math.floor(Math.random() * BARD_ROOTS.length)];
+    const phrase = BARD_PHRASES[Math.floor(Math.random() * BARD_PHRASES.length)];
+    const hz = (semi: number) => root * 2 ** (semi / 12);
+    const beat = 0.2;
+    for (const [semi, at] of phrase) pluck(ac, hz(semi), 0.5, 0.017, at * beat);
   },
 };
 

@@ -126,7 +126,7 @@ export interface EnemyVisual {
 const REGULAR: Record<string, EnemyDef> = {
   // Castle — disciplined rebels and siege beasts.
   cas_grunt: { id: 'cas_grunt', name: 'Footman', health: 60, speed: 46, reward: 2, mana: 1, damageToBase: 1, visual: { color: '#b3bccb', icon: '🛡️' }, boss: false, radius: 13 },
-  cas_grunt2: { id: 'cas_grunt2', name: 'Sergeant', health: 140, speed: 42, reward: 5, mana: 2, damageToBase: 2, visual: { color: '#9aa6be', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2 },
+  cas_grunt2: { id: 'cas_grunt2', name: 'Sergeant', health: 140, speed: 42, reward: 5, mana: 2, damageToBase: 1, visual: { color: '#9aa6be', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2 },
   cas_grunt3: { id: 'cas_grunt3', name: 'Man-at-Arms', health: 185, speed: 46, reward: 6, mana: 2, damageToBase: 2, visual: { color: '#7d8697', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2 },
   cas_runner: { id: 'cas_runner', name: 'Outrider', health: 65, speed: 94, reward: 3, mana: 2, damageToBase: 1, visual: { color: '#d7a94a', icon: '🐎' }, boss: false, radius: 14 },
   cas_mage: { id: 'cas_mage', name: 'Royal Wizard', health: 110, speed: 50, reward: 4, mana: 2, damageToBase: 1, visual: { color: '#530a69', icon: '🧙' }, boss: false, radius: 12, magicResist: 0.2 },
