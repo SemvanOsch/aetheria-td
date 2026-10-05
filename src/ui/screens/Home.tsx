@@ -5,6 +5,7 @@ import { canAffordSummon } from '../../application/summon';
 import { unlockedChapterCount } from '../../domain/journal';
 import { LEVELS, getSection } from '../../domain/levels';
 import { Icon } from '../components/Icon';
+import { playDeskSound } from '../deskAudio';
 import {
   CandleArt,
   CandleClusterArt,
@@ -93,6 +94,7 @@ export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, ret
     const release = window.setTimeout(() => {
       setInstant(false);
       setLeaving(null);
+      playDeskSound(returnFrom === 'summon' ? 'orbClose' : 'mapClose');
     }, 50);
     const done = window.setTimeout(() => setSettling(null), 1600);
     return () => {
@@ -155,6 +157,9 @@ export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, ret
       go(target);
       return;
     }
+    // The map and orb have their own cues (the journal plays its own on opening).
+    if (target === 'play') playDeskSound('map');
+    else if (target === 'summon') playDeskSound('orb');
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
       go(target);
       return;

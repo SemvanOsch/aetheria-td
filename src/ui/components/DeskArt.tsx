@@ -236,7 +236,7 @@ export function InkwellArt() {
           <stop offset="1" stopColor="#4a300c" />
         </linearGradient>
       </defs>
-      <ellipse cx="46" cy="72" rx="34" ry="6" fill="#000" opacity="0.5" />
+      <ellipse cx="47" cy="67.5" rx="35" ry="5.5" fill="#000" opacity="0.5" />
       <path d="M14 66 C10 46 22 30 45 30 C68 30 80 46 76 66 Z" fill="url(#iw-glass)" stroke="#05070c" strokeWidth="1.2" />
       <ellipse cx="45" cy="66" rx="31" ry="5" fill="#0c1220" />
       <rect x="35" y="20" width="20" height="12" rx="2" fill="url(#iw-brass)" stroke="#2e1c05" strokeWidth="0.8" />
@@ -329,8 +329,8 @@ export function CrystalBallArt() {
       </defs>
 
       {/* Violet light spilling onto the desk, and the stand's shadow. */}
-      <ellipse className="cb-pool" cx="130" cy="294" rx="130" ry="24" fill="#8a5cff" opacity="0.26" filter="url(#cb-haze)" />
-      <ellipse cx="134" cy="297" rx="100" ry="11" fill="#000" opacity="0.55" filter="url(#cb-soft)" />
+      <ellipse className="cb-pool" cx="130" cy="289" rx="130" ry="22" fill="#8a5cff" opacity="0.26" filter="url(#cb-haze)" />
+      <ellipse cx="133" cy="289" rx="104" ry="8" fill="#000" opacity="0.6" filter="url(#cb-soft)" />
 
       {/* Stand: a stepped plinth, a waisted column, and a petal cup. */}
       <path d="M34 290 L226 290 L208 266 L52 266 Z" fill="url(#cb-brass)" stroke="#2e1c05" strokeWidth="1.5" />

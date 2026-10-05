@@ -158,6 +158,7 @@ source → category gain (ui | combat | music) → master → speakers
 The Settings sliders map onto those gains.
 
 - **Interface** (`introAudio.ts`, `summonAudio.ts`): soft paper, quill and chime cues.
+- **Home desk** (`deskAudio.ts`): choosing the map plays `map` (a soft parchment slide, ~1.3s, as the lean over it begins); choosing the orb plays `orb` (a rising airy whirl with two slowly beating glass voices and a climbing shimmer, ending on a high ring as the altar opens). Coming back, `mapClose` draws the slide back down and `orbClose` winds the whirl down with the orb's spin-down. The journal uses the intro's `open` cue.
   - To add one, add a name to the `IntroSound` union.
   - Add a `case` in `playIntroSound`, built from the primitives there (`tone`, `noiseSwish`, `inkScratch`, …).
   - Call `playIntroSound('name')` at the moment it should fire.
