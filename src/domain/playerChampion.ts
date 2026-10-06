@@ -17,6 +17,7 @@
 import type { UnitDef, UnitVisual } from './units';
 import type { PlayerSpriteConfig } from './playerSprite';
 import type { Proficiency } from './proficiency';
+import { applyArmor, type ArmorPiece } from './armor';
 
 /**
  * One champion id per proficiency path. Stable and path-encoding: mastery,
@@ -131,14 +132,14 @@ function buildBladeChampion(
     maxMana: HERO_BASE_MANA,
     upgrades: [
       {
-        name: 'Honed Twin Blades',
+        name: 'Sharper Blades',
         description: 'Both short swords take a keener edge.',
         cost: 40,
         damage: 9,
       },
       {
-        name: 'Dual Flourish',
-        description: 'A faster two-blade rhythm — quicker, harder strikes.',
+        name: 'Flourishing Blades',
+        description: 'A faster two-blade rhythm - quicker, harder strikes.',
         cost: 55,
         damage: 6,
         attackSpeed: 0.2,
@@ -297,7 +298,7 @@ function buildMagicChampion(
         name: 'Dense Core',
         description: 'A tighter-wound orb detonates harder.',
         cost: 40,
-        damage: 9,
+        damage: 8,
       },
       {
         name: 'Swift Casting',
@@ -318,11 +319,11 @@ function buildMagicChampion(
           name: 'Mana Ray',
           description:
             'Channels a fixed beam for 3s, striking every enemy in its line for ' +
-            '1.25× damage every 0.5s.',
+            '1.25× damage every 0.4s.',
           damageMult: 1.25,
           duration: 3,
           aoeWidth: 18,
-          tickInterval: 0.5,
+          tickInterval: 0.4,
           cooldown: 14,
           manaCost: 40,
           icon: '🔆',
@@ -354,7 +355,8 @@ export interface PlayerChampionSource {
 }
 
 /**
- * Rebuild the registry to match the current profile + owned set. Registers a def
+ * Rebuild the registry to match the current profile + owned set + worn armor
+ * (the armor's stat bonuses apply to every player champion). Registers a def
  * for every *owned* player-champion id (so an owned Blade champion still resolves
  * after the player switches proficiency), plus the current proficiency's champion
  * (so a freshly-chosen path resolves even in the same tick it is granted). Clears
@@ -363,6 +365,7 @@ export interface PlayerChampionSource {
 export function syncPlayerChampions(
   source: PlayerChampionSource | null,
   ownedUnits: readonly string[],
+  armor: readonly ArmorPiece[] = [],
 ): void {
   registry.clear();
   if (!source) return;
@@ -371,6 +374,6 @@ export function syncPlayerChampions(
   if (currentId) ids.add(currentId);
   for (const id of ids) {
     const def = buildPlayerChampionDef(id, source.name, source.sprite);
-    if (def) registry.set(id, def);
+    if (def) registry.set(id, applyArmor(def, armor));
   }
 }

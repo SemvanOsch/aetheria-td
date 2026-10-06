@@ -188,8 +188,6 @@ const CASTLE_SPECS: LevelSpec[] = [
       { kind: 'castle', col: 12, row: 0 },
       { kind: 'house', col: 7, row: 2 },
       { kind: 'house', col: 0, row: 7 },
-      { kind: 'banner', col: 14, row: 1, color: '#8e1f2d' },
-      { kind: 'banner', col: 12, row: 1, color: '#8e1f2d' },
       { kind: 'tree', col: 14, row: 7 },
       { kind: 'tree', col: 1, row: 1 },
     ],

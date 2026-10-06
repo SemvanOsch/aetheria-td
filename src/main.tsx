@@ -3,17 +3,23 @@ import { createRoot } from 'react-dom/client';
 import { GameProvider } from './application/store';
 import { App } from './ui/App';
 import { EnemyStats } from './ui/screens/EnemyStats';
+import { ChampionStats } from './ui/screens/ChampionStats';
 import './ui/styles.css';
 
-// Developer-only enemy stat sheet, kept out of the game UI. Reach it with the
-// `#enemies` hash, `npm run enemies`, or `enemyStats()` in the browser console.
+// Developer-only enemy & champion stat sheets, kept out of the game UI. Reach
+// them with the `#enemies`/`#champions` hash, `npm run enemies`/`champions`, or
+// `enemyStats()`/`championStats()` in the browser console.
 declare global {
   interface Window {
     enemyStats: () => void;
+    championStats: () => void;
   }
 }
 window.enemyStats = () => {
   location.hash = 'enemies';
+};
+window.championStats = () => {
+  location.hash = 'champions';
 };
 
 function Root() {
@@ -24,6 +30,7 @@ function Root() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
   if (hash === '#enemies') return <EnemyStats />;
+  if (hash === '#champions') return <ChampionStats />;
   return (
     <GameProvider>
       <App />

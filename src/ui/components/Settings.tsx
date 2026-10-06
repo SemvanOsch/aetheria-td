@@ -43,16 +43,63 @@ function VolumeSlider({
   );
 }
 
+/** The Sound block (mute + every volume slider); shared by Settings and the in-stage pause menu. */
+export function SoundSettings() {
+  const { state, setAudioSettings } = useGame();
+  const audio = state.audio;
+
+  const set = (patch: Partial<AudioSettings>) => setAudioSettings(patch);
+
+  return (
+    <div className="settings-section audio">
+      <div className="settings-row-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span><Icon name="sound" /> Sound</span>
+        <button
+          className={`btn sort-toggle ${audio.muted ? 'off' : ''}`}
+          onClick={() => set({ muted: !audio.muted })}
+        >
+          {audio.muted ? <><Icon name="mute" /> Muted</> : <><Icon name="sound" /> Mute</>}
+        </button>
+      </div>
+
+      <VolumeSlider
+        label="Master"
+        hint="Scales all game sound."
+        value={audio.master}
+        disabled={audio.muted}
+        onChange={(master) => set({ master })}
+      />
+      <VolumeSlider
+        label="Interface"
+        hint="Menus, the summoning altar and the journal intro."
+        value={audio.ui}
+        disabled={audio.muted}
+        onChange={(ui) => set({ ui })}
+      />
+      <VolumeSlider
+        label="Combat"
+        hint="In-battle champion attacks and impacts."
+        value={audio.combat}
+        disabled={audio.muted}
+        onChange={(combat) => set({ combat })}
+      />
+      <VolumeSlider
+        label="Music"
+        hint="The menu theme and each chapter's battle theme."
+        value={audio.music}
+        disabled={audio.muted}
+        onChange={(music) => set({ music })}
+      />
+    </div>
+  );
+}
+
 /**
  * Player-facing Settings modal: volume controls. The old debug/authoring
  * controls now live behind the Developer menu, opened from the bottom here.
  */
 export function Settings({ onClose }: Props) {
-  const { state, setAudioSettings } = useGame();
   const [showDeveloper, setShowDeveloper] = useState(false);
-  const audio = state.audio;
-
-  const set = (patch: Partial<AudioSettings>) => setAudioSettings(patch);
 
   // The Developer menu is its own full-screen overlay rendered as a sibling (not
   // nested) so its backdrop clicks don't bubble up and close Settings too.
@@ -68,46 +115,7 @@ export function Settings({ onClose }: Props) {
         <button className="modal-close" onClick={onClose} aria-label="Close"><Icon name="close" /></button>
         <h2><Icon name="gear" /> Settings</h2>
 
-        <div className="settings-section audio">
-          <div className="settings-row-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span><Icon name="sound" /> Sound</span>
-            <button
-              className={`btn sort-toggle ${audio.muted ? 'off' : ''}`}
-              onClick={() => set({ muted: !audio.muted })}
-            >
-              {audio.muted ? <><Icon name="mute" /> Muted</> : <><Icon name="sound" /> Mute</>}
-            </button>
-          </div>
-
-          <VolumeSlider
-            label="Master"
-            hint="Scales all game sound."
-            value={audio.master}
-            disabled={audio.muted}
-            onChange={(master) => set({ master })}
-          />
-          <VolumeSlider
-            label="Interface"
-            hint="Menus, the summoning altar and the journal intro."
-            value={audio.ui}
-            disabled={audio.muted}
-            onChange={(ui) => set({ ui })}
-          />
-          <VolumeSlider
-            label="Combat"
-            hint="In-battle champion attacks and impacts."
-            value={audio.combat}
-            disabled={audio.muted}
-            onChange={(combat) => set({ combat })}
-          />
-          <VolumeSlider
-            label="Music"
-            hint="The menu theme and each chapter's battle theme."
-            value={audio.music}
-            disabled={audio.muted}
-            onChange={(music) => set({ music })}
-          />
-        </div>
+        <SoundSettings />
 
         <div className="settings-section">
           <div className="settings-row-title">Developer Menu</div>

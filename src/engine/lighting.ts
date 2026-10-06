@@ -20,7 +20,7 @@
 
 import { BOARD_HEIGHT, BOARD_WIDTH } from '../domain/grid';
 import type { Atmosphere } from '../domain/atmosphere';
-import { LIGHT, type LightFamily, toRgb, withAlpha } from './palette';
+import { LIGHT, type LightFamily, shade, toRgb, withAlpha } from './palette';
 
 export interface Light {
   x: number;
@@ -33,6 +33,11 @@ export interface Light {
   intensity: number;
   /** Glow strength multiplier (0 = clears darkness only, no colour bloom). */
   glow?: number;
+  /**
+   * Colour that replaces the family's glow (the core is a pale version of it),
+   * for light that follows a champion's own colour.
+   */
+  tint?: string;
 }
 
 const HALF = 0.5;
@@ -108,7 +113,7 @@ export class Lighting {
       const strength = Math.max(0, Math.min(1, L.intensity)) * (L.glow ?? 1);
       if (strength <= 0.01) continue;
       anyGlow = true;
-      const fam = LIGHT[L.family];
+      const fam = L.tint ? { core: shade(L.tint, 0.75), glow: L.tint } : LIGHT[L.family];
       const r = L.radius * 0.75;
       const grad = gl.createRadialGradient(L.x, L.y, 0, L.x, L.y, r);
       grad.addColorStop(0, withAlpha(fam.core, 0.42 * strength));

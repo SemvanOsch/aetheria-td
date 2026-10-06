@@ -6,14 +6,12 @@ import {
   type UnitDef,
 } from '../domain/units';
 import {
-  masteryAttackSpeedMult,
   masteryBounceDamageMult,
   masteryFinalBounceDamageMult,
-  masteryDamageMult,
   masteryGenerateMult,
   masteryHarvest,
-  masteryRangeMult,
   masteryBard,
+  masteryStats,
 } from '../domain/mastery';
 import { critChanceFor, critMultiplierFor } from '../domain/combat';
 import { BOUNCE_DAMAGE_MULTS } from '../engine/GameEngine';
@@ -39,10 +37,8 @@ export function championRole(unit: UnitDef): string {
  * show, so the two never disagree.
  */
 export function championStatTiles(unit: UnitDef, purchased: string[]): StatTile[] {
-  // Combat stats with permanent mastery multipliers (damage / speed / range).
-  const damage = Math.round(unit.damage * masteryDamageMult(unit.id, purchased));
-  const attackSpeed = unit.attackSpeed * masteryAttackSpeedMult(unit.id, purchased);
-  const range = Math.round(unit.range * masteryRangeMult(unit.id, purchased));
+  // Combat stats with permanent mastery multipliers and worn armor applied.
+  const { damage, attackSpeed, range } = masteryStats(unit, 0, purchased);
   // Per-arrow DPS; a burst shooter (the Bow adventurer) shows the volley size as
   // an "×N" beside it rather than folding it into the number.
   const burst = unit.burst ?? 1;
@@ -96,7 +92,8 @@ export function championStatTiles(unit: UnitDef, purchased: string[]): StatTile[
               ? `${burst}-arrow burst`
               : 'per target',
     },
-    { label: 'Crit', value: pct(critChanceFor(unit, purchased)), sub: `×${critMultiplierFor(unit, purchased)} damage` },
+    { label: 'Crit rate', value: pct(critChanceFor(unit, purchased)), sub: 'chance per hit' },
+    { label: 'Crit damage', value: `+${Math.round((critMultiplierFor(unit, purchased) - 1) * 100)}%`, sub: 'bonus damage' },
     ...(bounces > 0
       ? [
         {
@@ -106,7 +103,15 @@ export function championStatTiles(unit: UnitDef, purchased: string[]): StatTile[
         },
       ]
       : []),
-    ...(unit.maxMana ? [{ label: 'Mana', value: `${unit.maxMana}`, sub: 'refilled by kills' }] : []),
+    ...(unit.maxMana
+      ? [
+        {
+          label: 'Mana',
+          value: `${unit.maxMana}`,
+          sub: unit.manaRegen ? `+${+unit.manaRegen.toFixed(2)}/s · refilled by kills` : 'refilled by kills',
+        },
+      ]
+      : []),
     cost,
   ];
 }

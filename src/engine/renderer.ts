@@ -30,13 +30,24 @@ import { DEFAULT_PATH_LAYERS, type BoardTheme } from '../domain/decor';
 import { atmosphereFor, type Atmosphere } from '../domain/atmosphere';
 import { coneAngleDeg, DEFAULT_BURST_RADIUS, getUnit } from '../domain/units';
 import { getEnemy } from '../domain/enemies';
-import { drawEnemySprite, drawFeather, drawUnitSprite, enemyWalkPeriod, hasEnemySprite, hasSprite } from './sprites';
+import {
+  drawBladeTrails,
+  drawEnemySprite,
+  drawFeather,
+  drawUnitSprite,
+  enemyWalkPeriod,
+  hasEnemySprite,
+  hasSprite,
+  MAGIC_CAST_POINT,
+  magicOrbAnchor,
+  magicOrbRadius,
+} from './sprites';
 import { BOSS_BOX, DEFAULT_BOX, paintFigure, type FigureStyle } from './figure';
 import { bakeTerrain } from './terrain';
 import { Lighting, flicker, type Light } from './lighting';
 import { Vfx, type Corpse } from './vfx';
 import { drawLegacyDecor, drawProp, propAnchor, PROP_META } from './props';
-import { FEEDBACK, INK, LIGHT, ease, shade, withAlpha } from './palette';
+import { FEEDBACK, INK, LIGHT, ease, shade, tintRamp, withAlpha } from './palette';
 import {
   THROW_ANIM_TIME,
   RISE_LIFT,
@@ -46,7 +57,7 @@ import {
   DEATH_FALL_TIME,
   DEATH_HOLD_TIME,
 } from './GameEngine';
-import { currentSpeechLine, isSpeaking } from './types';
+import { attackAnimTime, currentSpeechLine, isSpeaking } from './types';
 import type { Enemy, Tower } from './types';
 import type { GameEngine } from './GameEngine';
 
@@ -190,6 +201,18 @@ export function drawBoard(
   st.vfx.weather(st.atmo.weather, st.atmo.weatherDensity ?? 1, dt);
   for (const f of st.flames) st.vfx.flame(f.x, f.y, dt, f.strength);
   for (const c of st.chimneys) st.vfx.chimney(c.x, c.y, dt);
+  for (const tw of engine.towers) {
+    if (tw.beamTimer <= 0) continue;
+    const { reach, width } = beamPhase(tw);
+    const o = beamOrigin(tw);
+    const ex = tw.pos.x + Math.cos(tw.beamAngle) * tw.beamRange * reach;
+    const ey = tw.pos.y + Math.sin(tw.beamAngle) * tw.beamRange * reach;
+    st.vfx.beam(o.x, o.y, ex, ey, tw.def.visual.playerConfig?.outfitColor ?? tw.def.visual.color, dt * width, reach > 0.95);
+  }
+  for (const tw of engine.towers) {
+    const q = quickdrawLevel(tw);
+    if (q > 0) st.vfx.quickdraw(tw.pos.x, tw.pos.y, tw.def.visual.color, dt * q);
+  }
 
   ctx.clearRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
   const shake = st.vfx.shakeOffset();
@@ -216,6 +239,7 @@ export function drawBoard(
   // 4. Glow: attacks and spells read as light.
   drawSlices(ctx, engine);
   drawBeams(ctx, engine);
+  drawQuickdraws(ctx, engine);
   drawProjectiles(ctx, engine, st.vfx, dt);
   drawThrownSpears(ctx, engine);
   drawPuffs(ctx, engine);
@@ -426,21 +450,34 @@ function collectLights(engine: GameEngine, st: BoardState, time: number): Light[
     out.push({ x: t.pos.x, y: t.pos.y + 2, radius: pool, family: 'candle', intensity: 0.6, glow: 0.18 });
     // Guiding Gale's wind carries a faint cool light so it reads in dark rooms.
     if (t.rangeBuffed) out.push({ x: t.pos.x, y: t.pos.y - 4, radius: 30, family: 'wind', intensity: 0.2 });
+    // Quickdraw's charged bow casts a soft light in the archer's colour.
+    const qd = quickdrawLevel(t);
+    if (qd > 0) out.push({ x: t.pos.x, y: t.pos.y - 4, radius: 56, family: 'holy', intensity: 0.45 * qd, glow: 0.35, tint: t.def.visual.color });
     if (t.charge > 0 && t.chargeMax > 0) {
       const k = 1 - t.charge / t.chargeMax;
       const fam = t.def.visual.shape === 'wizard' ? 'wind' : 'arcane';
-      out.push({ x: t.pos.x, y: t.pos.y - 6, radius: 30 + 60 * k, family: fam, intensity: 0.4 + 0.5 * k });
+      // The Magic adventurer's orb glows in its own colour.
+      const tint = t.def.visual.shape === 'player-magic' ? t.def.visual.color : undefined;
+      out.push({ x: t.pos.x, y: t.pos.y - 6, radius: 30 + 60 * k, family: fam, intensity: 0.4 + 0.5 * k, tint });
     }
     if (t.beamTimer > 0) {
       const ux = Math.cos(t.beamAngle);
       const uy = Math.sin(t.beamAngle);
-      for (let d = 20; d < t.beamRange; d += 60) {
-        out.push({ x: t.pos.x + ux * d, y: t.pos.y + uy * d, radius: 80, family: 'arcane', intensity: 0.75 });
+      const { reach, width, surge } = beamPhase(t);
+      const level = (0.6 + 0.25 * surge) * width;
+      // Low additive glow: the beam clears the dark around it, but its own
+      // layers carry the brightness (full glow bloomed it out to white).
+      for (let d = 40; d < t.beamRange * reach; d += 60) {
+        out.push({ x: t.pos.x + ux * d, y: t.pos.y + uy * d, radius: 80, family: 'arcane', intensity: level, glow: 0.25, tint: t.def.visual.color });
+      }
+      // A pool where the beam sears its far end.
+      if (reach > 0.95) {
+        out.push({ x: t.pos.x + ux * t.beamRange, y: t.pos.y + uy * t.beamRange, radius: 60, family: 'arcane', intensity: level, glow: 0.4, tint: t.def.visual.color });
       }
     }
   }
   for (const p of engine.projectiles) {
-    if (p.style === 'orb') out.push({ x: p.pos.x, y: p.pos.y, radius: 80, family: 'arcane', intensity: 0.85 });
+    if (p.style === 'orb') out.push({ x: p.pos.x, y: p.pos.y, radius: 80, family: 'arcane', intensity: 0.85, tint: p.color });
     else if (p.style === 'magic') out.push({ x: p.pos.x, y: p.pos.y, radius: 46, family: 'arcane', intensity: 0.6 });
     else if (p.style === 'wind') out.push({ x: p.pos.x, y: p.pos.y, radius: 34, family: 'wind', intensity: 0.45 });
   }
@@ -865,7 +902,7 @@ function drawTower(
   let ox = 0;
   let oy = 0;
   let squash = 0;
-  const strike = Math.max(0, Math.min(1, t.attackAnim / 0.18));
+  const strike = Math.max(0, Math.min(1, t.attackAnim / attackAnimTime(t.def.visual.shape)));
   if (strike > 0 && target) {
     const push = ease.outCubic(strike) * 5;
     ox += ux * push;
@@ -877,6 +914,20 @@ function drawTower(
     ox -= ux * back;
     oy -= uy * back;
     squash += 0.035 * wind;
+  }
+  // The Magic adventurer leans back as it draws its swelling orb in, and leans
+  // into a channelled Mana Ray, trembling with the strain of holding it.
+  if (t.def.visual.shape === 'player-magic') {
+    if (t.charge > 0 && t.chargeMax > 0 && target) {
+      const k = ease.inOutSine(1 - t.charge / t.chargeMax);
+      ox -= ux * 1.6 * k;
+      oy -= uy * 0.8 * k;
+      squash += 0.02 * k;
+    }
+    if (t.beamTimer > 0) {
+      ox += Math.cos(t.beamAngle) * 1.4 + Math.sin(time * 47) * 0.35;
+      oy += Math.sin(t.beamAngle) * 0.7;
+    }
   }
 
   // Idle life: breathing (a gentle rise and settle about the feet) and a slow
@@ -937,13 +988,26 @@ function drawTower(
     // it from the longer `throwAnim`; a charge ramps it 0→1 across the wind-up.
     const throwing = t.throwAnim > 0;
     const charging = t.charge > 0 && t.chargeMax > 0;
-    const rawAnim = charging
-      ? ease.inOutSine(1 - t.charge / t.chargeMax)
-      : throwing
-        ? t.throwAnim / THROW_ANIM_TIME
-        : ease.outQuad(strike);
+    const shape = t.def.visual.shape;
+    const rawAnim =
+      shape === 'player-magic'
+        ? t.beamTimer > 0
+          ? 1 // hands held thrust out through a Mana Ray channel
+          : strike // throw → recover (its charge rides on `draw`)
+        : charging
+          ? ease.inOutSine(1 - t.charge / t.chargeMax)
+          : throwing
+            ? t.throwAnim / THROW_ANIM_TIME
+            : shape === 'player-blade' || shape === 'player-bow'
+              ? strike // linear: the Blade's cuts land with its two hits; the Bow's phases are timed
+              : ease.outQuad(strike);
     // Quantized so attack poses reuse cached frames (12 steps is smooth at 0.18s).
     const anim = Math.round(rawAnim * 12) / 12;
+    // The sprite's second input: the Bow's raise + draw, or the Magic orb charge.
+    const rawDraw = shape === 'player-magic' ? (charging ? 1 - t.charge / t.chargeMax : 0) : bowDraw(t, !!target);
+    // Finer steps for the slow orb charge, so the cupping hands track the orb.
+    const drawSteps = shape === 'player-magic' ? 24 : 12;
+    const draw = Math.round(rawDraw * drawSteps) / drawSteps;
     // The "empowered" flourish marks a champion whose signature upgrade is
     // bought — wind motes for the Wizard (Wind Slice → cone), arcane sparkles
     // off the Elf's bow once Chain Enchantment lifts her bounce count.
@@ -968,18 +1032,22 @@ function drawTower(
     paintFigure(
       ctx,
       (g) =>
-        drawUnitSprite(g, t.def.visual.shape, t.def.visual.color, faceLeft, anim, throwing, empowered, t.def.visual.playerConfig),
+        drawUnitSprite(g, t.def.visual.shape, t.def.visual.color, faceLeft, anim, throwing, empowered, t.def.visual.playerConfig, draw),
       style,
       live
         ? undefined
-        : `u|${t.def.visual.shape}|${t.def.visual.color}|${faceLeft ? 1 : 0}|${anim}|${throwing ? 1 : 0}|${empowered ? 1 : 0}|${cfgKey(t.def.visual.playerConfig)}`,
+        : `u|${t.def.visual.shape}|${t.def.visual.color}|${faceLeft ? 1 : 0}|${anim}|${throwing ? 1 : 0}|${empowered ? 1 : 0}|${draw}|${cfgKey(t.def.visual.playerConfig)}`,
     );
+    // The Blade adventurer's slash streaks, outside the compositor so they stay
+    // clean light (from the unquantized anim, so they sweep smoothly).
+    if (t.def.visual.shape === 'player-blade') drawBladeTrails(ctx, faceLeft, rawAnim);
     // The Magic adventurer visibly gathers its orb during the wind-up.
     if (t.aoe === 'circle' && charging) {
-      const grow = 1 - t.charge / t.chargeMax;
+      // Held where the sprite's hands cup it (same charge step as the sprite).
+      const grow = draw;
       const accent = t.def.visual.playerConfig?.outfitColor ?? t.def.visual.color;
-      const cx = (faceLeft ? -1 : 1) * (12 + 1.6 * grow);
-      drawChargingOrb(ctx, cx, -4.5, 1.2 + 4.3 * grow, accent, grow);
+      const o = magicOrbAnchor(grow);
+      drawChargingOrb(ctx, (faceLeft ? -1 : 1) * o.x, o.y, magicOrbRadius(grow), accent, grow);
     }
   } else {
     // Emoji fallback token: a lit disc with an inked rim.
@@ -1564,7 +1632,7 @@ function drawCorpse(ctx: CanvasRenderingContext2D, st: BoardState, c: Corpse): v
     style.alpha = Math.max(0, fade);
     style.flash = k < 0.12 ? (1 - k / 0.12) * 0.9 : 0;
     if (c.element === 'arcane') {
-      style.tint = '#b48cf0';
+      style.tint = c.tint ? shade(c.tint, 0.3) : '#b48cf0';
       style.tintAmount = 0.55 * k;
     }
     const sf = strideFrame(e.def.id, c.dist);
@@ -1786,6 +1854,7 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine, vfx:
     if (p.style === 'orb') vfx.trail('orb', p.pos.x, p.pos.y, p.color, dt);
     else if (p.style === 'magic') vfx.trail('arcane', p.pos.x, p.pos.y, p.color, dt);
     else if (p.style === 'wind') vfx.trail('wind', p.pos.x, p.pos.y, p.color, dt);
+    else if (quickdrawLevel(p.source) > 0) vfx.trail('arcane', p.pos.x, p.pos.y, p.color, dt);
     ctx.save();
     ctx.translate(p.pos.x, p.pos.y);
     ctx.rotate(ang);
@@ -1802,6 +1871,9 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine, vfx:
       ctx.rotate(-ang);
       drawChargingOrb(ctx, 0, 0, 5.5, p.color, 1);
     } else {
+      // An arrow loosed under Quickdraw streaks in as a bolt of the archer's colour.
+      const q = quickdrawLevel(p.source);
+      if (q > 0) drawQuickdrawStreak(ctx, p.color, q);
       // Motion streak: a soft line trailing the shaft, fading to nothing.
       const sg = ctx.createLinearGradient(-26, 0, -6, 0);
       sg.addColorStop(0, 'rgba(255,248,230,0)');
@@ -2327,73 +2399,360 @@ function drawCyclones(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
   }
 }
 
+/** Seconds before a volley over which the Bow adventurer raises and draws. */
+const BOW_DRAW_TIME = 0.32;
+
 /**
- * Mana Ray beams (the Mage adventurer's channelled ability): a fixed, glowing
- * line of mana from each channelling champion out to its locked reach, in the
- * champion's colour. Drawn in layers — a soft wide outer glow, a solid core and a
- * bright white centre line — with a flowing dashed shimmer and a pulsing muzzle
- * flare at the origin. Fades over the last stretch of the channel.
+ * The Bow adventurer's raise + draw for its next shot (the sprite's `draw`, see
+ * `drawPlayerShortbow`): held at full draw through a volley, drawn up over the
+ * last `BOW_DRAW_TIME` of the reload when it has a target, relaxed otherwise.
+ * 0 for every other champion.
+ */
+function bowDraw(t: Tower, hasTarget: boolean): number {
+  if (t.def.visual.shape !== 'player-bow') return 0;
+  if (t.burstLeft > 0) return 1;
+  if (!hasTarget) return 0;
+  return ease.inOutSine(Math.max(0, Math.min(1, 1 - t.cooldown / BOW_DRAW_TIME)));
+}
+
+/**
+ * How strongly the Bow adventurer's Quickdraw is showing (0 when inactive): eases
+ * in over its first 0.2s and out over its last 0.4s.
+ */
+function quickdrawLevel(t: Tower): number {
+  if (t.abilitySpeedBuffTimer <= 0 || t.def.visual.shape !== 'player-bow') return 0;
+  const duration = t.ability?.duration ?? t.abilitySpeedBuffTimer;
+  return Math.min(1, t.abilitySpeedBuffTimer / 0.4, (duration - t.abilitySpeedBuffTimer) / 0.2 + 0.2);
+}
+
+/**
+ * Quickdraw (the Bow adventurer's haste), drawn additively in the glow pass in
+ * the archer's colour: a charged glow around the bow, and wind-swept speed
+ * streaks peeling back off the figure away from where it faces. The foot ring
+ * flares too (`drawTower`), rising motes come from `Vfx.quickdraw` and arrows
+ * loosed meanwhile streak in as bolts (`drawQuickdrawStreak`).
+ */
+function drawQuickdraws(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
+  const time = now() / 1000;
+  for (const t of engine.towers) {
+    const q = quickdrawLevel(t);
+    if (q <= 0) continue;
+    const color = t.def.visual.color;
+    const aim = t.aimTarget;
+    const dir = aim && aim.x < t.pos.x ? -1 : 1;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    // Charged bow: a pulsing glow where the bow is held up (local ~(9, -4)).
+    const pulse = 0.8 + 0.2 * Math.sin(time * 14 + t.uid);
+    const bx = t.pos.x + dir * 9 * FIGURE_SCALE;
+    const by = t.pos.y + 11 + (-4 - 11) * FIGURE_SCALE;
+    const g = ctx.createRadialGradient(bx, by, 0, bx, by, 13);
+    g.addColorStop(0, withAlpha('#ffffff', 0.55 * q * pulse));
+    g.addColorStop(0.35, withAlpha(color, 0.45 * q * pulse));
+    g.addColorStop(1, withAlpha(color, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(bx, by, 13, 0, Math.PI * 2);
+    ctx.fill();
+    // Speed streaks: short lines sliding back off the figure and fading.
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = shade(color, 0.45);
+    for (let i = 0; i < 5; i++) {
+      const u = (time * 2.6 + i * 0.37 + t.uid * 0.13) % 1;
+      const y = t.pos.y - 14 + ((i * 7.3) % 22);
+      const x0 = t.pos.x - dir * (4 + u * 16);
+      const len = 7 + 5 * Math.sin(i * 1.7) ** 2;
+      ctx.globalAlpha = q * 0.7 * Math.sin(Math.PI * u);
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x0 - dir * len, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+/**
+ * The bolt-of-light tail of an arrow loosed under Quickdraw, drawn in the arrow's
+ * local frame (+x forward) under the shaft: a long tapered streak in the archer's
+ * colour with a white core.
+ */
+function drawQuickdrawStreak(ctx: CanvasRenderingContext2D, color: string, q: number): void {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const g = ctx.createLinearGradient(-34, 0, 6, 0);
+  g.addColorStop(0, withAlpha(color, 0));
+  g.addColorStop(1, withAlpha(color, 0.75 * q));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(-34, 0);
+  ctx.lineTo(4, -2.4);
+  ctx.lineTo(8, 0);
+  ctx.lineTo(4, 2.4);
+  ctx.closePath();
+  ctx.fill();
+  const c = ctx.createLinearGradient(-20, 0, 6, 0);
+  c.addColorStop(0, 'rgba(255,255,255,0)');
+  c.addColorStop(1, withAlpha('#ffffff', 0.8 * q));
+  ctx.strokeStyle = c;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(-20, 0);
+  ctx.lineTo(6, 0);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Seconds the Mana Ray takes to lance out to full reach when cast. */
+const BEAM_IGNITE = 0.16;
+/** Seconds over which it collapses to a thread at the end of the channel. */
+const BEAM_COLLAPSE = 0.3;
+
+/**
+ * Lifecycle of a channelling Mana Ray, shared by the beam drawing, its light and
+ * its particle emitter: `reach` 0→1 as it lances out on cast, `width` 1→0 as it
+ * collapses at the end, and `surge` 1→0 just after each damage tick (the beam
+ * swells as it sears).
+ */
+function beamPhase(t: Tower): { reach: number; width: number; surge: number; age: number } {
+  const duration = t.ability?.duration ?? t.beamTimer;
+  const age = Math.max(0, duration - t.beamTimer);
+  const reach = ease.outCubic(Math.min(1, age / BEAM_IGNITE));
+  const width = ease.outQuad(Math.min(1, t.beamTimer / BEAM_COLLAPSE));
+  const interval = t.ability?.tickInterval ?? 0.5;
+  const sinceTick = interval - t.beamTickTimer;
+  const surge = sinceTick >= 0 && sinceTick < 0.18 ? 1 - sinceTick / 0.18 : 0;
+  return { reach, width, surge, age };
+}
+
+/**
+ * Where a Mana Ray leaves the caster's thrust-out palms (`MAGIC_CAST_POINT`,
+ * mapped through the figure's board scale and its lean into the beam — see
+ * `drawTower`), on the side it faces.
+ */
+function beamOrigin(t: Tower): Vec2 {
+  const ux = Math.cos(t.beamAngle);
+  const uy = Math.sin(t.beamAngle);
+  const dir = ux < 0 ? -1 : 1;
+  return {
+    x: t.pos.x + ux * 1.4 + dir * MAGIC_CAST_POINT.x * FIGURE_SCALE,
+    y: t.pos.y + uy * 0.7 + 11 + (MAGIC_CAST_POINT.y - 11) * FIGURE_SCALE,
+  };
+}
+
+/**
+ * Mana Ray beams (the Mage adventurer's channelled ability), drawn in the glow
+ * pass, entirely in the champion's colour (only the outer haze is
+ * additive, so the beam keeps its violet on bright floors):
+ *  - a rotating sigil disc at the hands, seen edge-on like a portal the beam
+ *    is fired through, blooming open on cast and folding shut at the end;
+ *  - a tapered beam body (haze → colour → white-hot core) that lances out on
+ *    cast, ripples, swells on every damage tick and collapses to a thread;
+ *  - two helix strands winding around it and bright packets racing outward;
+ *  - a flickering, crackling flare where it ends.
+ * Particles shed along its length come from `Vfx.beam` (see `drawBoard`).
  */
 function drawBeams(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
-  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
   for (const t of engine.towers) {
     if (t.beamTimer <= 0) continue;
     const accent = t.def.visual.playerConfig?.outfitColor ?? t.def.visual.color;
-    const ux = Math.cos(t.beamAngle);
-    const uy = Math.sin(t.beamAngle);
-    // A slim visual beam (thinner than the wider hit corridor) that emerges from
-    // the mage's raised hands — offset forward along the beam and lifted to hand
-    // height — rather than from a big orb over his body.
-    const coreW = 6; // slim core; the hit corridor stays BEAM_HALF_WIDTH wide
-    const handDist = 12;
-    const x0 = t.pos.x + ux * handDist;
-    const y0 = t.pos.y + uy * handDist - 4;
-    const x1 = t.pos.x + ux * t.beamRange;
-    const y1 = t.pos.y + uy * t.beamRange;
-    // Ease the beam out over the last 0.3s of the channel.
-    const fade = Math.min(1, t.beamTimer / 0.3);
-    const pulse = 0.5 - 0.5 * Math.cos(now / 70);
+    const ramp = tintRamp(accent);
+    const { reach, width, surge, age } = beamPhase(t);
+    const o = beamOrigin(t);
+    const ex = t.pos.x + Math.cos(t.beamAngle) * t.beamRange;
+    const ey = t.pos.y + Math.sin(t.beamAngle) * t.beamRange;
+    const ang = Math.atan2(ey - o.y, ex - o.x);
+    const len = Math.hypot(ex - o.x, ey - o.y) * reach;
+    if (len < 1) continue;
+    // Half-width of the beam body: slim (the hit corridor stays BEAM_HALF_WIDTH
+    // wide), breathing, swelling on each sear, thinning to a thread as it ends.
+    const breathe = 1 + 0.08 * Math.sin(now * 23) + 0.05 * Math.sin(now * 37 + 1);
+    const hw = 4.2 * breathe * (1 + 0.45 * surge) * (0.15 + 0.85 * width);
+    const alpha = Math.min(1, width * 1.6);
 
     ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.translate(o.x, o.y);
+    ctx.rotate(ang);
     ctx.lineCap = 'round';
-    // Soft outer glow.
-    ctx.globalAlpha = 0.25 * fade;
-    ctx.strokeStyle = accent;
-    ctx.shadowColor = accent;
-    ctx.shadowBlur = 9;
-    ctx.lineWidth = coreW * 1.9;
-    ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x1, y1);
-    ctx.stroke();
-    // Solid core.
-    ctx.globalAlpha = 0.85 * fade;
-    ctx.shadowBlur = 5;
-    ctx.lineWidth = coreW * (0.9 + pulse * 0.2);
-    ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x1, y1);
-    ctx.stroke();
-    // Bright white centre with a flowing dash shimmer.
-    ctx.globalAlpha = fade;
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
-    ctx.lineWidth = Math.max(1.4, coreW * 0.35);
-    ctx.setLineDash([9, 7]);
-    ctx.lineDashOffset = -(now / 12) % 16;
-    ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x1, y1);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    // A small spark at the hands where the beam is loosed (not a body-covering orb).
-    ctx.globalAlpha = fade;
-    ctx.fillStyle = '#ffffff';
-    ctx.shadowColor = accent;
-    ctx.shadowBlur = 10;
-    ctx.beginPath();
-    ctx.arc(x0, y0, coreW * (0.5 + pulse * 0.25), 0, Math.PI * 2);
+    ctx.lineJoin = 'round';
+
+    // A tapered ribbon along +x: pinched at the hands, full through the body,
+    // narrowing slightly toward the far end, with a gentle travelling ripple.
+    const steps = Math.max(6, Math.ceil(len / 14));
+    const ribbon = (half: number, ripple: number) => {
+      ctx.beginPath();
+      for (let i = 0; i <= steps; i++) {
+        const x = (len * i) / steps;
+        const u = x / len;
+        const taper = Math.min(1, u * 9 + 0.25) * (1 - 0.25 * u);
+        const w = half * taper * (1 + ripple * Math.sin(x * 0.11 - now * 26));
+        if (i === 0) ctx.moveTo(x, -w);
+        else ctx.lineTo(x, -w);
+      }
+      for (let i = steps; i >= 0; i--) {
+        const x = (len * i) / steps;
+        const u = x / len;
+        const taper = Math.min(1, u * 9 + 0.25) * (1 - 0.25 * u);
+        const w = half * taper * (1 + ripple * Math.sin(x * 0.11 - now * 26 + 1.7));
+        ctx.lineTo(x, w);
+      }
+      ctx.closePath();
+    };
+    const across = (half: number, stops: [number, string][]) => {
+      const g = ctx.createLinearGradient(0, -half, 0, half);
+      for (const [at, c] of stops) g.addColorStop(at, c);
+      return g;
+    };
+
+    // 1. Wide soft haze — the only additive layer, so the beam lights dark
+    // rooms without washing out to white on a bright floor.
+    ctx.globalAlpha = alpha;
+    const haze = hw * 3.4;
+    ctx.fillStyle = across(haze, [
+      [0, withAlpha(accent, 0)],
+      [0.5, withAlpha(accent, 0.22 + 0.15 * surge)],
+      [1, withAlpha(accent, 0)],
+    ]);
+    ribbon(haze, 0.12);
     ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    // 2. Coloured body: deep violet edges into a pale lilac centre.
+    const body = hw * 1.7;
+    ctx.fillStyle = across(body, [
+      [0, withAlpha(ramp[3], 0)],
+      [0.18, withAlpha(ramp[3], 0.55)],
+      [0.36, withAlpha(ramp[2], 0.9)],
+      [0.5, withAlpha(ramp[1], 1)],
+      [0.64, withAlpha(ramp[2], 0.9)],
+      [0.82, withAlpha(ramp[3], 0.55)],
+      [1, withAlpha(ramp[3], 0)],
+    ]);
+    ribbon(body, 0.08);
+    ctx.fill();
+    // 3. White-hot core.
+    ctx.fillStyle = across(hw * 0.6, [
+      [0, 'rgba(255,255,255,0)'],
+      [0.5, 'rgba(255,255,255,1)'],
+      [1, 'rgba(255,255,255,0)'],
+    ]);
+    ribbon(hw * 0.6, 0.04);
+    ctx.fill();
+
+    // 4. Helix strands winding around the beam, scrolling outward.
+    ctx.lineWidth = 1.3;
+    ctx.globalAlpha = alpha * 0.85;
+    for (let s = 0; s < 2; s++) {
+      ctx.strokeStyle = s === 0 ? ramp[1] : accent;
+      ctx.beginPath();
+      for (let x = 0; x <= len; x += 4) {
+        const u = x / len;
+        const amp = hw * 1.9 * Math.min(1, u * 6) * (1 - 0.3 * u);
+        const y = Math.sin(x * 0.085 - now * 14 + s * Math.PI) * amp;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+
+    // 5. Energy packets racing from the hands to the end.
+    ctx.globalAlpha = 1;
+    const packets = Math.max(2, Math.round(len / 55));
+    for (let i = 0; i < packets; i++) {
+      const u = (now * 2.4 + i / packets) % 1;
+      const px = u * len;
+      // Born just past the hands, swallowed by the terminus flare.
+      ctx.globalAlpha = Math.min(1, u * 5) * Math.min(1, (1 - u) * 6);
+      const r = hw * (1.5 + 0.6 * Math.sin(i * 2.3));
+      const g = ctx.createRadialGradient(px, 0, 0, px, 0, r * 2.2);
+      g.addColorStop(0, withAlpha('#ffffff', 0.9 * alpha));
+      g.addColorStop(0.35, withAlpha(ramp[1], 0.55 * alpha));
+      g.addColorStop(1, withAlpha(accent, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(px, 0, r * 2.2, r * 1.1, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 6. Terminus flare: a flickering bloom with short crackling arcs.
+    if (reach > 0.95) {
+      const fl = 0.75 + 0.25 * Math.sin(now * 41) * Math.sin(now * 17 + 2);
+      const fr = hw * (3.2 + 1.6 * surge) * fl;
+      ctx.globalAlpha = 1;
+      const g = ctx.createRadialGradient(len, 0, 0, len, 0, fr * 2);
+      g.addColorStop(0, withAlpha('#ffffff', 0.95 * alpha));
+      g.addColorStop(0.3, withAlpha(ramp[1], 0.6 * alpha));
+      g.addColorStop(1, withAlpha(accent, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(len, 0, fr * 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = ramp[1];
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = alpha * 0.8;
+      const seed = Math.floor(now * 20);
+      for (let k = 0; k < 3; k++) {
+        const a0 = (((seed * 7 + k * 13) % 17) / 17) * Math.PI * 2;
+        let x = len;
+        let y = 0;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        for (let j = 1; j <= 3; j++) {
+          const a = a0 + Math.sin(seed + j * 3.1 + k) * 0.9;
+          x += Math.cos(a) * fr * 0.55;
+          y += Math.sin(a) * fr * 0.55;
+          ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // 7. Sigil disc at the hands — a rune ring with orbiting ticks and a
+    // counter-rotating hexagram, seen edge-on (squashed along the beam) so the
+    // ray reads as fired through a portal.
+    const open = ease.outBack(Math.min(1, age / 0.22)) * width;
+    if (open > 0.01) {
+      const sq = 0.38;
+      ctx.save();
+      ctx.scale(sq, 1);
+      const R = 13 * open * (1 + 0.12 * surge);
+      ctx.globalAlpha = alpha;
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 1.5);
+      g.addColorStop(0, withAlpha(ramp[1], 0.45));
+      g.addColorStop(0.4, withAlpha(ramp[2], 0.35));
+      g.addColorStop(1, withAlpha(accent, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, R * 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = ramp[1];
+      ctx.beginPath();
+      ctx.arc(0, 0, R, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = accent;
+      for (let i = 0; i < 8; i++) {
+        const a = now * 2.2 + (i / 8) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * R * 1.08, Math.sin(a) * R * 1.08);
+        ctx.lineTo(Math.cos(a) * R * 1.3, Math.sin(a) * R * 1.3);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = ramp[1];
+      for (let tri = 0; tri < 2; tri++) {
+        const base = -now * 3 + tri * Math.PI;
+        ctx.beginPath();
+        for (let v = 0; v <= 3; v++) {
+          const a = base + (v / 3) * Math.PI * 2;
+          if (v === 0) ctx.moveTo(Math.cos(a) * R * 0.7, Math.sin(a) * R * 0.7);
+          else ctx.lineTo(Math.cos(a) * R * 0.7, Math.sin(a) * R * 0.7);
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
     ctx.restore();
   }
 }

@@ -7,8 +7,9 @@
  */
 
 import type { PlayerSpriteConfig } from '../domain/playerSprite';
-import { shade, withAlpha } from './palette';
-import { arm, belt, capeSide, legSide, neck, pauldron, seg, torsoFront, torsoSide, walkLegsFront, walkLegsSide, type ArmLook, type LegLook } from './anatomy';
+import type { Proficiency } from '../domain/proficiency';
+import { ease, shade, withAlpha } from './palette';
+import { arm, belt, forearm, capeSide, legSide, neck, pauldron, seg, torsoFront, torsoSide, walkLegsFront, walkLegsSide, type ArmLook, type LegLook } from './anatomy';
 
 // `shade` lives in the shared palette now; re-exported for existing callers.
 export { shade };
@@ -4684,6 +4685,13 @@ export function hasSprite(shape: string): boolean {
   );
 }
 
+/** The weapon each journal proficiency's champion carries (menus, the armory doll). */
+export const PROFICIENCY_WEAPON: Record<Proficiency, PlayerWeapon> = {
+  sword: 'dual-swords',
+  bow: 'bow',
+  magic: 'magic',
+};
+
 /** The held weapon a player-champion shape carries, or 'none'. */
 function playerWeaponForShape(shape: string): PlayerWeapon {
   if (shape === 'player-blade') return 'dual-swords';
@@ -4702,8 +4710,11 @@ function playerWeaponForShape(shape: string): PlayerWeapon {
  * has been transformed by an upgrade (the Wizard's unlocked Wind Slice), adding
  * its ambient flourish; other shapes ignore it. `playerConfig` supplies the
  * composed avatar for the `player-*` shapes (the player's own adventurer); it is
- * ignored by ordinary champions. No-op for shapes without a sprite; callers
- * should gate on `hasSprite` and fall back to the emoji token.
+ * ignored by ordinary champions. `draw` (0..1) is the Bow adventurer's raise +
+ * draw for its next shot (see `drawPlayerShortbow`) or the Magic adventurer's
+ * orb charge (see `drawPlayerCastArms`); others ignore it. No-op for
+ * shapes without a sprite; callers should gate on `hasSprite` and fall back to
+ * the emoji token.
  */
 export function drawUnitSprite(
   ctx: CanvasRenderingContext2D,
@@ -4714,6 +4725,7 @@ export function drawUnitSprite(
   throwing = false,
   empowered = false,
   playerConfig?: PlayerSpriteConfig,
+  draw = 0,
 ): void {
   if (shape === 'archer') drawArcher(ctx, color, faceLeft, anim);
   else if (shape === 'sword') drawSwordsman(ctx, color, faceLeft, anim);
@@ -4724,7 +4736,7 @@ export function drawUnitSprite(
   else if (shape === 'elf') drawElf(ctx, color, faceLeft, anim, empowered);
   else if (shape === 'bard') drawBard(ctx, color, faceLeft, anim);
   else if (shape.startsWith('player-') && playerConfig) {
-    drawPlayerSprite(ctx, playerConfig, faceLeft, anim, playerWeaponForShape(shape));
+    drawPlayerSprite(ctx, playerConfig, faceLeft, anim, playerWeaponForShape(shape), draw);
   }
 }
 
@@ -4809,6 +4821,8 @@ const CROWN_COVERING = new Set(['cap', 'hat', 'helm']);
  * eases with an attack (1 just after a strike → 0 at rest) and drives any held
  * weapon's swing — the bare portrait ignores it. `weapon` layers a champion's
  * armament (e.g. the Blade adventurer's two short swords) over the base figure.
+ * `draw` (0..1) is the Bow's raise + draw for its next shot, or the Magic
+ * adventurer's orb charge.
  *
  * Layered back-to-front: cape → back hair (long / braid / ponytail) → legs →
  * neck → outfit → cape clasp → arms + weapon → mantle / scarf → head → war paint
@@ -4820,6 +4834,7 @@ export function drawPlayerSprite(
   faceLeft: boolean,
   anim = 0,
   weapon: PlayerWeapon = 'none',
+  draw = 0,
 ): void {
   ctx.save();
   ctx.lineJoin = 'round';
@@ -4866,32 +4881,43 @@ export function drawPlayerSprite(
   drawPlayerOutfit(ctx, cfg, b, skin, oc, acc);
   if (cfg.cloak === 'cape') drawPlayerCapeClasp(ctx, b, cloakC);
 
+  // Mantle / scarf over the shoulders: normally laid over the arms. The armed
+  // champions lay it between their sleeves and their weapon / raised forearms
+  // (see `drawDualShortSwords`, `drawPlayerShortbow`, `drawPlayerCastArms`), so
+  // it still covers the shoulders but never hides a blade, the bow or a hand.
+  const drawCloak = () => {
+    if (cfg.cloak === 'mantle') drawPlayerMantle(ctx, b, cloakC);
+    else if (cfg.cloak === 'scarf') drawPlayerScarf(ctx, cloakC);
+  };
+
   // --- Arms + held weapon ---
   const look = playerArmLook(cfg.outfit, b, skin, oc, acc);
   const backLook: ArmLook = { ...look, sleeve: shade(look.sleeve, -0.12) };
   const sho = b.shoulder - 1.3;
   if (weapon === 'bow') {
-    // A bow shooter needs a proper archer pose (front arm out to the bow, rear
-    // arm drawing the string), so the shortbow draws its own raised arms in place
-    // of the default hanging ones.
-    drawPlayerShortbow(ctx, look, backLook, anim);
+    // A bow shooter needs a proper archer pose (bow arm out to the grip, rear arm
+    // on the string), so the shortbow poses its own arms in place of the default
+    // hanging ones.
+    drawPlayerShortbow(ctx, look, backLook, anim, draw, drawCloak);
   } else if (weapon === 'magic') {
     // A staff-less caster: hands rest at the sides and only rise to cradle the orb
     // out in front as it charges (higher `anim`) — so the resting pose (cards,
     // idle on the board) matches the other champions. The orb itself is drawn by
     // the renderer (in front of the caster) so it can take the player's colour and
     // animate its charge/flight/burst.
-    drawPlayerCastArms(ctx, look, backLook, anim, b, sho);
+    drawPlayerCastArms(ctx, look, backLook, anim, draw, b, sho, drawCloak);
+  } else if (weapon === 'dual-swords') {
+    // The Blade holds both short swords in a raised guard and cuts with them, so
+    // it poses its own arms (see `drawDualShortSwords`).
+    drawDualShortSwords(ctx, look, backLook, anim, sho, drawCloak);
   } else {
     // Arms hanging at the sides, elbows easing outward.
     arm(ctx, -sho, P_SHOULDER_Y, -b.hw + 1.5, 3.5, backLook, 0.7);
     arm(ctx, sho, P_SHOULDER_Y, b.hw - 0.5, 4, look, -0.7);
-    if (weapon === 'dual-swords') drawDualShortSwords(ctx, b, anim);
   }
 
   // --- Mantle / scarf over the shoulders ---
-  if (cfg.cloak === 'mantle') drawPlayerMantle(ctx, b, cloakC);
-  else if (cfg.cloak === 'scarf') drawPlayerScarf(ctx, cloakC);
+  if (weapon === 'none') drawCloak();
 
   // --- Head, face and everything on it ---
   ctx.fillStyle = skin;
@@ -5826,86 +5852,176 @@ function drawPlayerHeadwear(
 }
 
 /**
- * The Blade adventurer's two short swords, one in each hand. Drawn in the base
- * figure's local space (already flipped for `faceLeft` by the caller), pivoting
- * about the same hand points `drawPlayerSprite` paints. At rest the pair sits in
- * a ready guard (lead blade up-forward, off blade held back). `anim` (1 at the
- * instant of a strike → 0 at rest) drives the cut: the lead blade snaps down and
- * forward on a steep diagonal *through* the space ahead — where a targeted enemy
- * stands — while the off blade sweeps in behind it, and a slash arc streaks along
- * the cut and fades, so the strike reads as an actual slice rather than a raise.
- * Hands: front `(b.hw - 0.5, 4)`, back `(-b.hw + 1.5, 3.5)`.
+ * One pose of a Blade-adventurer arm: where the hand is, the angle the blade
+ * points (degrees from +x, y-down: -90 = straight up) and the elbow bend.
+ */
+interface BladePose {
+  x: number;
+  y: number;
+  ang: number;
+  bend: number;
+}
+
+// Keyframes for both arms, authored facing +x. Rest is a ready guard: lead hand
+// out at chest height with its blade raised forward, off blade
+// held low and forward. The strike is a crossing double cut: the lead blade chops
+// from high over the shoulder down through the space ahead, then the off blade
+// rips back up across it.
+const LEAD_GUARD: BladePose = { x: 6.6, y: -1.2, ang: -48, bend: 1.4 };
+const LEAD_RAISED: BladePose = { x: 4.4, y: -13.4, ang: -150, bend: 1.2 };
+const LEAD_CUT: BladePose = { x: 8.6, y: 3.4, ang: 58, bend: 0.6 };
+const OFF_GUARD: BladePose = { x: -0.6, y: 2.6, ang: 22, bend: 1.2 };
+const OFF_LOW: BladePose = { x: -4.2, y: 4.6, ang: 150, bend: 1 };
+const OFF_CUT: BladePose = { x: 8.4, y: -5.4, ang: -64, bend: 1.2 };
+
+const mixPose = (a: BladePose, c: BladePose, k: number): BladePose => ({
+  x: a.x + (c.x - a.x) * k,
+  y: a.y + (c.y - a.y) * k,
+  ang: a.ang + (c.ang - a.ang) * k,
+  bend: a.bend + (c.bend - a.bend) * k,
+});
+
+/**
+ * A three-beat swing through `u` (0 = the instant the attack fires → 1 = back at
+ * rest): wound up at `raised`, a fast eased cut to `cut` over `[c0, c1]`, then a
+ * smooth recovery to `guard`. Before `c0` it eases from `raised` toward the cut's
+ * start so the frame never holds still.
+ */
+function swingPose(
+  u: number,
+  guard: BladePose,
+  raised: BladePose,
+  cut: BladePose,
+  c0: number,
+  c1: number,
+): BladePose {
+  if (u >= 1) return guard;
+  if (u < c0) return raised;
+  if (u < c1) return mixPose(raised, cut, ease.outCubic((u - c0) / (c1 - c0)));
+  return mixPose(cut, guard, ease.inOutSine((u - c1) / (1 - c1)));
+}
+
+const DEG = Math.PI / 180;
+const LEAD_LEN = 11;
+const OFF_LEN = 10;
+
+/**
+ * The Blade adventurer's arms and two short swords, in the base figure's local
+ * space (already flipped for `faceLeft`). `anim` is the shared attack value (1 at
+ * the instant of a strike → 0 at rest); read as swing progress `u = 1 - anim`,
+ * the lead blade snaps up over the shoulder and chops down through the target,
+ * the off blade follows a beat later with a rising cut across it. At rest
+ * (cards, idle on the board) both swords sit in a ready guard.
+ *
+ * Layered sleeves → `cloak` (the mantle / scarf, so it covers the shoulders
+ * and upper arms) → swords → fists: each blade is held out in front of its own
+ * forearm and over the mantle, and only the fist closes over its grip. The off
+ * (far) side goes before the lead side throughout. The slash streaks are a
+ * separate pass (`drawBladeTrails`) so the figure compositor doesn't ink them.
  */
 function drawDualShortSwords(
   ctx: CanvasRenderingContext2D,
-  b: { hw: number },
+  look: ArmLook,
+  backLook: ArmLook,
   anim: number,
+  sho: number,
+  cloak: () => void,
 ): void {
   const steel = '#c9d2dc';
   const steelDark = '#8b95a3';
-  const deg = Math.PI / 180;
-  const frontHx = b.hw - 0.5;
-  const frontHy = 4;
-  const backHx = -b.hw + 1.5;
-  const backHy = 3.5;
-  // Angles from +x (y-down): the lead blade sweeps a wide diagonal from a raised
-  // guard (up-forward) down and across the target; the off blade follows a shorter
-  // counter-sweep behind it.
-  const leadRest = -28;
-  const leadStrike = 52;
-  const leadAng = (leadRest + (leadStrike - leadRest) * anim) * deg;
-  const offRest = 146;
-  const offStrike = 100;
-  const offAng = (offRest + (offStrike - offRest) * anim) * deg;
-  // Slash streak tracing the lead blade's cut, brightest at the strike and gone
-  // by rest — the visual cue that it just sliced through the enemy.
-  if (anim > 0.05) {
-    drawSlashArc(ctx, frontHx, frontHy, leadRest * deg, leadStrike * deg, anim);
-  }
-  // Off-hand blade first so the lead blade overlaps it when they cross.
-  drawShortSword(ctx, backHx, backHy, offAng, 9, steel, steelDark);
-  drawShortSword(ctx, frontHx, frontHy, leadAng, 10, steel, steelDark);
+  const u = 1 - Math.max(0, Math.min(1, anim));
+  const lead = leadPoseAt(u);
+  const off = offPoseAt(u);
+  arm(ctx, -sho, P_SHOULDER_Y, off.x, off.y, backLook, off.bend);
+  arm(ctx, sho, P_SHOULDER_Y, lead.x, lead.y, look, lead.bend);
+  cloak();
+  drawShortSword(ctx, off.x, off.y, off.ang * DEG, OFF_LEN, steel, steelDark);
+  fist(ctx, off.x, off.y, backLook);
+  drawShortSword(ctx, lead.x, lead.y, lead.ang * DEG, LEAD_LEN, steel, steelDark);
+  fist(ctx, lead.x, lead.y, look);
 }
 
+/** A closed hand over a sword grip — the same disc `arm` ends in. */
+function fist(ctx: CanvasRenderingContext2D, x: number, y: number, look: ArmLook): void {
+  ctx.fillStyle = look.hand;
+  ctx.beginPath();
+  ctx.arc(x, y, Math.max(1.1, (look.w / 2) * 0.66), 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// Cut windows (in swing progress `u`) for each blade.
+const LEAD_CUT_U: [number, number] = [0.04, 0.36];
+const OFF_CUT_U: [number, number] = [0.3, 0.62];
+const leadPoseAt = (u: number) => swingPose(u, LEAD_GUARD, LEAD_RAISED, LEAD_CUT, ...LEAD_CUT_U);
+const offPoseAt = (u: number) => swingPose(u, OFF_GUARD, OFF_LOW, OFF_CUT, ...OFF_CUT_U);
+
 /**
- * A quick crescent slash streak sweeping the arc the lead blade cuts through —
- * centred on the lead hand `(cx, cy)`, spanning `a0`→`a1` (radians, the blade's
- * rest→strike sweep) just past the blade's reach. A soft wide glow under a bright
- * thin core, its opacity scaled by `anim` so it flashes on the strike and fades
- * out as the blade recovers. Drawn in the figure's already-flipped local space.
+ * The Blade adventurer's slash streaks for attack value `anim` (same meaning as
+ * in `drawUnitSprite`), drawn by the renderer straight after the figure in the
+ * same local frame — outside the compositor, so they stay clean light rather
+ * than inked shapes. `faceLeft` mirrors them like the sprite.
  */
-function drawSlashArc(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  a0: number,
-  a1: number,
-  anim: number,
-): void {
-  const a = Math.max(0, Math.min(1, anim));
-  const r = 11.5;
+export function drawBladeTrails(ctx: CanvasRenderingContext2D, faceLeft: boolean, anim: number): void {
+  const u = 1 - Math.max(0, Math.min(1, anim));
+  if (u >= 1) return;
   ctx.save();
-  ctx.lineCap = 'round';
-  // Soft outer glow.
-  ctx.strokeStyle = `rgba(233,240,248,${0.16 * a})`;
-  ctx.lineWidth = 3.4;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, a0, a1);
-  ctx.stroke();
-  // Bright thin core.
-  ctx.strokeStyle = `rgba(255,255,255,${0.55 * a})`;
-  ctx.lineWidth = 1.1;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, a0, a1);
-  ctx.stroke();
+  if (faceLeft) ctx.scale(-1, 1);
+  drawBladeTrail(ctx, offPoseAt, u, ...OFF_CUT_U, OFF_LEN);
+  drawBladeTrail(ctx, leadPoseAt, u, ...LEAD_CUT_U, LEAD_LEN);
   ctx.restore();
 }
 
 /**
- * One short sword pivoted at a hand `(hx, hy)`, its blade laid along `angle`
- * (radians, from +x, y-down) reaching `len` px: a wrapped grip and pommel, a
- * steel crossguard, and a tapered steel blade with a bright edge. Shared by both
- * of the Blade adventurer's hands.
+ * A slash streak behind a swinging blade: the path its tip swept over the last
+ * stretch of the cut window `[c0, c1]`, drawn as a ribbon that tapers to nothing
+ * at its tail and fades out once the cut is over.
+ */
+function drawBladeTrail(
+  ctx: CanvasRenderingContext2D,
+  poseAt: (u: number) => BladePose,
+  u: number,
+  c0: number,
+  c1: number,
+  len: number,
+): void {
+  if (u <= c0) return;
+  const head = Math.min(u, c1);
+  const tail = Math.max(c0, head - 0.13);
+  // Fade out over the recovery after the cut lands.
+  const fade = u <= c1 ? 1 : Math.max(0, 1 - (u - c1) / 0.18);
+  if (fade <= 0 || head - tail < 0.005) return;
+  const tip = (v: number) => {
+    const p = poseAt(v);
+    const r = len + 1.2;
+    return { x: p.x + Math.cos(p.ang * DEG) * r, y: p.y + Math.sin(p.ang * DEG) * r };
+  };
+  const N = 8;
+  ctx.save();
+  ctx.lineCap = 'round';
+  let prev = tip(tail);
+  for (let i = 1; i <= N; i++) {
+    const k = i / N; // 0 at the tail → 1 at the blade
+    const pt = tip(tail + (head - tail) * k);
+    ctx.strokeStyle = `rgba(214,228,244,${0.35 * k * fade})`;
+    ctx.lineWidth = 0.6 + 2.6 * k;
+    ctx.beginPath();
+    ctx.moveTo(prev.x, prev.y);
+    ctx.lineTo(pt.x, pt.y);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(255,255,255,${0.75 * k * fade})`;
+    ctx.lineWidth = 0.3 + 0.9 * k;
+    ctx.stroke();
+    prev = pt;
+  }
+  ctx.restore();
+}
+
+/**
+ * One short sword gripped at a hand `(hx, hy)`, its blade laid along `angle`
+ * (radians, from +x, y-down) reaching `len` px past the hand: a wrapped grip
+ * centred on the fist with a pommel behind it, a steel crossguard just ahead of
+ * it, and a tapered blade with a fuller and a bright edge. Draw it *before* the
+ * arm so the hand closes over the grip.
  */
 function drawShortSword(
   ctx: CanvasRenderingContext2D,
@@ -5919,144 +6035,263 @@ function drawShortSword(
   ctx.save();
   ctx.translate(hx, hy);
   ctx.rotate(angle);
-  // Grip + pommel behind the hand.
+  // Grip through the fist + pommel behind it.
   ctx.strokeStyle = '#4a3a2a';
-  ctx.lineWidth = 2.2;
+  ctx.lineWidth = 1.7;
   ctx.beginPath();
-  ctx.moveTo(-2.4, 0);
-  ctx.lineTo(0, 0);
+  ctx.moveTo(-2, 0);
+  ctx.lineTo(1.6, 0);
   ctx.stroke();
   ctx.fillStyle = steelDark;
   ctx.beginPath();
-  ctx.arc(-2.8, 0, 1, 0, Math.PI * 2);
+  ctx.arc(-2.3, 0, 0.95, 0, Math.PI * 2);
   ctx.fill();
-  // Crossguard.
+  // Crossguard, slightly swept toward the blade.
   ctx.strokeStyle = steelDark;
-  ctx.lineWidth = 1.8;
+  ctx.lineWidth = 1.4;
   ctx.beginPath();
-  ctx.moveTo(0, -2.2);
-  ctx.lineTo(0, 2.2);
+  ctx.moveTo(2.4, -2.3);
+  ctx.quadraticCurveTo(1.7, 0, 2.4, 2.3);
   ctx.stroke();
-  // Tapered blade + edge highlight.
+  // Tapered blade.
   ctx.fillStyle = steel;
   ctx.beginPath();
-  ctx.moveTo(0.4, -1.5);
-  ctx.lineTo(len, -0.6);
-  ctx.lineTo(len + 1.4, 0);
-  ctx.lineTo(len, 0.6);
-  ctx.lineTo(0.4, 1.5);
+  ctx.moveTo(2.4, -1.25);
+  ctx.lineTo(len - 1.2, -0.85);
+  ctx.lineTo(len + 0.6, 0);
+  ctx.lineTo(len - 1.2, 0.85);
+  ctx.lineTo(2.4, 1.25);
   ctx.closePath();
   ctx.fill();
-  ctx.strokeStyle = '#eef3f8';
-  ctx.lineWidth = 0.7;
+  // Fuller groove down the middle, then a bright edge along the top.
+  ctx.strokeStyle = steelDark;
+  ctx.lineWidth = 0.45;
   ctx.beginPath();
-  ctx.moveTo(1, -0.3);
-  ctx.lineTo(len - 0.6, -0.1);
+  ctx.moveTo(3, 0.15);
+  ctx.lineTo(len - 3, 0.1);
+  ctx.stroke();
+  ctx.strokeStyle = '#eef3f8';
+  ctx.lineWidth = 0.6;
+  ctx.beginPath();
+  ctx.moveTo(2.8, -0.85);
+  ctx.lineTo(len - 0.6, -0.4);
   ctx.stroke();
   ctx.restore();
 }
 
 /**
- * The Bow adventurer's shortbow and firing arms, in the base figure's local space
- * (already flipped for `faceLeft`). A compact bow held out front in the lead hand,
- * the rear hand drawing the string; `release` (0 = full draw at rest → 1 just
- * after loosing) snaps the string forward and empties the nock, mirroring the
- * Archer's bow so a burst reads as three quick draws. Draws its own raised arms
- * (the caller skips the default hanging ones for this pose). The nocked-arrow tip
- * sits at ~(13, -3.5), matching the engine's arrow muzzle.
+ * The Bow adventurer's shortbow and both arms, in the base figure's local space
+ * (already flipped for `faceLeft`). Two inputs drive it:
+ *  - `draw` (0..1): how far the archer has raised and drawn for the next shot —
+ *    0 is the relaxed rest (bow lowered and tilted, arrow nocked on a slack
+ *    string: cards, idle), 1 is aimed at full draw.
+ *  - `release` (1 the instant an arrow is loosed → 0): the shot. The string snaps
+ *    forward and shivers, the limbs spring back and the draw hand flicks past the
+ *    cheek; then a fresh arrow is nocked and pulled straight back to `draw`
+ *    (mid-volley that is full draw again). After the volley's last arrow
+ *    (`draw` 0) the bow stays up through the follow-through, then lowers.
+ * Phase boundaries match `attackAnimTime('player-bow')` (0.24s): snap for the
+ * first ~0.035s, re-nock and redraw by ~0.08s, the rest is follow-through.
+ * Aimed at full draw the arrowhead sits at ~(12.5, -3.5), the engine's muzzle.
+ * Layered like the Blade: sleeves → `cloak` → bow, string and arrow → fists.
  */
 function drawPlayerShortbow(
   ctx: CanvasRenderingContext2D,
   look: ArmLook,
   backLook: ArmLook,
   release: number,
+  draw: number,
+  cloak: () => void,
 ): void {
-  const gripX = 9;
-  const gripY = -4;
-  const bowCx = gripX - 1;
-  const bowCy = gripY + 2;
-  const bowR = 6.8; // short — a compact bow, unlike the Archer's longbow (8.5)
-  const a0 = -1.3;
-  const a1 = 1.3;
-  const drawBack = 4.5 * (1 - release);
-  const stringX = gripX - 6 - drawBack;
-  const stringY = gripY + 2.5;
+  const r = Math.max(0, Math.min(1, release));
+  const d = Math.max(0, Math.min(1, draw));
+  const SNAP = 0.854; // r above this: string snapped forward, no arrow
+  const NOCKED = 0.667; // r below this: the redraw is complete
+  const snapping = r > SNAP;
+  // Bow raised to aim: held by the draw, or up through the shot and its
+  // follow-through, lowering as `release` runs out after the volley's last arrow.
+  const raise = ease.inOutSine(Math.max(d, Math.min(1, r / NOCKED)));
+  // String pull: 0 while snapped, ramping back to the draw as the next arrow nocks.
+  const renock = snapping ? 0 : r > NOCKED ? 1 - (r - NOCKED) / (SNAP - NOCKED) : 1;
+  const pull = d * ease.outCubic(renock);
+  // Follow-through flick of the draw hand just after the loose.
+  const flick = snapping ? (r - SNAP) / (1 - SNAP) : 0;
 
-  // Draw arm first: it sits behind the bow and the string.
-  arm(ctx, -1, -4.8, stringX, stringY, backLook, 1.4);
+  // Grip + bow tilt: lowered and pointed down-forward at rest, level when aimed.
+  const gx = 6.2 + (9 - 6.2) * raise;
+  const gy = 0.6 + (-4 - 0.6) * raise;
+  const tilt = 0.62 * (1 - raise);
+  const cos = Math.cos(tilt);
+  const sin = Math.sin(tilt);
+  const toWorld = (x: number, y: number) => ({ x: gx + x * cos - y * sin, y: gy + x * sin + y * cos });
 
-  // Bow limb (compact brown arc, belly forward) with a thin lit edge.
+  // Bow geometry in its own frame: grip at the origin, belly toward +x, limb tips
+  // flexing back and in as the string is drawn.
+  const tipX = -1.4 - 1.5 * pull;
+  const tipY = 6.6 - 0.5 * pull;
+  const nockX = tipX - 6 * pull;
+  // A shivering string just after the loose.
+  const shiver = snapping ? Math.sin(r * 90) * 0.9 * flick : 0;
+
+  // Draw hand: on the nock point, flicked back and up past the cheek on release.
+  const nockW = toWorld(nockX + shiver, 0);
+  const hand = snapping ? { x: nockW.x - 2.6 * flick, y: nockW.y - 1.2 * flick } : nockW;
+
+  // Sleeves, then the mantle over their shoulders; the bow and fists go on top.
+  arm(ctx, -2.4, -5.2, hand.x, hand.y, backLook, 1.1);
+  arm(ctx, 1.5, -5.2, gx + 0.4, gy, look, 0.5 + 0.6 * (1 - raise));
+  cloak();
+
+  ctx.save();
+  ctx.translate(gx, gy);
+  ctx.rotate(tilt);
+  // Limbs: two recurved strokes from the grip to the tips, wood then a lit edge.
+  const limbs = () => {
+    ctx.beginPath();
+    ctx.moveTo(tipX, -tipY);
+    ctx.quadraticCurveTo(1.9, -tipY * 0.55, 0.9, 0);
+    ctx.quadraticCurveTo(1.9, tipY * 0.55, tipX, tipY);
+  };
   ctx.strokeStyle = '#6e4a26';
   ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(bowCx, bowCy, bowR, a0, a1);
+  limbs();
   ctx.stroke();
   ctx.strokeStyle = 'rgba(255,240,210,0.5)';
+  ctx.lineWidth = 0.7;
+  limbs();
+  ctx.stroke();
+  // Leather grip wrap.
+  ctx.strokeStyle = '#3e2a18';
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.moveTo(1, -1.3);
+  ctx.lineTo(1, 1.3);
+  ctx.stroke();
+  // String: tip → nock → tip.
+  ctx.strokeStyle = 'rgba(255,255,255,0.75)';
   ctx.lineWidth = 0.8;
   ctx.beginPath();
-  ctx.arc(bowCx, bowCy, bowR, a0, a1);
+  ctx.moveTo(tipX, -tipY);
+  ctx.lineTo(nockX + shiver, 0);
+  ctx.lineTo(tipX, tipY);
   ctx.stroke();
-
-  // Bowstring from top limb to the draw hand to the bottom limb.
-  const topX = bowCx + Math.cos(a0) * bowR;
-  const topY = bowCy + Math.sin(a0) * bowR;
-  const botX = bowCx + Math.cos(a1) * bowR;
-  const botY = bowCy + Math.sin(a1) * bowR;
-  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(topX, topY);
-  ctx.lineTo(stringX, stringY);
-  ctx.lineTo(botX, botY);
-  ctx.stroke();
-
-  // Nocked arrow (only while still drawn) — shaft to a small steel head out front.
-  if (release < 0.5) {
+  // Nocked arrow (not while the string is snapped): shaft, fletching and head,
+  // riding the string so it slides back with the draw.
+  if (!snapping) {
+    const tail = nockX;
+    const head = nockX + 12.5;
     ctx.strokeStyle = '#d8d2c0';
-    ctx.lineWidth = 1.3;
+    ctx.lineWidth = 1.1;
     ctx.beginPath();
-    ctx.moveTo(stringX, stringY);
-    ctx.lineTo(gripX + 4, gripY + 0.5);
+    ctx.moveTo(tail, 0);
+    ctx.lineTo(head - 1.6, 0);
+    ctx.stroke();
+    ctx.strokeStyle = '#b8a888';
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(tail + 0.4, 0);
+    ctx.lineTo(tail - 1.2, -1.3);
+    ctx.moveTo(tail + 0.4, 0);
+    ctx.lineTo(tail - 1.2, 1.3);
     ctx.stroke();
     ctx.fillStyle = '#c9d2dc';
     ctx.beginPath();
-    ctx.moveTo(gripX + 4, gripY - 1);
-    ctx.lineTo(gripX + 6.4, gripY + 0.5);
-    ctx.lineTo(gripX + 4, gripY + 2);
+    ctx.moveTo(head - 2, -1.2);
+    ctx.lineTo(head + 0.4, 0);
+    ctx.lineTo(head - 2, 1.2);
     ctx.closePath();
     ctx.fill();
   }
+  ctx.restore();
 
-  // Bow arm out to the grip, over the limb.
-  arm(ctx, 1.5, -5.2, gripX, gripY, look, 0.5);
+  fist(ctx, hand.x, hand.y, backLook);
+  fist(ctx, gx + 0.4, gy, look);
+}
+
+/** Body radius of the Magic adventurer's orb as it charges (`charge` 0..1). */
+export function magicOrbRadius(charge: number): number {
+  return 1.2 + 4.3 * Math.max(0, Math.min(1, charge));
 }
 
 /**
- * The Magic adventurer's arms (there is no staff). At rest (`charge` = 0) both
- * bare hands hang at the sides exactly like the other champions, so the resting
- * pose reads normally on cards and while idle on the board. As the orb charges
- * (`charge` → 1) the hands rise and reach forward to cup it in front of the
- * figure. Drawn in the sprite's local space (authored facing +x). The orb itself
- * is not drawn here — the renderer paints it between the raised hands so it can
- * take the player's colour and animate.
+ * Where the Magic adventurer holds its orb while charging, in the sprite's local
+ * space (authored facing +x; mirror x for `faceLeft`): gathered out in front of
+ * the chest, then drawn back toward the body as it swells (the wind-up). The
+ * renderer paints the orb here and the hands cup it.
+ */
+export function magicOrbAnchor(charge: number): { x: number; y: number } {
+  const k = ease.inOutSine(Math.max(0, Math.min(1, charge)));
+  return { x: 8.8 - 2.2 * k, y: -3.9 - 1.3 * k };
+}
+
+/**
+ * Midpoint of the Magic adventurer's thrust-out hands (local, facing +x): where an
+ * orb is launched from and where a Mana Ray leaves the palms.
+ */
+export const MAGIC_CAST_POINT = { x: 11.4, y: -4.6 };
+
+/**
+ * The Magic adventurer's arms (there is no staff), in the sprite's local space
+ * (authored facing +x). The attack flows through four beats:
+ *  - rest: hands at the sides, like the other champions (cards, idle);
+ *  - gather + build (`charge` 0 → 1): the hands rise to the front of the chest,
+ *    one above and one below the orb, then draw it back toward the body as it
+ *    swells, staying cupped around its edge at every size (`magicOrbAnchor`);
+ *  - throw (`release` 1 → 0.7): both palms thrust out to `MAGIC_CAST_POINT`,
+ *    launching the orb (held there for the whole Mana Ray channel);
+ *  - recover (`release` 0.7 → 0): the hands ease back down to the sides.
+ * The upper arms go under the mantle / scarf (`cloak`) and the forearms are
+ * repainted over it, so raised hands are never hidden. The orb itself is drawn by
+ * the renderer so it can take the player's colour and animate.
  */
 function drawPlayerCastArms(
   ctx: CanvasRenderingContext2D,
   look: ArmLook,
   backLook: ArmLook,
+  release: number,
   charge: number,
   b: { hw: number },
   sho: number,
+  cloak: () => void,
 ): void {
-  const k = Math.max(0, Math.min(1, charge));
-  const reach = 1.6 * k;
-  // Each hand eases from its resting spot at the side to a forward cupping spot
-  // that frames the gap where the orb forms.
-  const lerp = (a: number, c: number) => a + (c - a) * k;
-  const frontX = lerp(b.hw - 0.5, 10 + reach); // upper/front hand
-  const frontY = lerp(4, -6);
-  const rearX = lerp(-b.hw + 1.5, 9.5 + reach); // lower/rear hand
-  const rearY = lerp(3.5, -1.5);
-  arm(ctx, -sho, P_SHOULDER_Y, rearX, rearY, backLook, lerp(0.7, 1));
-  arm(ctx, sho, P_SHOULDER_Y, frontX, frontY, look, lerp(-0.7, 0.8));
+  const r = Math.max(0, Math.min(1, release));
+  const c = Math.max(0, Math.min(1, charge));
+  type Hand = { x: number; y: number; bend: number };
+  const mix = (a: Hand, z: Hand, k: number): Hand => ({
+    x: a.x + (z.x - a.x) * k,
+    y: a.y + (z.y - a.y) * k,
+    bend: a.bend + (z.bend - a.bend) * k,
+  });
+  const restF: Hand = { x: b.hw - 0.5, y: 4, bend: -0.7 };
+  const restR: Hand = { x: -b.hw + 1.5, y: 3.5, bend: 0.7 };
+  const thrustF: Hand = { x: MAGIC_CAST_POINT.x + 0.3, y: MAGIC_CAST_POINT.y - 1.9, bend: 0.4 };
+  const thrustR: Hand = { x: MAGIC_CAST_POINT.x - 0.3, y: MAGIC_CAST_POINT.y + 1.9, bend: 0.6 };
+
+  let front: Hand;
+  let rear: Hand;
+  if (r > 0) {
+    // Throw, then recover down to rest.
+    const k = r >= 0.7 ? 1 : ease.inOutSine(r / 0.7);
+    front = mix(restF, thrustF, k);
+    rear = mix(restR, thrustR, k);
+  } else if (c > 0) {
+    // Hands cup the orb: just above and below its edge, wherever it is.
+    const o = magicOrbAnchor(c);
+    const gap = magicOrbRadius(c) + 0.9;
+    const cupF: Hand = { x: o.x + 0.4, y: o.y - gap, bend: 1 };
+    const cupR: Hand = { x: o.x - 0.4, y: o.y + gap, bend: 1.1 };
+    // Rise from rest over the first part of the charge (the gather).
+    const g = ease.inOutSine(Math.min(1, c / 0.3));
+    front = mix(restF, cupF, g);
+    rear = mix(restR, cupR, g);
+  } else {
+    front = restF;
+    rear = restR;
+  }
+
+  arm(ctx, -sho, P_SHOULDER_Y, rear.x, rear.y, backLook, rear.bend);
+  arm(ctx, sho, P_SHOULDER_Y, front.x, front.y, look, front.bend);
+  cloak();
+  forearm(ctx, -sho, P_SHOULDER_Y, rear.x, rear.y, backLook, rear.bend);
+  forearm(ctx, sho, P_SHOULDER_Y, front.x, front.y, look, front.bend);
 }

@@ -196,6 +196,21 @@ export function arm(ctx: Ctx, sx: number, sy: number, hx: number, hy: number, lo
   const ex = (sx + hx) / 2 + (-dy / len) * bend;
   const ey = (sy + hy) / 2 + (dx / len) * bend;
   seg(ctx, sx, sy, ex, ey, r, r * 0.84, look.sleeve);
+  forearm(ctx, sx, sy, hx, hy, look, bend);
+}
+
+/**
+ * Just the lower half of `arm` with the same arguments: the forearm from the
+ * elbow, the cuff and the hand. Repainting it over a mantle lets a raised
+ * forearm sit in front of a cloak that still covers the upper arm.
+ */
+export function forearm(ctx: Ctx, sx: number, sy: number, hx: number, hy: number, look: ArmLook, bend = 1.2): void {
+  const r = look.w / 2;
+  const dx = hx - sx;
+  const dy = hy - sy;
+  const len = Math.hypot(dx, dy) || 0.001;
+  const ex = (sx + hx) / 2 + (-dy / len) * bend;
+  const ey = (sy + hy) / 2 + (dx / len) * bend;
   if (look.bell) {
     // A flared sleeve: the cuff opening is wider than the elbow.
     seg(ctx, ex, ey, hx - (hx - ex) * 0.18, hy - (hy - ey) * 0.18, r * 0.84, r * 1.25, look.sleeve);

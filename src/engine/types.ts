@@ -88,6 +88,20 @@ export interface Enemy {
   deathT: number;
 }
 
+/**
+ * Seconds a champion's normal-attack animation (`Tower.attackAnim`) runs. Purely
+ * cosmetic. The Blade adventurer's wind-up → double cut needs longer to read; the
+ * Bow adventurer's covers a loose, re-nock and follow-through (mid-volley the
+ * next arrow restarts it before the follow-through, see `drawPlayerShortbow`); the
+ * Magic adventurer's covers its two-handed throw and the recovery to rest.
+ */
+export function attackAnimTime(shape: string): number {
+  if (shape === 'player-blade') return 0.3;
+  if (shape === 'player-bow') return 0.24;
+  if (shape === 'player-magic') return 0.35;
+  return 0.18;
+}
+
 /** Whether an enemy is still delivering its spawn lines (frozen & untargetable). */
 export function isSpeaking(e: Enemy): boolean {
   return (
@@ -290,6 +304,12 @@ export interface Tower {
   /** Countdown to the beam's next damage tick, in seconds (see `tickInterval`). */
   beamTickTimer: number;
   /**
+   * A pending second strike (the Blade adventurer's off-hand cut): lands on
+   * `targetUid` for `damage` (crit rolled when it lands) once `timer` runs out.
+   * null when nothing is pending.
+   */
+  followUp: { timer: number; targetUid: number; damage: number } | null;
+  /**
    * Player-activated ability this tower has unlocked (the Blade's Cyclone Slash),
    * or null. Set from the unit's upgrade tiers (see `effectiveAbility`) on deploy
    * and refolded on every tier bump, so a hero auto-levelling into the ability's
@@ -303,12 +323,15 @@ export interface Tower {
   abilityCooldownMax: number;
   /**
    * Current mana pool for a hero champion (0 for units without one). Abilities
-   * are paid for in mana; casting drains it and killing enemies refills it, up to
+   * are paid for in mana; casting drains it, and killing enemies (plus any
+   * `manaRegen`) refills it, up to
    * `maxMana`. Shown as the mana bar in the in-stage champion panel.
    */
   mana: number;
   /** Mana capacity (from `UnitDef.maxMana`; 0 for units with no mana pool). */
   maxMana: number;
+  /** Mana regained per second regardless of kills (from `UnitDef.manaRegen`). */
+  manaRegen: number;
 }
 
 export type ShotStyle = 'bolt' | 'slash' | 'line';
@@ -507,6 +530,8 @@ export type FxEvent =
       amount: number;
       /** Fraction of the enemy's max health this blow took (0..1). */
       weight: number;
+      /** Caster colour that replaces the element's ramp (see `fxTintFor`). */
+      tint?: string;
     }
   | {
       kind: 'kill';
@@ -514,6 +539,7 @@ export type FxEvent =
       fromX: number;
       fromY: number;
       element: FxElement;
+      tint?: string;
     }
   | {
       kind: 'blast';
@@ -523,6 +549,7 @@ export type FxEvent =
       color: string;
       element: FxElement;
       crit: boolean;
+      tint?: string;
     }
   | {
       kind: 'cast';

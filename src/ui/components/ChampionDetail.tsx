@@ -8,6 +8,7 @@ import { RARITIES } from '../../domain/rarity';
 import { championRole, championStatTiles } from '../championStats';
 import { UnitSprite } from './UnitSprite';
 import { Icon } from './Icon';
+import { BardSoundToggle } from './BardSoundToggle';
 
 interface Props {
   unit: UnitDef;
@@ -18,6 +19,8 @@ interface Props {
   purchased: string[];
   /** Open this champion's mastery skill-tree menu. */
   onOpenMastery: () => void;
+  /** Open the armory (the player's own adventurer only). */
+  onOpenArmory?: () => void;
   onClose: () => void;
 }
 
@@ -33,6 +36,7 @@ export function ChampionDetail({
   availableExp,
   purchased,
   onOpenMastery,
+  onOpenArmory,
   onClose,
 }: Props) {
   const rarity = RARITIES[unit.rarity];
@@ -90,7 +94,17 @@ export function ChampionDetail({
                 </span>
                 <span className="cd-mastery-sub">{expSource}</span>
               </button>
-            ) : (
+            ) : null}
+            {owned && onOpenArmory && (
+              <button type="button" className="cd-mastery cd-armory" onClick={onOpenArmory}>
+                <span className="cd-mastery-main">
+                  <Icon name="shield" /> Armory
+                </span>
+                <span className="cd-mastery-sub">Helmet, chestplate, leg piece and boots. Found on bosses.</span>
+              </button>
+            )}
+            {unit.bard && <BardSoundToggle className="cd-bard-sound" />}
+            {!owned && (
               <div className="cd-mastery locked">
                 <span className="cd-mastery-main">
                   <Icon name="lock" /> Not yet summoned

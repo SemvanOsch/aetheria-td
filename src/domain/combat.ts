@@ -17,14 +17,15 @@ export const BASE_CRIT_CHANCE = 0.05;
 export const CRIT_MULTIPLIER = 1.5;
 
 /**
- * A unit's crit chance (0–1): the flat base plus any purchased mastery bonuses.
+ * A unit's crit chance (0–1): the flat base plus any purchased mastery bonuses
+ * and worn equipment (`gearBonus`).
  * This is the one place crit chance is resolved — future passives add here too.
  */
 export function critChanceFor(
   unit: UnitDef,
   purchased: readonly string[] = [],
 ): number {
-  return BASE_CRIT_CHANCE + masteryCritChanceBonus(unit.id, purchased);
+  return BASE_CRIT_CHANCE + masteryCritChanceBonus(unit.id, purchased) + (unit.gearBonus?.critChance ?? 0);
 }
 
 /**
@@ -35,5 +36,7 @@ export function critMultiplierFor(
   unit: UnitDef,
   purchased: readonly string[] = [],
 ): number {
-  return masteryCritMultiplier(unit.id, purchased) ?? CRIT_MULTIPLIER;
+  // Plus any crit damage from worn equipment (`gearBonus`).
+  const base = masteryCritMultiplier(unit.id, purchased) ?? CRIT_MULTIPLIER;
+  return Math.round((base + (unit.gearBonus?.critMultiplier ?? 0)) * 100) / 100;
 }

@@ -17,7 +17,13 @@ import {
   type ReactNode,
 } from 'react';
 import {
+  addArmor,
   addEnemyKills,
+  equipArmor as equipArmorTx,
+  equippedArmor,
+  isArmorUnlocked,
+  salvageArmor as salvageArmorTx,
+  unequipArmor as unequipArmorTx,
   addGems,
   addMastery,
   addUnit,
@@ -29,7 +35,9 @@ import {
   recordEndlessRun as recordEndlessRunTx,
   saveState,
   reorderTeam as reorderTeamTx,
+  placeInTeam as placeInTeamTx,
   setPlayerProfile as setPlayerProfileTx,
+  setPlayerChampionClass as setPlayerChampionClassTx,
   setAudioSettings as setAudioSettingsTx,
   setPrefs as setPrefsTx,
   setActiveMasteryUpgrade as setActiveMasteryUpgradeTx,
@@ -42,6 +50,7 @@ import {
 import type { PlayerSpriteConfig } from '../domain/playerSprite';
 import type { SectionId } from '../domain/levels';
 import type { Proficiency } from '../domain/proficiency';
+import type { ArmorRoll, ArmorSlot } from '../domain/armor';
 import { syncPlayerChampions } from '../domain/playerChampion';
 import {
   canAffordSummon,
@@ -52,12 +61,20 @@ import {
 } from './summon';
 import { GameContext, type GameStore } from './gameContext';
 
+/** The armor whose bonuses apply: none until the armor node is learned. */
+function wornArmor(state: GameState) {
+  return isArmorUnlocked(state) ? equippedArmor(state) : [];
+}
+
 export function GameProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<GameState>(() => {
     const initial = loadState();
     // Register the player's champion(s) so getUnit resolves them from the very
     // first render (Collection, deploy list, board) — before any commit runs.
-    syncPlayerChampions(initial.player, initial.ownedUnits);
+    syncPlayerChampions(initial.player, initial.ownedUnits, wornArmor(initial));
+    // Persist the migrated state at once: some migrations roll random values
+    // (old armor re-rolls its stats), which must not re-roll on every load.
+    saveState(initial);
     return initial;
   });
   // Keep a ref in sync so actions can read the latest state without stale
@@ -66,9 +83,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
   const commit = useCallback((next: GameState) => {
     // Keep the player-champion registry matched to committed state (profile edits
-    // change the avatar; a grant adds the champion). Cheap and idempotent, so it
-    // rides every commit rather than being threaded through each action.
-    syncPlayerChampions(next.player, next.ownedUnits);
+    // change the avatar; a grant adds the champion; armor changes its stats and
+    // look). Cheap and idempotent, so it rides every commit rather than being
+    // threaded through each action.
+    syncPlayerChampions(next.player, next.ownedUnits, wornArmor(next));
     stateRef.current = next;
     saveState(next);
     setState(next);
@@ -153,6 +171,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
     [commit],
   );
 
+  const placeInTeam = useCallback(
+    (unitId: string, index: number) => {
+      commit(placeInTeamTx(stateRef.current, unitId, index));
+    },
+    [commit],
+  );
+
   const setPrefs = useCallback(
     (patch: Partial<UiPrefs>) => {
       commit(setPrefsTx(stateRef.current, patch));
@@ -174,9 +199,44 @@ export function GameProvider({ children }: { children: ReactNode }) {
     [commit],
   );
 
+  const setPlayerChampionClass = useCallback(
+    (proficiency: Proficiency) => {
+      commit(setPlayerChampionClassTx(stateRef.current, proficiency));
+    },
+    [commit],
+  );
+
   const markChapterRead = useCallback(
     (index: number) => {
       commit(markChapterReadTx(stateRef.current, index));
+    },
+    [commit],
+  );
+
+  const awardArmor = useCallback(
+    (rolls: ArmorRoll[]) => {
+      commit(addArmor(stateRef.current, rolls));
+    },
+    [commit],
+  );
+
+  const equipArmor = useCallback(
+    (id: string) => {
+      commit(equipArmorTx(stateRef.current, id));
+    },
+    [commit],
+  );
+
+  const unequipArmor = useCallback(
+    (slot: ArmorSlot) => {
+      commit(unequipArmorTx(stateRef.current, slot));
+    },
+    [commit],
+  );
+
+  const salvageArmor = useCallback(
+    (ids: string[]) => {
+      commit(salvageArmorTx(stateRef.current, ids));
     },
     [commit],
   );
@@ -205,15 +265,21 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setMasteryDisabled,
       toggleTeamMember,
       reorderTeam,
+      placeInTeam,
       setPrefs,
       setAudioSettings,
       setPlayerProfile,
+      setPlayerChampionClass,
       markChapterRead,
+      awardArmor,
+      equipArmor,
+      unequipArmor,
+      salvageArmor,
       resetAccount,
       grantGems,
       summonCost: SUMMON_COST,
     }),
-    [state, summon, completeLevel, recordEndlessRun, awardMastery, awardEnemyKills, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, reorderTeam, setPrefs, setAudioSettings, setPlayerProfile, markChapterRead, resetAccount, grantGems],
+    [state, summon, completeLevel, recordEndlessRun, awardMastery, awardEnemyKills, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, reorderTeam, placeInTeam, setPrefs, setAudioSettings, setPlayerProfile, setPlayerChampionClass, markChapterRead, awardArmor, equipArmor, unequipArmor, salvageArmor, resetAccount, grantGems],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

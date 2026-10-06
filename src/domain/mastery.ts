@@ -157,6 +157,17 @@ export interface MasteryUpgradeDef {
   bardSpeedBonus?: number;
   /** Extra seconds a Bard's tune lasts on each ally. Read through `masteryBard`. */
   bardDurationBonus?: number;
+  /**
+   * Multiplier on the wave-clear EXP a Hero pools to auto-level in a stage (e.g.
+   * 1.1 = +10%). Read through `masteryHeroExpMult`.
+   */
+  heroExpMult?: number;
+  /**
+   * Unlocks the armor system (domain/armor) for the player’s adventurer:
+   * until a node with this flag is learned, armor neither drops nor applies and
+   * the journal shows the slots locked. Read through `masteryUnlocksArmor`.
+   */
+  unlocksArmor?: boolean;
 }
 
 /**
@@ -417,87 +428,84 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
   'player-blade': [
     {
       id: 'dual_discipline',
-      name: 'Dual Discipline',
-      description: 'Drilled to fight with a blade in each hand - +10% attack speed.',
+      name: 'Honed will',
+      description: 'Strengthen your resolve, increasing damage dealt. - +10% damage.',
       cost: 100,
-      attackSpeedMult: 1.1,
-    },
-    {
-      id: 'keen_edges',
-      name: 'Keen Edges',
-      description: 'Both swords are kept razor-honed - +10% damage.',
-      cost: 100,
-      requires: 'dual_discipline',
       damageMult: 1.1,
     },
     {
+      id: 'battle_lessons',
+      name: 'Hero’s instinct',
+      description: 'Grow stronger from every encounter. - +10% instage Exp Earned.',
+      cost: 100,
+      requires: 'dual_discipline',
+      heroExpMult: 1.1,
+    },
+    {
       id: 'perfect_balance',
-      name: 'Perfect Balance',
+      name: 'Ironclad',
       description:
-        'A duelist’s eye for the opening — +12% critical hit chance, and criticals now strike for 2× instead of 1.5×.',
+        'Unlocks armor - won from endless bosses.',
       cost: 250,
-      requires: 'keen_edges',
+      requires: 'battle_lessons',
       major: true,
-      critChanceBonus: 0.12,
-      critMultiplier: 2,
+      unlocksArmor: true,
     },
   ],
   // The player's Bow adventurer. Keyed by the stable path id like the Blade tree.
   'player-bow': [
     {
       id: 'keen_sight',
-      name: 'Keen Sight',
-      description: 'A hunter’s eye for the vital gap - +7.5% critical hit chance.',
+      name: 'Honed will',
+      description: 'Strengthen your resolve, increasing damage dealt. - +10% damage.',
       cost: 100,
-      critChanceBonus: 0.075,
+      damageMult: 1.1,
     },
     {
-      id: 'fleet_fingers',
-      name: 'Fleet Fingers',
-      description: 'Nimble hands nock and loose faster - +10% attack speed (quicker volleys).',
+      id: 'hunters_instinct',
+      name: 'Hero’s Instinct',
+      description: 'Grow stronger from every encounter. - +10% instage Exp Earned.',
       cost: 100,
       requires: 'keen_sight',
-      attackSpeedMult: 1.1,
+      heroExpMult: 1.1,
     },
     {
       id: 'eagle_eye',
-      name: 'Eagle Eye',
+      name: 'Ironclad',
       description:
-        'A steady, far-seeing aim — +10% attack range and +10% damage on every arrow.',
+        'Unlocks armor - won from endless bosses.',
       cost: 250,
-      requires: 'fleet_fingers',
+      requires: 'hunters_instinct',
       major: true,
-      rangeMult: 1.1,
-      damageMult: 1.1,
+      unlocksArmor: true,
     },
   ],
   // The player's Magic adventurer. Keyed by the stable path id like the others.
   'player-magic': [
     {
       id: 'focused_will',
-      name: 'Focused Will',
-      description: 'A disciplined mind gathers the orb faster - +10% attack speed.',
+      name: 'Honed will',
+      description: 'Strengthen your resolve, increasing damage dealt. - +10% damage.',
       cost: 100,
-      attackSpeedMult: 1.1,
-    },
-    {
-      id: 'raw_power',
-      name: 'Raw Power',
-      description: 'A denser, angrier orb - +10% damage on every burst.',
-      cost: 100,
-      requires: 'focused_will',
       damageMult: 1.1,
     },
     {
+      id: 'arcane_study',
+      name: 'Hero’s instinct',
+      description: 'Grow stronger from every encounter. - +10% instage Exp Earned.',
+      cost: 100,
+      requires: 'focused_will',
+      heroExpMult: 1.1,
+    },
+    {
       id: 'arcane_mastery',
-      name: 'Arcane Mastery',
+      name: 'Ironclad',
       description:
-        'Command of the arcane — +10% attack range and +15% damage on every burst.',
+        'Unlocks armor - won from endless bosses.',
       cost: 250,
-      requires: 'raw_power',
+      requires: 'arcane_study',
       major: true,
-      rangeMult: 1.1,
-      damageMult: 1.15,
+      unlocksArmor: true,
     },
   ],
 };
@@ -505,6 +513,16 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
 /** The skill tree for a champion (empty if it has none). */
 export function masteryTree(unitId: string): MasteryUpgradeDef[] {
   return MASTERY_TREES[unitId] ?? [];
+}
+
+/** Whether a champion’s learned nodes include one that unlocks armor. */
+export function masteryUnlocksArmor(unitId: string, purchased: readonly string[]): boolean {
+  return masteryTree(unitId).some((n) => n.unlocksArmor && purchased.includes(n.id));
+}
+
+/** The node that unlocks armor in a champion’s tree, if it has one. */
+export function armorUnlockNode(unitId: string): MasteryUpgradeDef | undefined {
+  return masteryTree(unitId).find((n) => n.unlocksArmor);
 }
 
 /** Look up a single skill-tree node by champion + upgrade id. */
@@ -691,6 +709,18 @@ export function masteryCritMultiplier(
   return mult;
 }
 
+/** Combined multiplier on a Hero's in-stage level-up EXP from purchased nodes (1 = none). */
+export function masteryHeroExpMult(
+  unitId: string,
+  purchased: readonly string[],
+): number {
+  let mult = 1;
+  for (const u of masteryTree(unitId)) {
+    if (u.heroExpMult && purchased.includes(u.id)) mult *= u.heroExpMult;
+  }
+  return mult;
+}
+
 /** Combined multiplier on a champion's damage from purchased nodes (1 = none). */
 export function masteryDamageMult(
   unitId: string,
@@ -784,10 +814,12 @@ export function masteryStats(
   purchased: readonly string[],
 ): MasteryStats {
   const s = effectiveStats(unit, tier);
+  // Worn equipment (the player's armor) multiplies on top of mastery.
+  const gear = unit.gearBonus;
   return {
-    damage: Math.round(s.damage * masteryDamageMult(unit.id, purchased)),
-    attackSpeed: s.attackSpeed * masteryAttackSpeedMult(unit.id, purchased),
-    range: Math.round(s.range * masteryRangeMult(unit.id, purchased)),
+    damage: Math.round(s.damage * masteryDamageMult(unit.id, purchased) * (gear?.damageMult ?? 1)),
+    attackSpeed: s.attackSpeed * masteryAttackSpeedMult(unit.id, purchased) * (gear?.attackSpeedMult ?? 1),
+    range: Math.round(s.range * masteryRangeMult(unit.id, purchased) * (gear?.rangeMult ?? 1)),
   };
 }
 

@@ -4,6 +4,8 @@ import {
   activeMasteryUpgradesFor,
   availableMasteryExp,
   effectiveMasteryUpgradesFor,
+  equippedArmor,
+  isArmorUnlocked,
   hasAffordableMasteryUpgrade,
   isInTeam,
   isLockedChampion,
@@ -19,6 +21,10 @@ import { proficiencyDef } from '../../domain/proficiency';
 import { RARITIES } from '../../domain/rarity';
 import { championRole, championStatTiles } from '../championStats';
 import { ChampionDetail } from './ChampionDetail';
+import { Armory } from './Armory';
+import { ArmorIcon } from './ArmorIcon';
+import { ARMOR_RARITIES, ARMOR_SLOTS, armorPieceName, type ArmorPiece, type ArmorSlot } from '../../domain/armor';
+import { armorUnlockNode } from '../../domain/mastery';
 import { MasteryTree } from './MasteryTree';
 import { UnitSprite } from './UnitSprite';
 import { Icon } from './Icon';
@@ -41,7 +47,7 @@ interface Props {
  * of nine at a time.
  */
 export function JournalChampions({ ready, onTurn }: Props) {
-  const { state, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, reorderTeam, setPrefs } =
+  const { state, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, reorderTeam, placeInTeam, setPrefs } =
     useGame();
   const sortDir = state.prefs.championSort;
   const showMarks = state.prefs.showMasteryMarks;
@@ -77,13 +83,18 @@ export function JournalChampions({ ready, onTurn }: Props) {
 
   const [detail, setDetail] = useState<UnitDef | null>(null);
   const [masteryUnit, setMasteryUnit] = useState<UnitDef | null>(null);
+  // The armory, when open, and the slot tab it opens on ('all' = every piece).
+  const [armoryTab, setArmoryTab] = useState<ArmorSlot | 'all' | null>(null);
 
   // Team slot drag-to-reorder (the hero is pinned to the first slot).
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  // A roster card being dragged onto the company (its unit id).
+  const [rosterDrag, setRosterDrag] = useState<string | null>(null);
   const endDrag = () => {
     setDragIndex(null);
     setDragOverIndex(null);
+    setRosterDrag(null);
   };
 
   const turn = (dir: 'next' | 'prev') => {
@@ -110,6 +121,9 @@ export function JournalChampions({ ready, onTurn }: Props) {
             onToggleTeam={() => toggleTeamMember(selected.id)}
             onMastery={() => setMasteryUnit(selected)}
             onDetail={() => setDetail(selected)}
+            armor={isPlayerChampionId(selected.id) ? equippedArmor(state) : undefined}
+            armorLocked={!isArmorUnlocked(state)}
+            onArmory={(slot) => setArmoryTab(slot ?? 'all')}
           />
         )}
       </div>
@@ -119,7 +133,7 @@ export function JournalChampions({ ready, onTurn }: Props) {
         <div className="id-header">Champions</div>
         <Flourish className="id-flourish j-tight" />
 
-        <div className="jc-company">
+        <div className={`jc-company${rosterDrag ? ' receiving' : ''}`}>
           <div className="j-row-head">
             <span className="id-label">Your Company</span>
             <span className="j-count">
@@ -131,14 +145,31 @@ export function JournalChampions({ ready, onTurn }: Props) {
               const id = state.team[i];
               const def = id ? getUnit(id) : undefined;
               if (!def) {
+                // An empty slot takes a roster card dropped on it.
                 return (
-                  <span key={`empty-${i}`} className="jc-slot empty" aria-hidden="true">
+                  <span
+                    key={`empty-${i}`}
+                    className={`jc-slot empty${rosterDrag && dragOverIndex === i ? ' drop-target' : ''}`}
+                    aria-hidden="true"
+                    onDragEnter={() => setDragOverIndex(i)}
+                    onDragOver={(e) => {
+                      if (!rosterDrag) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'copy';
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (rosterDrag) placeInTeam(rosterDrag, i);
+                      endDrag();
+                    }}
+                  >
                     <Icon name="plus" />
                   </span>
                 );
               }
               const locked = isLockedChampion(state, def.id);
-              const dropTarget = dragOverIndex === i && dragIndex !== null && dragIndex !== i && !locked;
+              const dropTarget =
+                dragOverIndex === i && !locked && ((dragIndex !== null && dragIndex !== i) || rosterDrag !== null);
               return (
                 <div
                   key={def.id}
@@ -154,11 +185,13 @@ export function JournalChampions({ ready, onTurn }: Props) {
                   onDragOver={(e) => {
                     if (locked) return;
                     e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
+                    e.dataTransfer.dropEffect = rosterDrag ? 'copy' : 'move';
                   }}
                   onDrop={(e) => {
                     e.preventDefault();
-                    if (dragIndex !== null && !locked) reorderTeam(dragIndex, i);
+                    // A roster card swaps in for this member; a slot drag reorders.
+                    if (!locked && rosterDrag) placeInTeam(rosterDrag, i);
+                    else if (dragIndex !== null && !locked) reorderTeam(dragIndex, i);
                     endDrag();
                   }}
                   onDragEnd={endDrag}
@@ -219,13 +252,25 @@ export function JournalChampions({ ready, onTurn }: Props) {
           {shown.map((u) => {
             const owned = ownsUnit(state, u.id);
             const rarity = RARITIES[u.rarity];
+            // Owned champions not yet in the company can be dragged onto a slot.
+            const draggable = owned && !isInTeam(state, u.id) && !isLockedChampion(state, u.id);
             return (
               <button
                 key={u.id}
                 type="button"
-                className={`j-card${owned ? '' : ' faded'}${u.id === selected?.id ? ' current' : ''}`}
+                className={`j-card${owned ? '' : ' faded'}${u.id === selected?.id ? ' current' : ''}${rosterDrag === u.id ? ' dragging' : ''}`}
                 style={{ '--rarity': rarity.color } as CSSProperties}
                 onClick={() => setSelectedId(u.id)}
+                draggable={draggable}
+                title={draggable ? `${u.name} · drag onto your company to enlist` : undefined}
+                onDragStart={(e) => {
+                  if (!draggable) return;
+                  setRosterDrag(u.id);
+                  e.dataTransfer.effectAllowed = 'copy';
+                  // Firefox requires data to be set for the drag to begin.
+                  e.dataTransfer.setData('text/plain', u.id);
+                }}
+                onDragEnd={endDrag}
               >
                 {showMarks && owned && hasAffordableMasteryUpgrade(state, u.id) && (
                   <span className="j-card-dot" title="A skill-tree upgrade is affordable" />
@@ -269,6 +314,14 @@ export function JournalChampions({ ready, onTurn }: Props) {
             setDetail(null);
             setMasteryUnit(detail);
           }}
+          onOpenArmory={
+            isPlayerChampionId(detail.id) && isArmorUnlocked(state)
+              ? () => {
+                setDetail(null);
+                setArmoryTab('all');
+              }
+              : undefined
+          }
           onClose={() => setDetail(null)}
         />
       )}
@@ -286,6 +339,7 @@ export function JournalChampions({ ready, onTurn }: Props) {
           onClose={() => setMasteryUnit(null)}
         />
       )}
+      {armoryTab && <Armory initialTab={armoryTab} onClose={() => setArmoryTab(null)} />}
     </>
   );
 }
@@ -303,6 +357,9 @@ function ChampionPlate({
   onToggleTeam,
   onMastery,
   onDetail,
+  armor,
+  armorLocked,
+  onArmory,
 }: {
   unit: UnitDef;
   owned: boolean;
@@ -315,6 +372,12 @@ function ChampionPlate({
   onToggleTeam: () => void;
   onMastery: () => void;
   onDetail: () => void;
+  /** The worn armor, for the player's own adventurer only (else undefined). */
+  armor?: ArmorPiece[];
+  /** Armor not yet unlocked through the skill tree: the slots show locked. */
+  armorLocked?: boolean;
+  /** Open the armory, on one slot's tab when given. */
+  onArmory: (slot?: ArmorSlot) => void;
 }) {
   const rarity = RARITIES[unit.rarity];
   const path = playerChampionPath(unit.id);
@@ -350,6 +413,41 @@ function ChampionPlate({
         ))}
       </div>
 
+      {armor && owned && armorLocked && (
+        <button
+          type="button"
+          className="j-armor locked"
+          onClick={onMastery}
+          title={`Armor is locked — learn ${armorUnlockNode(unit.id)?.name ?? 'the major skill'} in the skill tree`}
+        >
+          {ARMOR_SLOTS.map((s) => (
+            <span key={s.id} className="j-armor-slot">
+              <Icon name="lock" />
+            </span>
+          ))}
+        </button>
+      )}
+      {armor && owned && !armorLocked && (
+        <div className="j-armor">
+          {ARMOR_SLOTS.map((s) => {
+            const item = armor.find((p) => p.slot === s.id);
+            return (
+              <button
+                type="button"
+                key={s.id}
+                className={`j-armor-slot${item ? ' filled' : ''}`}
+                style={item ? ({ '--rarity': ARMOR_RARITIES[item.rarity].color } as CSSProperties) : undefined}
+                onClick={() => onArmory(s.id)}
+                title={item ? `${s.label}: ${armorPieceName(item)}` : `${s.label}: empty`}
+                aria-label={`Open the armory on ${s.label}`}
+              >
+                {item ? <ArmorIcon piece={item} size={30} /> : <Icon name="plus" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div className="j-actions">
         {owned &&
           (locked ? (
@@ -381,6 +479,11 @@ function ChampionPlate({
             <Icon name="tree" /> Skills
             <small>{availableExp.toLocaleString()} EXP</small>
             {masteryReady && <span className="j-btn-dot" />}
+          </button>
+        )}
+        {armor && owned && !armorLocked && (
+          <button type="button" className="j-btn" onClick={() => onArmory()}>
+            <Icon name="shield" /> Armor
           </button>
         )}
         <button type="button" className="j-btn" onClick={onDetail}>

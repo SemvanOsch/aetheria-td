@@ -51,6 +51,7 @@ Easing curves and the seeded RNG live in `palette.ts` too.
 - **Backdrop.** The screens the desk leads to (Summon, the mode picker, the campaign) sit over the desk itself: `DeskBackdrop` in `Home.tsx` renders the same scene held still (no animation, except that the orb behind Summon keeps whirling) and zoomed into the object that leads there (the orb for Summon, the leaned-over map for the mode picker and campaign; `frozenOn`), blurred and dimmed (`blur(8px) brightness(0.5)`), and inert. The journal, opened from the game, floats over the live desk behind a `backdrop-filter: blur(10px)` dim (`.intro-root.over-desk`). The zoomed desk shows through. The first-launch journal keeps its opaque night. The old animated night-sky `Backdrop` canvas is no longer mounted.
 - **Ornament.** `.panel.ornate` panels and modals get gilded corners. `UnitCard` frames read `data-rarity`.
 - **Summon ceremony.** A timed phase machine in `Summon.tsx` plus the `SummonFx` particle canvas. The reveal shows only the champion figure with its rarity, name and note stacked underneath. That caption is laid out (invisible) from the silhouette phase onwards and fades in as the colour resolves, so the figure never shifts; there is no card and no "Again" button, since Summon can simply be pressed again.
+- **Developer menu.** A grid of tool cards under a gilded hammer badge: each card has an icon badge, a Cinzel title and a line of help over compact `dev-btn` buttons and pill chips (rarity chips take the rarity colour). Wide cards (Hero class, Armor forge, Danger zone) span both columns; the Danger zone is tinted red.
 - **Champion detail sheet.** Two columns. On the left: a large portrait over a rarity-coloured glow, the name in gilt (plus "Hero of the …" for the player champion), tags, the description and the purple skill-tree button. On the right, "Battle profile": stat tiles, each with a label, a value in the title font and a sub-line. Below that are the in-stage levels with gold numbered medallions, the deltas in green, and an ability-granting tier picked out in gold.
 - **Mastery skill tree.** A node board on a gridded dark well, with the champion at the top. Nodes are round gems; capstones (`major`) are diamonds. Each node's glyph comes from its first effect field (`nodeIcon` in `MasteryTree.tsx`). Locked nodes are dim, learnable ones pulse gold, learned ones fill with gold, and the links between them light gold as nodes are learned. Selecting a node opens it in the side panel, which holds the Learn or Activate button and the total-bonuses list.
 - **Home: the adventurer's desk.** The home screen is a desk at night, drawn entirely in inline SVG (`ui/components/DeskArt.tsx`) and CSS. Behind it is a panelled wall with a three-pane window between star-sewn blue drapes on a brass rod, over a windowsill. Through the window is a living night: clouds drifting past the moon, a castle on a cliff with flickering windows and a fluttering flag, a lit bridge, a lake carrying the castle's reflection with moon glitter and mist, swaying pines, fireflies, a passing flight of birds and the odd shooting star. The desk's planks recede in perspective. **Props are anchored by their base** (`bottom` sets how far forward the foot sits) and carry their own contact shadow and warm reflection, so nothing floats: a lantern beside a book stack at back-left, a tall candlestick on two books plus a shorter one at back-right, coins, an inkwell, and a foreground candle cropped by the screen edge. Three objects are the ways in. The violet crystal ball on its brass petal cup (Summon) stands upright. The scroll map of Aetheria (Play) and the strapped journal with its quill (Journal) lie flat, tilted back with `rotateX`, with negative margins reclaiming the upright box. The map is inked, with no glow: coastline ripples, rhumb lines, the chapter names in italic, pins and a dashed route, a sea serpent, a ship, and a brass pocket compass whose needle drifts. Each object has a brass name plaque with a red "ready" dot. Hover or keyboard focus lifts the object. A pinned parchment note on the map continues into the next stage. Each object has its own lead-in before its destination opens. The **orb spins up** (about 1.4s): its vortex whirls faster and faster while the desk zooms in on it, and the altar opens as the spin ends. The **map is leaned over** (about 1.8s): the camera pans down onto it while it rises to face you, straight into the screen. The **journal** is a plain zoom with no veil (about 0.65s), opening over the blurred desk; Continue zooms into a dark leather veil. The desk stays zoomed under the journal until it closes, then zooms back out from it. Coming back works the same way. Returning from Summon draws the desk already zoomed into the orb; returning from Play (the mode picker's Home button, or Home after a battle) draws it already leaned over the raised map. In both cases the desk then zooms back out from that object (the orb's vortex winding down from its whirl to rest as it does) (`returnFrom` on `Home`). Escape cancels the zoom, and reduced motion skips it and stills every ambient animation. On narrow screens the map spans the top, with the orb and journal beneath.
@@ -100,6 +101,37 @@ Menus use the same pass through `ui/portrait.ts`, with a thinner ink and one sha
 ### The player's adventurer
 `drawPlayerSprite` composes interchangeable parts from a `PlayerSpriteConfig` but follows all of the conventions above, so it stands beside the champions. It has no nose: `cheek: false` on the profile face. Hair highlights are kept subtle. Strand and lit shades sit close to the base colour, so no "white streak" appears.
 
+**The Magic adventurer's casting arms** (`drawPlayerCastArms`) run on two inputs: `draw` is the orb charge (0..1, 24 steps), and the attack value is the release (0.35s, linear).
+1. **Gather and build:** the hands rise from the sides and cup the orb just above and below its edge at every size. The orb is drawn back toward the body as it swells (`magicOrbAnchor`, `magicOrbRadius`, shared with the renderer that paints it), with a slight lean back.
+2. **Throw:** a two-handed palm thrust to `MAGIC_CAST_POINT`, where the engine launches the orb.
+3. **Recover:** the hands ease back down to the sides.
+
+During a Mana Ray the thrust is held. The beam leaves the palms (`beamOrigin`) while the figure leans and trembles into it, and the recovery plays when the channel ends. The upper arms go under the mantle and the forearms are repainted over it (`forearm`), so raised hands are never hidden.
+
+**The Bow's shortbow** (`drawPlayerShortbow`) takes two inputs. `draw` (0..1) is how far it has raised and drawn for the next shot; the renderer's `bowDraw` sets it. It is held at full draw through a volley and drawn up over the last 0.32s of the reload when there's a target.
+- **Rest:** relaxed, with the bow lowered and tilted and an arrow nocked on a slack string.
+- **Each arrow:** `release` (the attack value, 0.24s, linear) snaps the string forward with a shiver and flicks the draw hand back. A new arrow is nocked and pulled straight back.
+- **After the volley's last arrow:** the bow stays up through the follow-through, then lowers.
+
+The limbs flex as the string is drawn. It layers like the Blade: sleeves, then the mantle, then the bow and arrow, then the fists.
+
+**The Blade's dual short swords** (`drawDualShortSwords`) pose their own arms from keyframes (`BladePose`: hand point, blade angle, elbow bend).
+- **Rest:** a ready guard, with the lead blade raised forward and the off blade held low and forward.
+- **Strike:** a three-beat swing (`swingPose`), read as `u = 1 - anim`. The lead blade winds up over the shoulder and chops down through the target, and the off blade rips back up across it a beat later.
+
+The layers go sleeves → mantle/scarf → swords → fists, off side before lead side.
+- The mantle still covers the shoulders and upper arms.
+- Each blade sits in front of its own forearm and over the mantle.
+- Only the fist closes over the grip.
+
+The wind-up hand rises beside the head, not over it, since the head is drawn after the arms and would hide it. The swing runs `attackAnimTime('player-blade')` (0.3s, longer than other champions' 0.18s) so it reads. It is driven linearly, not eased, so its two cuts line up with the engine's two half-damage hits. The lead chop lands as the attack fires, and the off-hand cut lands `BLADE_SECOND_HIT_DELAY` (0.13s) later. Retime both together. The tip streaks come from `drawBladeTrails`, which the renderer calls straight after the figure, outside the compositor, so they stay clean light rather than inked shapes.
+
+### Armor icons — `engine/armorArt.ts`
+Armor is stat-boosting equipment: it is **never drawn on the adventurer** (the figure looks the same with or without it). It appears only as item icons: the helm (with the set's plume), the cuirass (breastplate, gorget, pauldrons and the set's cloth tabard), the leg piece (cuisses, greaves, knee cops and tassets) and the sabatons. Each is authored in figure space with flat fills, like a sprite part.
+- **A set's shape comes from its `style`, its metal from rarity** (`FINISH`, built from `MATERIAL`/`LIGHT`): Common is dull iron with leather trim; Rare is polished steel with a frost gem; Epic is blackened steel with gold trim and an arcane gem; Legendary is gilded plate with pale-gold trim and a blood-red gem. The set's `cloth` colours the plume and tabard (Kingsguard: the castle's crimson `#9a2a33`).
+- **Icons go through the compositor.** `drawArmorIcon` draws one piece (the helmet's face opening shows dark padding; boots and greaves stand close together), framed by `ARMOR_ICON_BOX`, and the UI's `ArmorIcon` finishes it through the figure compositor like a portrait.
+- **UI.** The Armory is a paper doll: the four slot sockets flank the adventurer (holding their class weapon, without the armor drawn on), and a full set adds a warm halo behind them. Rarity frames read `--rarity`, and drops get a rarity-tinted toast over the board (with the rolled stats beneath the name). Each inventory tile carries one rarity-coloured pip per rolled stat; the detail panel shows every rolled value with a slim bar for where it landed in its rarity's range, plus the range itself.
+
 ---
 
 ## 5. The battle board
@@ -130,14 +162,24 @@ The engine emits cosmetic `fx` events: `hit`, `kill`, `blast`, `cast`, `dodge`, 
 - rings, flashes, slash crescents and light pulses;
 - exposure lifts and hit recoil;
 - corpses;
-- screen shake, which is off under `prefers-reduced-motion`.
+- screen shake, used only when a boss spawns, and off under `prefers-reduced-motion`.
 
 Effects pick a `LIGHT` family for their colour.
+
+**Mana Ray** (`drawBeams` in `renderer.ts`, particles from `Vfx.beam`) follows a lifecycle from `beamPhase`. It lances out over 0.16s, swells briefly on each damage tick, and collapses to a thread over the last 0.3s. Its look has several layers:
+- a squashed, rotating sigil disc at the caster's thrust-out palms (`beamOrigin`), like a portal the ray is fired through;
+- a tapered, rippling ribbon body with deep edges, a pale body and a white core;
+- two helix strands and energy packets running outward;
+- a crackling flare where the beam ends.
+
+Only the outer haze is additive. The body is normal-blend so it keeps its colour on bright floors, and its lights use a low `glow` for the same reason.
+
+**Caster-coloured magic.** The Magic adventurer's orb (charge, flight, blast), its hits and kills, and the Mana Ray all use the player's outfit colour instead of the fixed arcane violet. `tintRamp(color)` in `palette.ts` builds a MAGIC-shaped ramp from that colour. The engine tags its `hit`/`kill`/`blast` events with `tint` (`fxTintFor`). `Light.tint` and the `Vfx.pulse` tint replace a light family's glow colour.
 
 **Buff auras on champions** are drawn in `renderer.ts` around the figure, not as `fx` events. Each one reads as its own shape and colour:
 - **Better Morale:** a gold ground glow.
 - **Bard tune:** music notes circling the head.
-- **Quickdraw:** the foot ring flares.
+- **Quickdraw:** the foot ring flares. `drawQuickdraws` adds a pulsing glow on the bow and speed streaks peeling back off the figure, all in the archer's colour. `Vfx.quickdraw` adds rising motes. Arrows loosed meanwhile fly as glowing bolts (`drawQuickdrawStreak` plus a sparkle trail). Everything fades with `quickdrawLevel`.
 - **Guiding Gale** (`drawGale`): wind-family ribbons spiral up from the feet past the head over a ground swirl. Each orbit is split by depth, with a `back` layer before the figure and a `front` layer after it, so the wind wraps the body. It also adds a faint `wind` light so it shows in dark rooms. An aura that wraps a figure should use the same back/front split.
 
 ### Props — `engine/props.ts`

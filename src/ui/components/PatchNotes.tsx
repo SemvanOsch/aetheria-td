@@ -20,6 +20,25 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-10-06 · Armor & Hero Polish',
+    changes: [
+      'Armor for your adventurer: a helmet, chestplate, leg piece and boots in Common, Rare, Epic or Legendary. Bosses in endless runs have a 50% chance to drop a piece of their chapter’s set (the Castle’s Kingsguard); campaign bosses never drop armor. A toast shows each piece as it drops, and the result card lists everything you found.',
+      'Every armor piece rolls its own random stats: 2 on Common and Rare, 3 on Epic and Legendary, with bigger values at higher rarities. Stats include damage, attack speed, range, crit chance, crit damage, max mana, mana regen and ability cooldown. Wearing all four Kingsguard pieces adds Oath of the Crown (+10% damage, +15% range).',
+      'The new Armory (Armor button on your adventurer’s journal page, or from their champion sheet) shows your adventurer surrounded by the four slots. Equip and unequip pieces, filter by slot, see where each roll landed in its range, and salvage unworn pieces for gems (5 / 15 / 40 / 100 by rarity). Armor isn’t drawn on your adventurer; it appears only as item icons.',
+      'Adventurer skill trees reworked for all three classes: Honed Will (+10% damage), Hero’s Instinct (+10% in-stage EXP, so your hero levels up faster in battle) and Ironclad, the major node, which unlocks armor. Until you learn Ironclad, the armor slots show as locked. If you already owned the old second node, it carries over to Hero’s Instinct.',
+      'Pause menu: press Esc (with nothing selected) or the new pause button to freeze the battle. It has the volume sliders, an Auto-start waves switch that starts the next wave as soon as one is cleared, and a button to leave the stage or end an endless run.',
+      'Bard tune switch: silence the Bard’s lute tune from his champion sheet or from a small switch on his in-stage panel.',
+      'Drag a champion from the journal roster onto your company to add it, either into an empty slot or replacing a member.',
+      'Blade adventurer: each attack is now a two-blade combo. The lead sword chops down, then the off-hand blade cuts back up a moment later, each for half damage with its own crit roll. There’s a new wind-up and swing animation with blade trails. The in-stage levels are renamed Sharper Blades and Flourishing Blades.',
+      'Bow adventurer: a new shortbow animation. The bow rests lowered, rises and draws for each shot, snaps on release and stays up through a volley. Quickdraw now makes the bow glow, adds speed streaks and rising motes, and arrows fly as glowing bolts while it lasts.',
+      'Magic adventurer: a new two-handed cast. The hands gather and cradle the orb as it grows, then thrust it forward. Its orb, hits, kills and Mana Ray now glow in your outfit colour. The Mana Ray is redrawn with a sigil at the palms, a rippling beam, helix strands and a crackling flare where it ends. Mana Ray now hits every 0.4s instead of 0.5s, and Dense Core gives +8 damage instead of +9.',
+      'Champion stats now show Crit rate and Crit damage as separate tiles, and Mana shows any regen per second.',
+      'The screen now shakes only when a boss appears.',
+      'The Castle Door no longer has the two banners by the castle.',
+      'Settings → Developer is now a grid of tool cards, with an Armor forge (roll any piece) and a Hero class switch.',
+    ],
+  },
+  {
     version: '2026-10-05 · Endless Mode',
     changes: [
       'Endless mode is here: clear every stage of a chapter to unlock its endless run (Play → Endless). Each run fields only that chapter’s foes, with tougher ones joining in later waves, in randomly rolled waves that keep growing and get sturdier the longer you last.',

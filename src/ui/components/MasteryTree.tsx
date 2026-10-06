@@ -37,6 +37,7 @@ const PAD_Y = 52;
 
 /** A glyph for a node, picked from the first effect it carries. */
 function nodeIcon(up: MasteryUpgradeDef): IconName {
+  if (up.unlocksArmor) return 'shield';
   if (up.critChanceBonus || up.critMultiplier) return 'target';
   if (up.generateMult) return 'wheat';
   if (up.startingGoldBonus || up.upgradeDiscount) return 'coin';

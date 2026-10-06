@@ -35,6 +35,15 @@ npm run typecheck
    Don't let foes reach your castle. Clearing a realm unlocks the next and pays
    a 💎 gem reward. Progress persists.
 
+7. Once your adventurer learns the major (third) node of their skill tree,
+   bosses in **endless** runs may drop **armor** for them: a
+   helmet, chestplate, leg piece or boots in Common, Rare, Epic or Legendary.
+   Armor is stat-boosting equipment (it isn't drawn on the figure). Every piece
+   rolls random stats: 2 different ones on Commons and Rares, 3 on Epics and
+   Legendaries, with higher ranges at higher rarities. Equip it in the
+   journal's Champions pages (**Armor**). All four pieces of one set add its
+   set bonus. Unworn pieces can be salvaged for gems.
+
 ### Currencies
 
 - **💎 Gems** — the only persistent currency: earned from clearing realms, spent
@@ -92,6 +101,13 @@ src/
   `domain/targeting.ts`; add it to `SELECTABLE_TARGETING` to expose it in-stage.
 - **New AoE shape:** extend `AoeType` in `domain/units.ts` and handle it in
   `GameEngine.fire()` (+ a shot style in `engine/renderer.ts`).
+- **Armor (the adventurer's equipment):** everything tunable is data in
+  `domain/armor.ts`: drop chances in `ARMOR_DROPS`, rarity odds / stats per
+  piece / salvage gems in `ARMOR_RARITIES`, the rollable stats with their
+  ranges per rarity in `ARMOR_STATS`, and each set's piece names and 4-piece
+  bonus in `ARMOR_SETS`. A new chapter's set is one `ARMOR_SETS` entry with its
+  `section`; reuse the `kingsguard` icon `style` with a different `cloth`, or add
+  a style in `engine/armorArt.ts`. Settings → Developer has an armor forge.
 
 All persistence flows through `application/gameState.ts` + `infrastructure/storage.ts`.
 Nothing in the UI touches `localStorage` or game rules directly.

@@ -20,7 +20,7 @@
 import type { Weather } from '../domain/atmosphere';
 import { BOARD_HEIGHT, BOARD_WIDTH } from '../domain/grid';
 import type { Enemy, FxElement, FxEvent } from './types';
-import { MAGIC, ease, shade, withAlpha, type LightFamily, type MagicFamily } from './palette';
+import { MAGIC, ease, shade, tintRamp, withAlpha, type LightFamily, type MagicFamily } from './palette';
 import type { Light } from './lighting';
 
 // ---------------------------------------------------------------------------
@@ -141,6 +141,8 @@ interface LightPulse {
   intensity: number;
   t: number;
   max: number;
+  /** Caster colour replacing the family's glow. */
+  tint?: string;
 }
 
 /** A felled foe playing a short death: recoil, topple, sink and fade. */
@@ -157,6 +159,8 @@ export interface Corpse {
   t: number;
   max: number;
   element: FxElement;
+  /** Caster colour of the killing magic (tints the dissolve). */
+  tint?: string;
 }
 
 interface Recoil {
@@ -170,6 +174,15 @@ const MAX_FLASHES = 40;
 const MAX_SLASHES = 40;
 const MAX_PULSES = 24;
 const MAX_CORPSES = 40;
+
+/**
+ * Particle ramp + light for an attack: the element's fixed ramp, or a ramp
+ * built from the caster's colour when the event carries a `tint`.
+ */
+function magicOf(el: FxElement, tint?: string): { light: LightFamily; ramp: readonly string[]; tint?: string } {
+  const fam = MAGIC[familyOf(el)];
+  return tint ? { light: fam.light, ramp: tintRamp(tint), tint } : fam;
+}
 
 /** Particle colour ramp + light family for an attack element. */
 function familyOf(el: FxElement): MagicFamily {
@@ -305,9 +318,9 @@ export class Vfx {
     this.slashes.push({ x, y, angle, radius, t: 0, max, color, width, span });
   }
 
-  pulse(x: number, y: number, radius: number, family: LightFamily, intensity: number, max: number): void {
+  pulse(x: number, y: number, radius: number, family: LightFamily, intensity: number, max: number, tint?: string): void {
     if (this.pulses.length >= MAX_PULSES) this.pulses.shift();
-    this.pulses.push({ x, y, radius, family, intensity, t: 0, max });
+    this.pulses.push({ x, y, radius, family, intensity, t: 0, max, tint });
   }
 
   shake(amount: number): void {
@@ -347,10 +360,10 @@ export class Vfx {
           this.onHit(e);
           break;
         case 'kill':
-          this.onKill(e.enemy, e.fromX, e.fromY, e.element);
+          this.onKill(e.enemy, e.fromX, e.fromY, e.element, e.tint);
           break;
         case 'blast':
-          this.onBlast(e.x, e.y, e.radius, e.color, e.element, e.crit);
+          this.onBlast(e.x, e.y, e.radius, e.color, e.element, e.crit, e.tint);
           break;
         case 'cast':
           this.onCast(e.ability, e.x, e.y, e.color, e.radius);
@@ -362,7 +375,6 @@ export class Vfx {
           this.flash(e.x, e.y, e.boss ? 90 : 40, 0.4, '#ff5a5a');
           this.ring(e.x, e.y, 6, e.boss ? 110 : 46, 0.5, '#ff6a5a', 3, 0.6);
           this.burst('smoke', e.x, e.y, 6, 30, { life: 0.8, size: 6, grow: 10, color: '#3a1a1a' });
-          this.shake(e.boss ? 0.8 : 0.28);
           break;
         case 'deploy':
           this.ring(e.x, e.y + 10, 4, 26, 0.45, e.color, 2, 0.45);
@@ -383,7 +395,7 @@ export class Vfx {
   }
 
   private onHit(e: Extract<FxEvent, { kind: 'hit' }>): void {
-    const fam = MAGIC[familyOf(e.element)];
+    const fam = magicOf(e.element, e.tint);
     const ang = Math.atan2(e.y - e.fromY, e.x - e.fromX);
     const melee = e.melee;
     const big = e.crit ? 1.8 : 1;
@@ -428,15 +440,13 @@ export class Vfx {
     if (e.crit) {
       this.ring(hx, hy, 4, 34, 0.32, '#ffd76a', 2.4);
       this.flash(hx, hy, 46, 0.22, '#fff1c4');
-      this.pulse(hx, hy, 110, fam.light, 0.7, 0.3);
+      this.pulse(hx, hy, 110, fam.light, 0.7, 0.3, fam.tint);
       this.exposure = Math.min(0.5, this.exposure + 0.08);
-    } else if (e.weight > 0.18) {
-      this.shake(0.05);
     }
   }
 
   /** Record a corpse (for a normal foe) and throw death debris. */
-  private onKill(enemy: Enemy, fromX: number, fromY: number, element: FxElement): void {
+  private onKill(enemy: Enemy, fromX: number, fromY: number, element: FxElement, tint?: string): void {
     const x = enemy.pos.x;
     const y = enemy.pos.y;
     const R = enemy.def.radius;
@@ -445,7 +455,7 @@ export class Vfx {
     const kl = Math.hypot(kx, ky) || 1;
     kx /= kl;
     ky /= kl;
-    const fam = MAGIC[familyOf(element)];
+    const fam = magicOf(element, tint);
     // Elemental death flourish.
     if (element === 'arcane') {
       this.burst('mote', x, y - 6, 14, 60, { life: 0.8, size: 1.8, color: fam.ramp[2], vy: -30 });
@@ -468,7 +478,6 @@ export class Vfx {
     });
     this.flash(x, y - 6, R * 1.6, 0.16, fam.ramp[1]);
     if (enemy.def.boss) {
-      this.shake(0.7);
       this.ring(x, y + R * 0.6, 8, 140, 0.8, '#ffd77a', 3, 0.5);
       this.pulse(x, y, 220, 'holy', 0.9, 1.1);
       this.exposure = Math.min(0.6, this.exposure + 0.35);
@@ -491,20 +500,20 @@ export class Vfx {
       t: 0,
       max: enemy.def.boss ? 1.4 : 0.85,
       element,
+      tint,
     });
   }
 
-  private onBlast(x: number, y: number, radius: number, color: string, element: FxElement, crit: boolean): void {
-    const fam = MAGIC[familyOf(element)];
+  private onBlast(x: number, y: number, radius: number, color: string, element: FxElement, crit: boolean, tint?: string): void {
+    const fam = magicOf(element, tint);
     this.flash(x, y, radius * 1.2, 0.28, fam.ramp[1]);
     this.ring(x, y, radius * 0.2, radius * 1.05, 0.42, color, 3);
     this.ring(x, y + 4, radius * 0.3, radius * 1.2, 0.55, fam.ramp[2], 1.5, 0.55);
     this.burst('shard', x, y, crit ? 26 : 16, radius * 3.2, { life: 0.5, size: 2.2, color: fam.ramp[1], color2: color, drag: 4 });
     this.burst('mote', x, y, 14, radius * 1.6, { life: 0.9, size: 2, color, vy: -20, drag: 2 });
     this.burst('smoke', x, y + 4, 6, radius * 0.8, { life: 0.9, size: 6, grow: 12, color: shade(color, -0.6) });
-    this.pulse(x, y, radius * 3.2, fam.light, 1, 0.45);
+    this.pulse(x, y, radius * 3.2, fam.light, 1, 0.45, fam.tint);
     this.exposure = Math.min(0.6, this.exposure + 0.12);
-    this.shake(0.16);
   }
 
   private onCast(
@@ -522,21 +531,35 @@ export class Vfx {
         this.burst('dust', x, y + 10, 18, radius * 1.4, { life: 0.8, size: 2, color: '#b8a888', drag: 3 });
         this.pulse(x, y, radius * 2.4, 'holy', 1, 0.6);
         this.exposure = Math.min(0.7, this.exposure + 0.35);
-        this.shake(0.4);
         break;
-      case 'quickdraw':
-        this.ring(x, y + 10, 6, 34, 0.5, color, 2.4, 0.45);
-        this.burst('mote', x, y, 16, 60, { life: 0.7, size: 1.6, color, vy: -40 });
-        this.pulse(x, y, 110, 'holy', 0.8, 0.5);
+      case 'quickdraw': {
+        // A snap of focus in the archer's colour: a ring cinching in on the bow
+        // hand, a flash, a fan of sparks thrown forward-up and a ground ring.
+        const ramp = tintRamp(color);
+        this.ring(x, y - 4, 30, 4, 0.2, ramp[1], 2);
+        this.flash(x, y - 4, 42, 0.26, ramp[1]);
+        this.ring(x, y + 10, 6, 38, 0.55, color, 2.4, 0.45);
+        this.burst('spark', x, y - 4, 20, 170, { life: 0.35, size: 1.1, color: '#ffffff', color2: color, drag: 4 });
+        this.burst('mote', x, y, 16, 60, { life: 0.8, size: 1.6, color: ramp[1], vy: -40, drag: 1.5 });
+        this.pulse(x, y, 120, 'holy', 0.8, 0.5, color);
         this.exposure = Math.min(0.5, this.exposure + 0.12);
         break;
-      case 'manaRay':
-        this.flash(x, y - 4, 50, 0.3, '#e8d8ff');
-        this.burst('shard', x, y - 4, 16, 120, { life: 0.5, size: 2, color: '#f2e6ff', color2: color });
-        this.pulse(x, y, 180, 'arcane', 1, 0.8);
+      }
+      case 'manaRay': {
+        // Gathering then release: an inward-snapping ring, a ground sigil ring
+        // and a spray of shards, then a strong light pulse — all in the
+        // caster's own colour, like the orb.
+        const ramp = tintRamp(color);
+        this.flash(x, y - 4, 56, 0.32, ramp[1]);
+        this.ring(x, y - 4, 44, 6, 0.22, ramp[1], 2.2);
+        this.ring(x, y + 8, 6, 40, 0.6, color, 2.4, 0.45);
+        this.ring(x, y + 8, 4, 28, 0.5, ramp[2], 1.4, 0.45);
+        this.burst('shard', x, y - 4, 18, 120, { life: 0.5, size: 2, color: ramp[1], color2: color });
+        this.burst('mote', x, y, 14, 50, { life: 0.8, size: 1.6, color, vy: -30, drag: 1.5 });
+        this.pulse(x, y, 180, 'arcane', 1, 0.8, color);
         this.exposure = Math.min(0.7, this.exposure + 0.3);
-        this.shake(0.25);
         break;
+      }
       case 'bard':
         this.burst('mote', x, y - 6, 12, 50, { life: 1, size: 1.6, color, vy: -30 });
         this.pulse(x, y, 90, 'holy', 0.45, 0.8);
@@ -630,6 +653,62 @@ export class Vfx {
     }
   }
 
+  /**
+   * A channelling Mana Ray (see the renderer's `drawBeams`): sheds arcane motes
+   * and shards along its length that drift off sideways, and — once it has
+   * reached full length — sprays sparks off the far end where it sears.
+   */
+  beam(x0: number, y0: number, x1: number, y1: number, color: string, dt: number, live: boolean): void {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const ramp = tintRamp(color);
+    const want = len * dt * 0.35;
+    const n = Math.floor(want) + (this.rand() < want % 1 ? 1 : 0);
+    for (let i = 0; i < n; i++) {
+      const u = this.rand();
+      const side = this.rand() < 0.5 ? -1 : 1;
+      const s = 10 + this.rand() * 22;
+      const shard = this.rand() < 0.3;
+      this.spawn(shard ? 'shard' : 'mote', x0 + dx * u - uy * side * 3, y0 + dy * u + ux * side * 3, {
+        vx: -uy * side * s + ux * 30,
+        vy: ux * side * s + uy * 30 - 8,
+        life: 0.4 + this.rand() * 0.4,
+        size: shard ? 1.4 : 1.1 + this.rand() * 0.8,
+        color: this.rand() < 0.5 ? ramp[1] : color,
+        color2: ramp[2],
+        drag: 2.5,
+      });
+    }
+    if (live && this.rand() < dt * 30) {
+      this.burst('spark', x1, y1, 2, 120, {
+        dir: Math.atan2(uy, ux),
+        spread: 2.6,
+        life: 0.25,
+        size: 1,
+        color: '#ffffff',
+        color2: ramp[2],
+        drag: 4,
+      });
+    }
+  }
+
+  /** Quickdraw active on an archer at (x, y): motes of its colour drifting up. */
+  quickdraw(x: number, y: number, color: string, dt: number): void {
+    if (this.rand() < dt * 14) {
+      this.spawn('mote', x + (this.rand() - 0.5) * 18, y + 6 - this.rand() * 10, {
+        life: 0.6 + this.rand() * 0.4,
+        size: 1 + this.rand() * 0.7,
+        color: this.rand() < 0.5 ? color : shade(color, 0.5),
+        vx: (this.rand() - 0.5) * 8,
+        vy: -26 - this.rand() * 14,
+        drag: 1,
+      });
+    }
+  }
+
   /** Trail motes behind a projectile in flight. */
   trail(kind: 'arcane' | 'wind' | 'orb' | 'arrow', x: number, y: number, color: string, dt: number): void {
     switch (kind) {
@@ -708,7 +787,7 @@ export class Vfx {
   lights(out: Light[]): void {
     for (const l of this.pulses) {
       const k = 1 - l.t / l.max;
-      out.push({ x: l.x, y: l.y, radius: l.radius * (0.8 + 0.2 * k), family: l.family, intensity: l.intensity * ease.outQuad(k), glow: 1 });
+      out.push({ x: l.x, y: l.y, radius: l.radius * (0.8 + 0.2 * k), family: l.family, intensity: l.intensity * ease.outQuad(k), glow: 1, tint: l.tint });
     }
   }
 

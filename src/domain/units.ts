@@ -234,6 +234,11 @@ export interface UnitDef {
    * champions without a mana pool.
    */
   maxMana?: number;
+  /**
+   * Mana a hero regains per second on its own, on top of kills (from worn armor;
+   * omitted / 0 = none).
+   */
+  manaRegen?: number;
   /** Sequential in-stage upgrade tiers (bought in order; most units have 2). */
   upgrades: UpgradeDef[];
   /** If set, the unit is a non-combat economy unit (see GeneratorDef). */
@@ -244,6 +249,23 @@ export interface UnitDef {
   visual: UnitVisual;
   /** Optional special properties for future expansion (slow, etc.). */
   special?: Partial<UnitSpecial>;
+  /**
+   * Bonuses from worn equipment (the player's armor, see `domain/armor.ts`
+   * `applyArmor`). Read by `masteryStats`, `critChanceFor` and
+   * `critMultiplierFor`, so they reach the engine and every display.
+   */
+  gearBonus?: GearBonus;
+}
+
+/** Stat bonuses from equipment, applied on top of in-stage levels and mastery. */
+export interface GearBonus {
+  damageMult: number;
+  attackSpeedMult: number;
+  rangeMult: number;
+  /** Added crit chance (0.03 = +3 points). */
+  critChance: number;
+  /** Added to the crit damage multiplier. */
+  critMultiplier: number;
 }
 
 export interface UnitVisual {

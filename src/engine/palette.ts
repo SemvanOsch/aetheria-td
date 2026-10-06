@@ -96,6 +96,15 @@ export const MAGIC = {
 
 export type MagicFamily = keyof typeof MAGIC;
 
+/**
+ * A MAGIC-shaped ramp (white-hot → pale → body → deep) built from one colour,
+ * for magic that takes its caster's colour instead of a fixed element (the
+ * Magic adventurer's orb and Mana Ray follow the player's outfit colour).
+ */
+export function tintRamp(color: string): readonly [string, string, string, string] {
+  return ['#ffffff', shade(color, 0.6), shade(color, 0.15), shade(color, -0.5)];
+}
+
 /** Status/feedback colours used on the board (health, damage, gold). */
 export const FEEDBACK = {
   hpHigh: '#6fdc8c',

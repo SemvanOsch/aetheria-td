@@ -12,6 +12,7 @@ import type { AudioSettings, GameState, UiPrefs } from './gameState';
 import type { PlayerSpriteConfig } from '../domain/playerSprite';
 import type { Proficiency } from '../domain/proficiency';
 import type { SectionId } from '../domain/levels';
+import type { ArmorRoll, ArmorSlot } from '../domain/armor';
 import type { SummonOutcome } from './summon';
 
 export interface GameStore {
@@ -36,6 +37,8 @@ export interface GameStore {
   toggleTeamMember: (unitId: string) => void;
   /** Reorder the team by moving the member at `from` to index `to`. */
   reorderTeam: (from: number, to: number) => void;
+  /** Drop a roster champion into team slot `index` (replacing that member, or joining an empty slot). */
+  placeInTeam: (unitId: string, index: number) => void;
   /** Merge a patch into the persisted UI preferences. */
   setPrefs: (patch: Partial<UiPrefs>) => void;
   /** Merge a patch into the persisted volume settings. */
@@ -45,8 +48,18 @@ export interface GameStore {
    * first-launch journal introduction. No-op on an invalid/empty name.
    */
   setPlayerProfile: (name: string, sprite: PlayerSpriteConfig, proficiency: Proficiency) => void;
+  /** Developer tool: switch the player champion to another class (path). */
+  setPlayerChampionClass: (proficiency: Proficiency) => void;
   /** Mark a journal chapter's lore as read, so its reveal only plays once ever. */
   markChapterRead: (index: number) => void;
+  /** Bank rolled armor pieces (endless-boss drops, the developer forge). */
+  awardArmor: (rolls: ArmorRoll[]) => void;
+  /** Wear an owned armor piece (by id) in its slot. */
+  equipArmor: (id: string) => void;
+  /** Take off the armor piece in a slot. */
+  unequipArmor: (slot: ArmorSlot) => void;
+  /** Break down armor pieces (by id) for gems; worn pieces are skipped. */
+  salvageArmor: (ids: string[]) => void;
   /** Wipe all progression back to a fresh account. */
   resetAccount: () => void;
   /** Add gems (the settings grant button; endless boss-wave payouts). */

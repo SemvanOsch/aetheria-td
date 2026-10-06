@@ -14,6 +14,7 @@
 import { getEnemy, resistMultiplier, type EnemyDef } from '../domain/enemies';
 import { ENDLESS_BOSS_GEMS, generateEndlessWave, isEndlessBossWave } from '../domain/endless';
 import { isPlayerChampionId } from '../domain/playerChampion';
+import { ARMOR_RARITIES, rollArmorDrop, type ArmorRoll } from '../domain/armor';
 import { CASTLE_DECOR_CELLS, decorCellKeys } from '../domain/decor';
 import {
   cellCenter,
@@ -51,6 +52,7 @@ import {
   masteryBounceDamageMult,
   masteryFinalBounceDamageMult,
   masteryHarvest,
+  masteryHeroExpMult,
   masteryKnockback,
   masteryPreload,
   masteryRangeAura,
@@ -60,7 +62,7 @@ import {
   type MasteryStats,
 } from '../domain/mastery';
 import { critChanceFor, critMultiplierFor } from '../domain/combat';
-import { isSpeaking } from './types';
+import { attackAnimTime, isSpeaking } from './types';
 import type {
   Burst,
   Cyclone,
@@ -126,6 +128,14 @@ function fxElementFor(tower: Tower): FxElement {
   return tower.def.damageType === 'magic' ? 'arcane' : 'steel';
 }
 
+/**
+ * Caster colour for a tower's hit/kill/blast VFX, or undefined to use its
+ * element's fixed ramp. The Magic adventurer's arcane takes the player's colour.
+ */
+function fxTintFor(tower: Tower | undefined): string | undefined {
+  return tower?.def.visual.shape === 'player-magic' ? tower.def.visual.color : undefined;
+}
+
 // ─── TUNING: End-of-wave cash reward ─────────────────────────────────────────
 // Gold banked each time a wave is fully cleared, listed per wave. The first
 // entry is wave 1's reward, the second is wave 2's, and so on — just edit,
@@ -166,6 +176,10 @@ const BURST_SHOT_DELAY = 0.09;
 // enough for the spear to fly across the board and linger. Shared with the
 // renderer so the sprite's flight is timed to this exact window.
 export const THROW_ANIM_TIME = 1.0;
+// The Blade adventurer cuts twice per attack, each for half its damage: the lead
+// blade's chop lands at once, the off blade's rising cut this many seconds later
+// (matched to the swing in `drawDualShortSwords`).
+export const BLADE_SECOND_HIT_DELAY = 0.13;
 // Wind Slice sweep: how long the crescent takes to travel from the caster to the
 // end of range (its "projectile" speed — longer is slower), and the fraction of
 // range its leading edge starts at. The engine and renderer share both so the
@@ -364,6 +378,18 @@ export class GameEngine {
    * are kept however the run ends.
    */
   gemsEarned = 0;
+
+  /**
+   * Armor pieces endless bosses have dropped this run (each with its rolled stats), in drop
+   * order. Rolled the moment a boss falls; the UI banks new entries as they
+   * appear, so the pieces are kept however the battle ends.
+   */
+  readonly armorDrops: ArmorRoll[] = [];
+  /**
+   * Whether bosses may drop armor at all (the player has unlocked it through
+   * their mastery tree). Set by the caller after construction.
+   */
+  armorUnlocked = true;
 
   private uidCounter = 1;
   private spawnQueue: ScheduledSpawn[] = [];
@@ -605,12 +631,14 @@ export class GameEngine {
       beamAngle: 0,
       beamRange: 0,
       beamTickTimer: 0,
+      followUp: null,
       ability,
       abilityCooldown: 0,
       abilityCooldownMax: ability?.cooldown ?? 0,
       // Heroes start each stage with a full mana pool; others have none.
       mana: def.maxMana ?? 0,
       maxMana: def.maxMana ?? 0,
+      manaRegen: def.maxMana ? (def.manaRegen ?? 0) : 0,
     });
     // A new tower can grant/receive adjacency bonuses (Better Morale).
     this.recomputeAdjacency();
@@ -820,7 +848,6 @@ export class GameEngine {
     // Its own buff slot (not the Bard's), so Quickdraw stacks on top of a tune.
     t.abilitySpeedBuffMult = ability.speedMult ?? 1;
     t.abilitySpeedBuffTimer = ability.duration ?? 0;
-    t.attackAnim = 0.2;
     this.sfx.push('quickdraw');
     this.emitFx({ kind: 'cast', ability: 'quickdraw', x: t.pos.x, y: t.pos.y, color: t.def.visual.color, radius: 40 });
     this.floaters.push({
@@ -870,7 +897,6 @@ export class GameEngine {
       x: t.pos.x + Math.cos(t.beamAngle) * t.beamRange,
       y: t.pos.y + Math.sin(t.beamAngle) * t.beamRange,
     };
-    t.attackAnim = 0.2;
     this.sfx.push('manaRay');
     this.emitFx({ kind: 'cast', ability: 'manaRay', x: t.pos.x, y: t.pos.y, color: t.def.visual.color, radius: t.beamRange });
     this.floaters.push({
@@ -890,6 +916,8 @@ export class GameEngine {
    */
   private updateBeam(t: Tower, dt: number): void {
     t.beamTimer = Math.max(0, t.beamTimer - dt);
+    // As the channel ends the caster's held-out hands recover, like after a throw.
+    if (t.beamTimer === 0) t.attackAnim = attackAnimTime(t.def.visual.shape);
     t.beamTickTimer -= dt;
     if (t.beamTickTimer <= 0) {
       this.beamTick(t);
@@ -1017,7 +1045,7 @@ export class GameEngine {
     let leveled = false;
     for (const t of this.towers) {
       if (!isHeroTower(t)) continue;
-      t.heroExp += exp;
+      t.heroExp += exp * masteryHeroExpMult(t.def.id, this.masteryUpgrades[t.def.id] ?? []);
       // Drain the pool into as many tiers as it now affords.
       let up = nextUpgrade(t.def, t.upgradeTier);
       while (up && t.heroExp >= up.cost) {
@@ -1399,9 +1427,15 @@ export class GameEngine {
   private updateTowers(dt: number): void {
     for (const t of this.towers) {
       if (t.attackAnim > 0) t.attackAnim = Math.max(0, t.attackAnim - dt);
+      if (t.followUp) {
+        t.followUp.timer -= dt;
+        if (t.followUp.timer <= 0) this.landFollowUp(t);
+      }
       if (t.throwAnim > 0) t.throwAnim = Math.max(0, t.throwAnim - dt);
       // Recharge an activated ability (Cyclone Slash) for every tower that has one.
       if (t.abilityCooldown > 0) t.abilityCooldown = Math.max(0, t.abilityCooldown - dt);
+      // Passive mana regeneration (from worn armor), on top of mana from kills.
+      if (t.manaRegen > 0 && t.mana < t.maxMana) t.mana = Math.min(t.maxMana, t.mana + t.manaRegen * dt);
 
       // Decay any attack-speed buff this tower is receiving (the Bard's tune).
       if (t.attackSpeedBuffTimer > 0) {
@@ -1633,7 +1667,7 @@ export class GameEngine {
 
   private fire(tower: Tower, target: Enemy): void {
     tower.targetUid = target.uid;
-    tower.attackAnim = 0.18;
+    tower.attackAnim = attackAnimTime(tower.def.visual.shape);
     tower.aimTarget = { ...target.pos };
 
     // Periodic "throw" attack (e.g. Spearman's Javelin Toss): every Nth attack
@@ -1721,6 +1755,19 @@ export class GameEngine {
       return;
     }
 
+    // The Blade adventurer splits each attack into two cuts of half damage: this
+    // one now, the off-hand cut a beat later (crit rolled per cut).
+    if (shape === 'player-blade') {
+      if (tower.followUp) this.landFollowUp(tower); // never drop a pending cut
+      tower.followUp = { timer: BLADE_SECOND_HIT_DELAY, targetUid: target.uid, damage: tower.damage / 2 };
+      this.sfx.push('swordSwing');
+      const half = (tower.damage / 2) * (crit ? tower.critMultiplier : 1);
+      const landed = this.damageEnemy(target, half, tower);
+      if (landed) this.sfx.push('swordHit');
+      if (crit && landed) this.critFloater(target.pos);
+      return;
+    }
+
     // Swordsman melee slash — lands instantly at the target.
     this.shots.push({
       from: { ...tower.pos },
@@ -1732,6 +1779,22 @@ export class GameEngine {
     });
     this.sfx.push('swordSwing');
     const landed = this.damageEnemy(target, dmg, tower);
+    if (landed) this.sfx.push('swordHit');
+    if (crit && landed) this.critFloater(target.pos);
+  }
+
+  /**
+   * Land a pending second cut (the Blade adventurer's off-hand strike) on its
+   * target, rolling its own crit. Dropped harmlessly if the target has died.
+   */
+  private landFollowUp(t: Tower): void {
+    const f = t.followUp;
+    t.followUp = null;
+    if (!f) return;
+    const target = this.enemies.find((e) => e.uid === f.targetUid && !e.dead && !e.dying);
+    if (!target) return;
+    const crit = this.rollCrit(t);
+    const landed = this.damageEnemy(target, f.damage * (crit ? t.critMultiplier : 1), t);
     if (landed) this.sfx.push('swordHit');
     if (crit && landed) this.critFloater(target.pos);
   }
@@ -1865,7 +1928,7 @@ export class GameEngine {
       if (this.damageEnemy(e, p.damage, p.source)) anyLanded = true;
     }
     if (p.crit && anyLanded) this.critFloater(pos);
-    this.emitFx({ kind: 'blast', x: pos.x, y: pos.y, radius, color: p.color, element: fxElementFor(p.source), crit: p.crit });
+    this.emitFx({ kind: 'blast', x: pos.x, y: pos.y, radius, color: p.color, element: fxElementFor(p.source), crit: p.crit, tint: fxTintFor(p.source) });
     // A big blast ring filling the detonation circle, plus a bright inner flash.
     this.bursts.push({
       pos: { ...pos },
@@ -2075,10 +2138,10 @@ export class GameEngine {
   private fireOrb(tower: Tower, target: Enemy): void {
     const crit = this.rollCrit(tower);
     const dmg = tower.damage * (crit ? tower.critMultiplier : 1);
-    // Launch from where the renderer gathers the orb — just in front of the
-    // caster's hands, on the side it faces.
+    // Launch from the caster's thrust-out palms (the sprite's MAGIC_CAST_POINT at
+    // board scale), on the side it faces.
     const dir = target.pos.x >= tower.pos.x ? 1 : -1;
-    const origin = { x: tower.pos.x + dir * 11, y: tower.pos.y - 4 };
+    const origin = { x: tower.pos.x + dir * 12.8, y: tower.pos.y - 6.4 };
     this.projectiles.push({
       pos: origin,
       targetUid: target.uid,
@@ -2189,10 +2252,11 @@ export class GameEngine {
       melee: source?.def.attackType === 'melee',
       amount: dealt,
       weight: Math.min(1, dealt / Math.max(1, enemy.def.health)),
+      tint: fxTintFor(source),
     });
     if (enemy.health <= 0) {
       enemy.health = 0;
-      this.emitFx({ kind: 'kill', enemy, fromX: from.x, fromY: from.y, element });
+      this.emitFx({ kind: 'kill', enemy, fromX: from.x, fromY: from.y, element, tint: fxTintFor(source) });
       // An enemy with a special death lingers to play it out (frozen and
       // untargetable) instead of popping — victory waits until it finishes. Every
       // other enemy dies instantly as before. Rewards/kill credit bank now either
@@ -2213,6 +2277,21 @@ export class GameEngine {
       // Tally the kill for the Enemy Index (regardless of which unit landed it).
       this.enemyKills[enemy.def.id] = (this.enemyKills[enemy.def.id] ?? 0) + 1;
       if (source) this.creditKill(source, enemy);
+      // A boss falling in an endless run may drop a piece of the chapter's armor set.
+      if (enemy.def.boss && this.armorUnlocked) {
+        const drop = rollArmorDrop(this.level.section, this.level.endless != null, this.rng);
+        if (drop) {
+          this.armorDrops.push(drop);
+          this.floaters.push({
+            pos: { x: enemy.pos.x, y: enemy.pos.y - 26 },
+            text: 'Armor found!',
+            color: ARMOR_RARITIES[drop.rarity].color,
+            ttl: 1.8,
+            maxTtl: 1.8,
+            size: 13,
+          });
+        }
+      }
       // A hero that lands the killing blow drinks in the enemy's mana, refilling
       // its pool (the only way to recover mana) up to its cap.
       if (source && source.maxMana > 0 && (enemy.def.mana ?? 0) > 0) {

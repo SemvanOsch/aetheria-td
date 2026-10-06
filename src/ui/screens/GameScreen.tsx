@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useGame } from '../../application/gameContext';
 import {
   effectiveMasteryUpgradesFor,
+  isArmorUnlocked,
   resolvedMasteryUpgrades,
   REPLAY_GEM_REWARD,
 } from '../../application/gameState';
@@ -32,6 +33,10 @@ import { setMusicIntensity } from '../music';
 import { playUiSound } from '../uiAudio';
 import { UnitSprite } from '../components/UnitSprite';
 import { Icon, type IconName } from '../components/Icon';
+import { ArmorIcon } from '../components/ArmorIcon';
+import { PauseMenu } from '../components/PauseMenu';
+import { BardSoundToggle } from '../components/BardSoundToggle';
+import { ARMOR_RARITIES, armorPieceName, armorStatLines, type ArmorRoll } from '../../domain/armor';
 
 interface Props {
   levelId: number;
@@ -78,7 +83,15 @@ interface Hud {
   gemsEarned: number;
   /** Activated abilities of deployed champions (the Blade's Cyclone Slash). */
   abilities: AbilityHud[];
+  /** Armor pieces bosses have dropped this battle (already banked). */
+  armorDrops: ArmorRoll[];
+  /** The newest drop while its toast is showing, else null. */
+  lootToast: ArmorRoll | null;
 }
+
+const NO_DROPS: ArmorRoll[] = [];
+/** How long the "armor found" toast stays up (ms). */
+const LOOT_TOAST_MS = 4200;
 
 /** Live info for the hovered-enemy tooltip, positioned as % of the board. */
 interface EnemyTooltip {
@@ -147,6 +160,16 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   const [fastForward, setFastForward] = useState(false);
   const speedRef = useRef(1);
   speedRef.current = fastForward ? 3 : 1;
+  // Pause menu: while open the simulation is frozen (the board still redraws).
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  pausedRef.current = paused;
+  // Auto-start-waves preference, read by the rAF loop.
+  const autoStartRef = useRef(false);
+  autoStartRef.current = game.state.prefs.autoStartWaves;
+  // Bard tune mute preference, read when the loop drains sound cues.
+  const bardMutedRef = useRef(false);
+  bardMutedRef.current = game.state.prefs.bardSoundMuted;
   // Uid of the enemy currently hovered (read each frame to refresh the tooltip).
   const hoverEnemyRef = useRef<number | null>(null);
   // Bumped on place/sell to refresh deploy counts immediately (independent of
@@ -190,6 +213,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
       level.startingGold +
       masteryStartingGoldBonus(game.state.team, activeUpgrades);
     const engine = new GameEngine(level, startingGold, activeUpgrades);
+    engine.armorUnlocked = isArmorUnlocked(game.state);
     engineRef.current = engine;
     settledRef.current = false;
 
@@ -203,8 +227,18 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     let raf = 0;
     let last = performance.now();
     let bossBannerUntil = 0;
+    // Armor drops already banked to the save (they bank the moment a boss falls).
+    let dropsBanked = 0;
+    let lootUntil = 0;
     // Endless gems already banked to the save (they bank the moment they're won).
     let gemsBanked = 0;
+    // Auto-start waves: the next wave is due the moment the previous one clears.
+    const autoWaveDue = () =>
+      autoStartRef.current &&
+      engine.phase === 'prep' &&
+      engine.outcome === 'playing' &&
+      engine.waveIndex > 0 &&
+      engine.waveIndex < engine.totalWaves;
 
     const snapshot = (now: number): Hud => ({
       currency: Math.round(engine.currency),
@@ -217,6 +251,8 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
       outcome: engine.outcome,
       showBossBanner: now < bossBannerUntil,
       gemsEarned: engine.gemsEarned,
+      armorDrops: engine.armorDrops.length ? [...engine.armorDrops] : NO_DROPS,
+      lootToast: now < lootUntil ? engine.armorDrops[engine.armorDrops.length - 1] ?? null : null,
       abilities: engine.towers
         .filter((t) => t.ability)
         .map((t) => {
@@ -280,16 +316,23 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
 
       // Fast-forward advances the sim multiple normal-sized steps per frame,
       // keeping each step's fidelity (vs. one oversized dt that skips motion).
-      const steps = speedRef.current;
+      // Paused: nothing advances, but the board keeps drawing.
+      const steps = pausedRef.current ? 0 : speedRef.current;
       for (let i = 0; i < steps; i++) {
         engine.update(dt);
         if (engine.outcome !== 'playing') break; // stop stepping once settled
       }
 
+      // Auto-start waves: start the next wave as soon as one is cleared (not while paused).
+      if (steps > 0 && autoWaveDue()) engine.startWave();
+
       // Drain this frame's sound cues (the audio layer throttles each type, so
       // dense bursts stay light) and clear the queue for the next frame.
       if (engine.sfx.length) {
-        for (const s of engine.sfx) playCombatSound(s);
+        for (const s of engine.sfx) {
+          if (s === 'bardPlay' && bardMutedRef.current) continue;
+          playCombatSound(s);
+        }
         engine.sfx.length = 0;
       }
 
@@ -302,6 +345,12 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
       if (engine.gemsEarned > gemsBanked) {
         game.grantGems(engine.gemsEarned - gemsBanked);
         gemsBanked = engine.gemsEarned;
+      }
+      // Likewise armor a boss dropped: into the armory at once, with a toast.
+      if (engine.armorDrops.length > dropsBanked) {
+        game.awardArmor(engine.armorDrops.slice(dropsBanked));
+        dropsBanked = engine.armorDrops.length;
+        lootUntil = now + LOOT_TOAST_MS;
       }
 
       // Settle rewards/progression exactly once when the battle ends.
@@ -433,15 +482,24 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
 
   // The chapter battle theme thins out in the build phase and swells while a
   // wave is on the board; after the battle it settles back down.
-  const musicPhase = !hud || hud.outcome !== 'playing' ? 'over' : hud.phase;
+  // Pausing settles it down too.
+  const musicPhase = !hud || hud.outcome !== 'playing' || paused ? 'over' : hud.phase;
   useEffect(() => {
     setMusicIntensity(musicPhase === 'prep' ? 0.3 : musicPhase === 'over' ? 0.15 : 1);
   }, [musicPhase]);
 
-  // Escape also cancels the current selection.
+  // Escape cancels the current selection; with nothing selected it opens or
+  // closes the pause menu.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') clearSelection();
+      if (e.key !== 'Escape') return;
+      const ui = uiRef.current;
+      if (!pausedRef.current && (ui.selectedUnitId || ui.selectedTowerUid != null)) {
+        clearSelection();
+        return;
+      }
+      if (engineRef.current?.outcome !== 'playing') return;
+      setPaused((p) => !p);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -511,8 +569,18 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   const canStartWave =
     hud?.phase === 'prep' && hud.outcome === 'playing' && hud.waveIndex < hud.totalWaves;
 
+  // Leaving from the pause menu: retreat from a stage, or concede an endless run.
+  const leaveFromPause = () => {
+    setPaused(false);
+    if (endless) engineRef.current?.surrender();
+    else onExit();
+  };
+
   return (
     <main className="game-wrap">
+      {paused && hud?.outcome === 'playing' && (
+        <PauseMenu endless={!!endless} onResume={() => setPaused(false)} onLeave={leaveFromPause} />
+      )}
       <div className="game-hud">
         {endless && hud?.outcome === 'playing' ? (
           <button
@@ -531,16 +599,11 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
           <span className="lbl">Realm</span> {level.name}
         </div>
         {endless ? (
-          <>
-            <div className="hud-stat">
-              <span className="lbl">Wave</span>
-              <HudNum value={(hud?.waveIndex ?? 0) + 1} digits={3} />
-              <small className="hud-boss-in">{bossCountdown((hud?.waveIndex ?? 0) + 1)}</small>
-            </div>
-            <div className="hud-stat hud-gems" title="Gems earned this run">
-              <Icon name="gem" /> <HudNum value={hud?.gemsEarned ?? 0} digits={4} />
-            </div>
-          </>
+          <div className="hud-stat">
+            <span className="lbl">Wave</span>
+            <HudNum value={(hud?.waveIndex ?? 0) + 1} digits={3} />
+            <small className="hud-boss-in">{bossCountdown((hud?.waveIndex ?? 0) + 1)}</small>
+          </div>
         ) : (
           <div className="hud-stat">
             <span className="lbl">Wave</span>
@@ -565,6 +628,16 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
         <div className="hud-stat hud-gold">
           <Icon name="coin" /> <HudNum value={hud?.currency ?? 0} digits={5} />
         </div>
+        <button
+          type="button"
+          className="hud-stat hud-pause"
+          onClick={() => setPaused(true)}
+          disabled={hud?.outcome !== 'playing'}
+          title="Pause (Esc)"
+          aria-label="Pause"
+        >
+          <Icon name="pause" />
+        </button>
       </div>
 
       <div className="board-layout">
@@ -610,12 +683,14 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                   <Icon name="skull" /> A Boss Approaches <Icon name="skull" />
                 </div>
               )}
+              {hud?.lootToast && hud.outcome === 'playing' && <LootToast key={hud.armorDrops.length} roll={hud.lootToast} />}
               {hud && hud.outcome !== 'playing' && endless && (
                 <EndlessResultCard
                   wavesCleared={hud.waveIndex}
                   gemsEarned={hud.gemsEarned}
                   newBest={hud.waveIndex > prevBest}
                   best={Math.max(prevBest, hud.waveIndex)}
+                  armorDrops={hud.armorDrops}
                   onExit={onExit}
                   onHome={onHome}
                   onRetry={onRetry}
@@ -626,6 +701,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                   outcome={hud.outcome}
                   gemReward={level.gemReward}
                   firstClear={firstClearRef.current}
+                  armorDrops={hud.armorDrops}
                   onExit={onExit}
                   onHome={onHome}
                   onRetry={onRetry}
@@ -754,6 +830,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
 
           {selectedTower && (
             <div className="panel panel-pad selected-tower-box">
+              {selectedTower.bardEvery > 0 && <BardSoundToggle compact className="t-bard-sound" />}
               <div className="t-head">
                 <div className="t-title">
                   <span className="t-name-text">{selectedTower.def.name}</span>
@@ -1156,6 +1233,7 @@ function EndlessResultCard({
   gemsEarned,
   newBest,
   best,
+  armorDrops,
   onExit,
   onHome,
   onRetry,
@@ -1164,6 +1242,7 @@ function EndlessResultCard({
   gemsEarned: number;
   newBest: boolean;
   best: number;
+  armorDrops: ArmorRoll[];
   onExit: () => void;
   onHome: () => void;
   onRetry: () => void;
@@ -1182,6 +1261,7 @@ function EndlessResultCard({
         </div>
         <div style={{ color: 'var(--text-dim)' }}>Best · {best} waves</div>
       </div>
+      <LootList drops={armorDrops} />
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
         <button className="btn ghost" onClick={onHome}>
           Home
@@ -1201,6 +1281,7 @@ function ResultCard({
   outcome,
   gemReward,
   firstClear,
+  armorDrops,
   onExit,
   onHome,
   onRetry,
@@ -1208,6 +1289,7 @@ function ResultCard({
   outcome: Outcome;
   gemReward: number;
   firstClear: boolean;
+  armorDrops: ArmorRoll[];
   onExit: () => void;
   onHome: () => void;
   onRetry: () => void;
@@ -1233,6 +1315,7 @@ function ResultCard({
           </div>
         )}
       </div>
+      <LootList drops={armorDrops} />
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
         <button className="btn ghost" onClick={onHome}>
           Home
@@ -1245,6 +1328,70 @@ function ResultCard({
           <button className="btn primary" onClick={onRetry}>
             Retry
           </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The "armor found" toast that rises over the board when a boss drops a piece. */
+function LootToast({ roll }: { roll: ArmorRoll }) {
+  const rarity = ARMOR_RARITIES[roll.rarity];
+  return (
+    <div className="loot-toast" style={{ '--rarity': rarity.color } as CSSProperties}>
+      <ArmorIcon piece={roll} size={46} />
+      <div>
+        <div className="loot-toast-kicker">Armor found</div>
+        <div className="loot-toast-name">
+          {rarity.name} {armorPieceName(roll)}
+        </div>
+        <div className="loot-toast-stats">
+          {armorStatLines(roll.stats).map((l) => `${l.label} ${l.value}`).join(' · ')}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The pieces this battle's bosses dropped, on the result card. */
+/** Armor tiles shown on the result card before the rest collapse into "+N more". */
+const LOOT_LIST_MAX = 3;
+
+function LootList({ drops }: { drops: ArmorRoll[] }) {
+  if (drops.length === 0) return null;
+  // Rarest first; only the top few get a tile so a long endless run still fits the card.
+  const sorted = [...drops].sort((a, b) => ARMOR_RARITIES[b.rarity].order - ARMOR_RARITIES[a.rarity].order);
+  const shown = sorted.slice(0, LOOT_LIST_MAX);
+  const rest = sorted.slice(LOOT_LIST_MAX);
+  return (
+    <div className="loot-list">
+      <div className="loot-list-head">
+        {drops.length > 1 ? `${drops.length} armor pieces found` : 'Armor found'} · added to your armory
+      </div>
+      <div className="loot-list-items">
+        {shown.map((roll, i) => {
+          const rarity = ARMOR_RARITIES[roll.rarity];
+          const lines = armorStatLines(roll.stats).map((l) => `${l.label} ${l.value}`);
+          return (
+            <div
+              key={i}
+              className="loot-item"
+              style={{ '--rarity': rarity.color } as CSSProperties}
+              title={[`${rarity.name} ${armorPieceName(roll)}`, ...lines].join('\n')}
+            >
+              <ArmorIcon piece={roll} size={44} />
+              <span>{armorPieceName(roll)}</span>
+            </div>
+          );
+        })}
+        {rest.length > 0 && (
+          <div
+            className="loot-item loot-item-more"
+            title={rest.map((roll) => `${ARMOR_RARITIES[roll.rarity].name} ${armorPieceName(roll)}`).join('\n')}
+          >
+            <strong>+{rest.length}</strong>
+            <span>more</span>
+          </div>
         )}
       </div>
     </div>

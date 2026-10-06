@@ -31,10 +31,24 @@ import { ENEMY_KILLS_TO_UNLOCK, type EnemyDef } from '../domain/enemies';
 import { getSection, levelsForSection, type SectionId } from '../domain/levels';
 import { endlessLevelFor } from '../domain/endless';
 import {
+  ARMOR_RARITIES,
+  ARMOR_SLOTS,
+  equippedPieces,
+  getArmorSet,
+  normalizeArmorPiece,
+  rollArmorPiece,
+  type ArmorLoadout,
+  type ArmorPiece,
+  type ArmorRarity,
+  type ArmorRoll,
+  type ArmorSlot,
+} from '../domain/armor';
+import {
   activeMasteryUpgrades,
   getMasteryUpgrade,
   masterySpent,
   masteryTree,
+  masteryUnlocksArmor,
 } from '../domain/mastery';
 
 /**
@@ -123,6 +137,19 @@ export interface GameState {
   readChapters: number[];
   /** Best endless run per chapter: the most waves cleared in a single run. */
   endlessBest: Partial<Record<SectionId, number>>;
+  /** The adventurer's armor: pieces found and what is worn (see domain/armor). */
+  armor: ArmorState;
+}
+
+/**
+ * Every owned piece is stored on its own (its stats were rolled when it
+ * dropped), and the loadout maps each slot to a worn piece's id. A worn id is
+ * always owned. `nextId` hands out piece ids.
+ */
+export interface ArmorState {
+  items: ArmorPiece[];
+  equipped: ArmorLoadout;
+  nextId: number;
 }
 
 /** Persisted, non-gameplay UI preferences. */
@@ -131,11 +158,17 @@ export interface UiPrefs {
   championSort: 'asc' | 'desc';
   /** Whether the "mastery upgrade available" marks show on champion cards. */
   showMasteryMarks: boolean;
+  /** In a stage, start the next wave by itself shortly after one is cleared (pause menu). */
+  autoStartWaves: boolean;
+  /** Silence the Bard's lute tune in battle (Champion sheet + in-stage panel). */
+  bardSoundMuted: boolean;
 }
 
 const DEFAULT_PREFS: UiPrefs = {
   championSort: 'desc',
   showMasteryMarks: true,
+  autoStartWaves: false,
+  bardSoundMuted: false,
 };
 
 /**
@@ -178,7 +211,7 @@ function normalizeAudio(raw: Partial<AudioSettings> | undefined | null): AudioSe
 
 const STORAGE_KEY = 'state';
 const STARTING_GEMS = 200;
-const CURRENT_VERSION = 16;
+const CURRENT_VERSION = 18;
 
 /** Maximum distinct champions the player may bring into a stage. */
 export const MAX_TEAM_SIZE = 6;
@@ -205,8 +238,16 @@ export function createInitialState(): GameState {
     audio: { ...DEFAULT_AUDIO },
     readChapters: [],
     endlessBest: {},
+    armor: { items: [], equipped: {}, nextId: 1 },
   };
 }
+
+/** Skill-tree nodes that were replaced: [unit id, old node id, new node id]. */
+const RENAMED_MASTERY_NODES: readonly [string, string, string][] = [
+  ['player-blade', 'keen_edges', 'battle_lessons'],
+  ['player-bow', 'fleet_fingers', 'hunters_instinct'],
+  ['player-magic', 'raw_power', 'arcane_study'],
+];
 
 /** Legacy shapes: v1 had `currency`; v2 had a persistent `gold`. */
 interface LegacyState {
@@ -240,6 +281,16 @@ export function loadState(): GameState {
   migrated.mastery = { ...(raw.mastery ?? {}) };
   // Pre-v5 saves have no purchased skill-tree upgrades.
   migrated.masteryUpgrades = { ...(raw.masteryUpgrades ?? {}) };
+  // The player champions' second node was replaced by a hero-EXP node (same
+  // cost); carry an old purchase over so the spent EXP and the capstone survive.
+  for (const [unitId, oldId, newId] of RENAMED_MASTERY_NODES) {
+    const owned = migrated.masteryUpgrades[unitId];
+    if (owned?.includes(oldId)) {
+      migrated.masteryUpgrades[unitId] = Array.from(
+        new Set(owned.map((id) => (id === oldId ? newId : id))),
+      );
+    }
+  }
   // Pre-v7 saves have no active-path selections for exclusive skill-tree groups.
   migrated.activeMastery = { ...(raw.activeMastery ?? {}) };
   // Pre-v8 saves have no per-champion mastery on/off switch (all default on).
@@ -248,6 +299,9 @@ export function loadState(): GameState {
   migrated.enemyKills = { ...(raw.enemyKills ?? {}) };
   // Pre-v16 saves have no endless records.
   migrated.endlessBest = { ...(raw.endlessBest ?? {}) };
+  // Pre-v17 saves have no armor; v17 counted identical pieces (now each piece
+  // rolls its stats). Unknown pieces (a removed set) are dropped.
+  migrated.armor = normalizeArmor(raw.armor as ArmorState & LegacyArmorState);
   // Pre-v6 saves have no team; seed it from owned units (all were deployable
   // before teams existed). Always normalize to a distinct, owned, capped list
   // with the personal champion (if owned) pinned to the first slot.
@@ -297,6 +351,52 @@ function normalizePlayerProfile(
     // the intro — progression is preserved.
     proficiency: normalizeProficiency(raw.proficiency),
   };
+}
+
+/** v17 armor: a count per `set:slot:rarity` key, and the loadout by key. */
+interface LegacyArmorState {
+  owned?: Record<string, number>;
+}
+
+/**
+ * Keep only valid pieces with distinct ids, and worn ids that are owned in the
+ * right slot. A v17 save's counted pieces are converted into that many freshly
+ * rolled pieces of the same set, slot and rarity (a worn key → its first one).
+ */
+function normalizeArmor(raw: Partial<ArmorState & LegacyArmorState> | undefined | null): ArmorState {
+  const items: ArmorPiece[] = [];
+  const ids = new Set<string>();
+  for (const r of Array.isArray(raw?.items) ? raw.items : []) {
+    const p = normalizeArmorPiece(r);
+    if (p && !ids.has(p.id)) {
+      ids.add(p.id);
+      items.push(p);
+    }
+  }
+  let nextId = Math.max(1, typeof raw?.nextId === 'number' ? Math.floor(raw.nextId) : 1);
+  for (const p of items) {
+    const n = Number(p.id.replace(/^a/, ''));
+    if (Number.isFinite(n)) nextId = Math.max(nextId, n + 1);
+  }
+  const equipped: ArmorLoadout = {};
+  const legacyFirst: Record<string, string> = {};
+  if (raw?.owned && !Array.isArray(raw.items)) {
+    for (const [key, n] of Object.entries(raw.owned)) {
+      const [set, slot, rarity] = key.split(':');
+      if (!getArmorSet(set) || !ARMOR_SLOTS.some((s) => s.id === slot) || !(rarity in ARMOR_RARITIES)) continue;
+      for (let i = 0; i < Math.min(50, Math.floor(Number(n) || 0)); i++) {
+        const id = `a${nextId++}`;
+        items.push({ id, ...rollArmorPiece(set, slot as ArmorSlot, rarity as ArmorRarity, Math.random) });
+        legacyFirst[key] ??= id;
+      }
+    }
+  }
+  for (const { id: slot } of ARMOR_SLOTS) {
+    const worn = raw?.equipped?.[slot];
+    const id = worn && legacyFirst[worn] ? legacyFirst[worn] : worn;
+    if (id && items.some((p) => p.id === id && p.slot === slot)) equipped[slot] = id;
+  }
+  return { items, equipped, nextId };
 }
 
 export function saveState(state: GameState): void {
@@ -362,6 +462,26 @@ export function toggleTeamMember(state: GameState, unitId: string): GameState {
   if (!state.ownedUnits.includes(unitId) || state.team.length >= MAX_TEAM_SIZE) {
     return state;
   }
+  return { ...state, team: [...state.team, unitId] };
+}
+
+/**
+ * Put an owned champion not yet in the team into slot `index` (a roster card
+ * dropped on the company): over a member it replaces them (never the locked
+ * hero), on an empty slot it joins at the end if there's room.
+ */
+export function placeInTeam(state: GameState, unitId: string, index: number): GameState {
+  if (isLockedChampion(state, unitId) || state.team.includes(unitId) || !state.ownedUnits.includes(unitId)) {
+    return state;
+  }
+  const current = state.team[index];
+  if (current !== undefined) {
+    if (isLockedChampion(state, current)) return state;
+    const team = [...state.team];
+    team[index] = unitId;
+    return { ...state, team };
+  }
+  if (state.team.length >= MAX_TEAM_SIZE) return state;
   return { ...state, team: [...state.team, unitId] };
 }
 
@@ -441,6 +561,26 @@ export function grantPlayerChampion(state: GameState): GameState {
     ownedUnits,
     // Pin the champion to the first team slot — it is always deployed.
     team: normalizeTeam([id, ...state.team], ownedUnits),
+    playerChampionGranted: true,
+  };
+}
+
+/**
+ * Developer tool: swap the player's champion to another class. The profile's
+ * proficiency changes and the owned player champion is replaced by that path's
+ * (taking its team slot), so exactly one player champion is owned. Mastery is
+ * keyed per champion id, so switching back restores each class's progress.
+ */
+export function setPlayerChampionClass(state: GameState, proficiency: Proficiency): GameState {
+  if (!state.player) return state;
+  const id = implementedPlayerChampionId(proficiency);
+  if (!id) return state;
+  const ownedUnits = [...state.ownedUnits.filter((u) => !isPlayerChampionId(u)), id];
+  return {
+    ...state,
+    player: { ...state.player, proficiency },
+    ownedUnits,
+    team: normalizeTeam([id, ...state.team.filter((u) => !isPlayerChampionId(u))], ownedUnits),
     playerChampionGranted: true,
   };
 }
@@ -761,4 +901,70 @@ export function isEndlessUnlocked(state: GameState, section: SectionId): boolean
 export function recordEndlessRun(state: GameState, section: SectionId, wavesCleared: number): GameState {
   if (wavesCleared <= (state.endlessBest[section] ?? 0)) return state;
   return { ...state, endlessBest: { ...state.endlessBest, [section]: wavesCleared } };
+}
+
+// --- Armor ------------------------------------------------------------------
+
+/** Add rolled pieces (drops, forges) to the armory, each with a fresh id. */
+export function addArmor(state: GameState, rolls: readonly ArmorRoll[]): GameState {
+  let nextId = state.armor.nextId;
+  const added: ArmorPiece[] = [];
+  for (const roll of rolls) {
+    const piece = normalizeArmorPiece({ ...roll, id: `a${nextId}` });
+    if (!piece) continue;
+    nextId++;
+    added.push(piece);
+  }
+  if (added.length === 0) return state;
+  return { ...state, armor: { ...state.armor, items: [...state.armor.items, ...added], nextId } };
+}
+
+/**
+ * Whether armor is unlocked: the owned player champion has learned its tree’s
+ * armor node (the major node). Until then armor neither drops nor applies.
+ */
+export function isArmorUnlocked(state: GameState): boolean {
+  return state.ownedUnits.some(
+    (id) => isPlayerChampionId(id) && masteryUnlocksArmor(id, masteryUpgradesFor(state, id)),
+  );
+}
+
+/** The pieces the adventurer wears, in slot order. */
+export function equippedArmor(state: GameState): ArmorPiece[] {
+  return equippedPieces(state.armor.items, state.armor.equipped);
+}
+
+/** Whether a piece is being worn. */
+export function isArmorEquipped(state: GameState, id: string): boolean {
+  return Object.values(state.armor.equipped).includes(id);
+}
+
+/** Wear an owned piece in its slot, replacing whatever was there. */
+export function equipArmor(state: GameState, id: string): GameState {
+  const piece = state.armor.items.find((p) => p.id === id);
+  if (!piece) return state;
+  return { ...state, armor: { ...state.armor, equipped: { ...state.armor.equipped, [piece.slot]: id } } };
+}
+
+/** Take off the piece in a slot. */
+export function unequipArmor(state: GameState, slot: ArmorSlot): GameState {
+  if (!state.armor.equipped[slot]) return state;
+  const equipped = { ...state.armor.equipped };
+  delete equipped[slot];
+  return { ...state, armor: { ...state.armor, equipped } };
+}
+
+/**
+ * Break down pieces for gems (each pays its rarity's `salvageGems`). Worn
+ * pieces are skipped — take them off first.
+ */
+export function salvageArmor(state: GameState, ids: readonly string[]): GameState {
+  const drop = new Set(ids.filter((id) => !isArmorEquipped(state, id)));
+  const salvaged = state.armor.items.filter((p) => drop.has(p.id));
+  if (salvaged.length === 0) return state;
+  return {
+    ...state,
+    gems: state.gems + salvaged.reduce((sum, p) => sum + ARMOR_RARITIES[p.rarity].salvageGems, 0),
+    armor: { ...state.armor, items: state.armor.items.filter((p) => !drop.has(p.id)) },
+  };
 }
