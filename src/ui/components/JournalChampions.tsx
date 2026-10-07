@@ -405,8 +405,6 @@ function ChampionPlate({
         {path ? `Hero of the ${proficiencyDef(path).label} · ` : ''}
         {traits.join(' · ')}
       </div>
-      <p className="j-desc">{unit.description}</p>
-
       <div className="j-ledger">
         {championStatTiles(unit, purchased).map((t) => (
           <div key={t.label} className="j-ledger-row" title={t.sub}>

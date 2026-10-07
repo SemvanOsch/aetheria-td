@@ -663,7 +663,7 @@ export function LevelDesigner({ onClose }: Props) {
     const end = lane[lane.length - 1];
     const endProp = propAt(props, end);
     const startOk = isOffBoard(start.col, start.row);
-    const endOk = isOffBoard(end.col, end.row) || endProp?.kind === 'castle' || endProp?.kind === 'gate';
+    const endOk = isOffBoard(end.col, end.row) || endProp?.kind === 'castle' || endProp?.kind === 'burningCastle' || endProp?.kind === 'gate';
     const issues: string[] = [];
     if (!startOk) issues.push('its spawn (first point) is on the board');
     if (!endOk) issues.push('its castle (last point) is on the board with no castle or gate prop there');
@@ -675,6 +675,7 @@ export function LevelDesigner({ onClose }: Props) {
     (p) =>
       p.kind !== 'battlements' &&
       p.kind !== 'castle' &&
+      p.kind !== 'burningCastle' &&
       p.kind !== 'gate' &&
       propCells(p).some((c) => pathCells.has(cellKey(c.col, c.row))),
   ).length;

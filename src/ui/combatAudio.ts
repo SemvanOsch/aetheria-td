@@ -34,6 +34,8 @@ const MIN_GAP: Partial<Record<SfxName, number>> = {
   spearHit: 0.07,
   windSliceHit: 0.07,
   longbowHit: 0.07,
+  staffHit: 0.08,
+  stormBolt: 0.08,
 };
 const DEFAULT_GAP = 0.05;
 const lastPlayed: Partial<Record<SfxName, number>> = {};
@@ -121,6 +123,65 @@ function pluck(ac: AudioContext, freq: number, dur: number, gain: number, delay 
     osc.connect(lp);
     osc.start(t);
     osc.stop(t + dur);
+  }
+}
+
+/**
+ * An FM "zap": a sine carrier gliding `from`→`to`, frequency-modulated at an
+ * inharmonic `ratio` with a modulation depth (`index`, × the carrier) that dies
+ * away — a bright, metallic, unmistakably *synthetic* attack melting into a pure
+ * tail. With a fast vibrato on top (`warble` Hz) it shimmers. The magic voice:
+ * no breathy noise and no plain glide, so it never reads as a wind instrument.
+ */
+function fmZap(
+  ac: AudioContext,
+  from: number,
+  to: number,
+  dur: number,
+  gain: number,
+  ratio = 2.73,
+  index = 2.5,
+  warble = 0,
+  delay = 0,
+): void {
+  const t = ac.currentTime + AUDIO_LEAD + delay;
+  const car = ac.createOscillator();
+  car.type = 'sine';
+  car.frequency.setValueAtTime(from, t);
+  car.frequency.exponentialRampToValueAtTime(Math.max(30, to), t + dur);
+  const mod = ac.createOscillator();
+  mod.type = 'sine';
+  mod.frequency.setValueAtTime(from * ratio, t);
+  mod.frequency.exponentialRampToValueAtTime(Math.max(30, to * ratio), t + dur);
+  const depth = ac.createGain();
+  depth.gain.setValueAtTime(from * index, t);
+  depth.gain.exponentialRampToValueAtTime(Math.max(1, to * index * 0.08), t + dur);
+  mod.connect(depth).connect(car.frequency);
+  const oscs = [car, mod];
+  if (warble > 0) {
+    const lfo = ac.createOscillator();
+    lfo.frequency.value = warble;
+    const lfoDepth = ac.createGain();
+    lfoDepth.gain.value = from * 0.04;
+    lfo.connect(lfoDepth).connect(car.frequency);
+    oscs.push(lfo);
+  }
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(gain, t + Math.min(0.006, dur * 0.2));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  car.connect(g).connect(dest ?? ac.destination);
+  for (const o of oscs) {
+    o.start(t);
+    o.stop(t + dur);
+  }
+}
+
+/** A glitter of `count` tiny high sine pips scattered over `dur` — sparkling dust. */
+function sparkle(ac: AudioContext, count: number, lo: number, hi: number, dur: number, gain: number, delay = 0): void {
+  for (let i = 0; i < count; i++) {
+    const f = lo + Math.random() * (hi - lo);
+    toneGlide(ac, f, f * 1.08, 0.035, gain, 'sine', delay + Math.random() * dur);
   }
 }
 
@@ -230,6 +291,33 @@ const VOICES: Record<SfxName, (ac: AudioContext) => void> = {
     noiseSweep(ac, jit(2600, 200), 1100, 0.3, 0.01, 0.9, 'bandpass', 0.05);
   },
 
+  // Arcane Staff — FM voices, not breath and glides (those read as a flute): a
+  // warbling shimmer swelling up as the crystal kindles in the raise; three
+  // metallic "pew" zaps with a glitter of sparks as the bolts streak out one
+  // after another; and a small fiery whoomp when each strikes.
+  staffCast: (ac) => {
+    fmZap(ac, jit(520, 30), 1100, 0.32, 0.01, 1.5, 1.2, 14);
+    sparkle(ac, 4, 2800, 5200, 0.28, 0.003);
+  },
+  staffShot: (ac) => {
+    for (let i = 0; i < 3; i++) {
+      // Spaced like the bolts leaving the crystal (`STAFF_BOLT_STAGGER`).
+      fmZap(ac, jit(1300, 80) - i * 110, 420, 0.16, 0.0072, 2.73, 3, 0, i * 0.07);
+      sparkle(ac, 2, 3000, 6000, 0.1, 0.0018, i * 0.07);
+    }
+  },
+  staffHit: (ac) => {
+    // A small fiery "whoomp", modelled on a fire-magic burst but squeezed from
+    // about a second down to a quarter of one (several bolts land per second):
+    // a soft click as the point bites, then a low, dark roar of lowpassed noise
+    // that flares open (up to ~1.6kHz) and darkens back down into a rumble, over
+    // a low sine body dropping away beneath it.
+    noiseSweep(ac, jit(4200, 300), 2800, 0.018, 0.008, 0.9, 'highpass');
+    noiseSweep(ac, jit(380, 40), jit(1600, 150), 0.06, 0.03, 0.8, 'lowpass');
+    noiseSweep(ac, jit(1500, 120), 180, 0.24, 0.036, 0.8, 'lowpass', 0.05);
+    toneGlide(ac, jit(165, 12), 62, 0.26, 0.022, 'sine', 0.01);
+  },
+
   // Cyclone Slash (the Blade's ability) — a big whirling steel roar: two broad
   // noise sweeps whipping up in pitch for the whirlwind, plus a low metallic
   // ring underneath for the heft of the spinning blades. Louder than a normal
@@ -320,6 +408,20 @@ const VOICES: Record<SfxName, (ac: AudioContext) => void> = {
   // Mana Ray tick — a soft, steady zap each 0.5s the beam sears, so the channel
   // reads as a continuous hum rather than silence. Kept very quiet.
   manaRayTick: (ac) => toneGlide(ac, jit(900, 80), 640, 0.09, 0.016, 'sine'),
+
+  // Mana Storm (the Staff's ability) — the staff goes up: a deep swell climbing
+  // under an airy rising sweep, then a high shimmer that rings on as it channels.
+  manaStorm: (ac) => {
+    toneGlide(ac, jit(220, 20), 880, 0.5, 0.03, 'sawtooth');
+    noiseSweep(ac, jit(400, 60), jit(2600, 250), 0.45, 0.018, 0.8);
+    toneGlide(ac, jit(1320, 40), 1400, 0.6, 0.008, 'sine', 0.3);
+  },
+  // A Mana Storm bolt flung skyward — one soft FM zap rising as it climbs, with
+  // a couple of sparks.
+  stormBolt: (ac) => {
+    fmZap(ac, jit(600, 50), 1500, 0.14, 0.0048, 2.73, 2.5, 0);
+    sparkle(ac, 2, 3000, 6000, 0.1, 0.0015);
+  },
 
   // Bard — a short, unhurried lute phrase as the minstrel strikes up: three
   // spaced, soft notes from a random motif in a random major key.

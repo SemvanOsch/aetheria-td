@@ -6614,13 +6614,23 @@ body:has(.intro-root) > .modal-backdrop {
   color: var(--ink);
   white-space: nowrap;
 }
+/* two equal columns; an odd last button sits centred at the same width */
 .j-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
   gap: 8px;
-  margin-top: auto;
+  width: min(100%, 380px);
+  margin: 12px auto 0;
   padding-bottom: 10px;
+}
+.j-actions > .j-btn {
+  justify-content: center;
+}
+.j-actions > .j-btn:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: calc(50% - 4px);
 }
 .j-btn {
   position: relative;
@@ -7187,6 +7197,33 @@ body:has(.intro-root) > .modal-backdrop {
 .es-mech {
   color: var(--text-dim);
   font-size: 13px;
+}
+/* Stage sheet (#stages): one table per stage, a row per wave and lane. */
+.ss-meta {
+  margin: -4px 0 10px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.es-table td.ss-wave {
+  font-weight: 700;
+  color: var(--gold);
+  vertical-align: top;
+}
+.ss-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+.ss-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ss-group.boss .es-name {
+  color: var(--gold);
+}
+.ss-hidden {
+  opacity: 0.45;
 }
 
 /* ============================================================

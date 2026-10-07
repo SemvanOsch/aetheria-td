@@ -114,12 +114,15 @@ export interface AbilityDef {
   damageMult?: number;
   /**
    * Timed self-buff abilities (the Bow's Quickdraw): the attack-speed multiplier
-   * granted to the caster while active. Omitted for abilities that aren't a buff.
+   * granted to the caster while active. For a barrage (the Staff's Mana Storm):
+   * how many times faster than its normal attacks it looses bolts. Omitted for
+   * other abilities.
    */
   speedMult?: number;
   /**
    * How long a timed ability lasts, in seconds — the buff window for a self-buff
-   * (Quickdraw), or the channel time for a beam (the Mage's Mana Ray).
+   * (Quickdraw), or the channel time for a beam (the Mage's Mana Ray) or a
+   * barrage (the Staff's Mana Storm).
    */
   duration?: number;
   /**
@@ -235,7 +238,9 @@ export interface UnitDef {
   /**
    * Arrows/shots loosed per attack as a quick burst volley (the Bow adventurer's
    * shortbow fires 3). Omitted / 1 means a single shot per attack. The unit's
-   * `attackSpeed` then governs how often the whole burst repeats.
+   * `attackSpeed` then governs how often the whole burst repeats. The Magic
+   * adventurer's Staff looses its whole volley at once (3 mana bolts, each
+   * seeking a different foe) rather than one after another.
    */
   burst?: number;
   /** Gold cost to deploy the unit during a level. */
@@ -306,7 +311,8 @@ export interface UnitVisual {
   | 'player-claymore'
   | 'player-bow'
   | 'player-longbow'
-  | 'player-magic';
+  | 'player-magic'
+  | 'player-staff';
   /**
    * For the `player-*` shapes: the composed avatar config to render, so the board
    * token and every card match the portrait made in the Adventurer's Journal.

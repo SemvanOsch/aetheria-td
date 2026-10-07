@@ -5,15 +5,18 @@ import { App } from './ui/App';
 import { EnemyStats } from './ui/screens/EnemyStats';
 import { ChampionStats, findChampion } from './ui/screens/ChampionStats';
 import { ChampionStatDetail } from './ui/screens/ChampionStatDetail';
+import { StageStats } from './ui/screens/StageStats';
 import './ui/styles.css';
 
-// Developer-only enemy & champion stat sheets, kept out of the game UI. Reach
-// them with the `#enemies`/`#champions` hash, `npm run enemies`/`champions`, or
-// `enemyStats()`/`championStats()` in the browser console.
+// Developer-only enemy, champion & stage stat sheets, kept out of the game UI.
+// Reach them with the `#enemies`/`#champions`/`#stages` hash, `npm run
+// enemies`/`champions`/`stages`, or `enemyStats()`/`championStats()`/
+// `stageStats()` in the browser console.
 declare global {
   interface Window {
     enemyStats: () => void;
     championStats: () => void;
+    stageStats: () => void;
   }
 }
 window.enemyStats = () => {
@@ -21,6 +24,9 @@ window.enemyStats = () => {
 };
 window.championStats = () => {
   location.hash = 'champions';
+};
+window.stageStats = () => {
+  location.hash = 'stages';
 };
 
 function Root() {
@@ -32,6 +38,7 @@ function Root() {
   }, []);
   if (hash === '#enemies') return <EnemyStats />;
   if (hash === '#champions') return <ChampionStats />;
+  if (hash === '#stages') return <StageStats />;
   if (hash.startsWith('#champions/')) {
     const unit = findChampion(decodeURIComponent(hash.slice('#champions/'.length)));
     return unit ? <ChampionStatDetail key={hash} unit={unit} /> : <ChampionStats />;

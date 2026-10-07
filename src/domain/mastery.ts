@@ -200,7 +200,7 @@ export interface MasteryUpgradeDef {
   greaterOrb?: boolean;
   /**
    * Re-arms the player champion with a different weapon (the Blade adventurer's
-   * Claymore, the Bow adventurer's Longbow). The champion's whole def is rebuilt for the form — its attack,
+   * Claymore, the Bow adventurer's Longbow, the Magic adventurer's Staff). The champion's whole def is rebuilt for the form — its attack,
    * stats, in-stage levels, ability and sprite — by `syncPlayerChampions`, so
    * every surface picks it up through `getUnit`. Read through `masteryWeaponForm`.
    */
@@ -593,13 +593,13 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
       major: true,
       unlocksArmor: true,
     },
-    // Rival casting styles after Ironclad (only the Greater Orb so far): every
-    // member may be learned, but only the chosen one is active.
+    // Two rival casting styles after Ironclad: both may be learned, but only the
+    // chosen one is active.
     {
       id: 'greater_orb',
       name: 'Greater Orb',
       description:
-        'Leap into the air, gather a massive orb above your head and hurl it down on your foes - 40% slower casting, but +70% damage and a 30% wider blast.',
+        'Embrace the raw power of your mana, creating larger and more devastating blasts.',
       cost: 500,
       requires: 'arcane_mastery',
       major: true,
@@ -608,6 +608,17 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
       damageMult: 1.7,
       attackSpeedMult: 0.6,
       burstRadiusMult: 1.3,
+    },
+    {
+      id: 'arcane_staff',
+      name: 'Arcane Staff',
+      description:
+        'Take up the staff and transform your magic into precise, guided projectiles seeking up to three enemies.',
+      cost: 500,
+      requires: 'arcane_mastery',
+      major: true,
+      exclusiveGroup: 'magic_style',
+      weaponForm: 'staff',
     },
   ],
 };

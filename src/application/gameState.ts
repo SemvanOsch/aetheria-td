@@ -937,6 +937,17 @@ export function isArmorUnlocked(state: GameState): boolean {
 }
 
 /**
+ * Whether worn armor's bonuses apply: the armor node must be *effective* — learned
+ * and not switched off with the champion's mastery toggle. Unlike
+ * `isArmorUnlocked` (equipping, drops), this follows the mastery switch.
+ */
+export function isArmorActive(state: GameState): boolean {
+  return state.ownedUnits.some(
+    (id) => isPlayerChampionId(id) && masteryUnlocksArmor(id, effectiveMasteryUpgradesFor(state, id)),
+  );
+}
+
+/**
  * The weapon form each player champion fights with, from its *effective* mastery
  * (the Blade's active Claymore node; none while the node is swapped out or the
  * champion's mastery is switched off). Fed to `syncPlayerChampions`, which

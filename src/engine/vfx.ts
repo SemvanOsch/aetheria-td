@@ -667,6 +667,20 @@ export class Vfx {
         this.exposure = Math.min(0.7, this.exposure + 0.3);
         break;
       }
+      case 'manaStorm': {
+        // The staff goes up: a ring cinching in on the caster, a soft ground
+        // ring out to the storm's reach, motes and shards flung skyward and a
+        // light pulse — all in the caster's own colour.
+        const ramp = tintRamp(color);
+        this.ring(x, y - 12, 40, 5, 0.24, ramp[1], 2.2);
+        this.flash(x, y - 20, 48, 0.28, ramp[1]);
+        this.ring(x, y + 10, 6, radius, 0.7, withAlpha(color, 0.5), 1.6, 0.45);
+        this.burst('mote', x, y - 10, 20, 60, { life: 1, size: 1.7, color: ramp[1], vy: -80, drag: 1.2 });
+        this.burst('shard', x, y - 30, 12, 140, { dir: -Math.PI / 2, spread: 0.8, life: 0.45, size: 1.8, color: ramp[1], color2: color });
+        this.pulse(x, y, 170, 'arcane', 0.9, 0.7, color);
+        this.exposure = Math.min(0.6, this.exposure + 0.2);
+        break;
+      }
       case 'bard':
         this.burst('mote', x, y - 6, 12, 50, { life: 1, size: 1.6, color, vy: -30 });
         this.pulse(x, y, 90, 'holy', 0.45, 0.8);
@@ -958,6 +972,42 @@ export class Vfx {
         vx: (this.rand() - 0.5) * 8,
         vy: -26 - this.rand() * 14,
         drag: 1,
+      });
+    }
+  }
+
+  /**
+   * A Mana Storm's overflowing pool at (x, y) (see the renderer's
+   * `drawManaPools`), `rx` wide: motes bubbling up off its whole surface and the
+   * odd bright droplet leaping out of it and falling back.
+   */
+  manaPool(x: number, y: number, rx: number, color: string, dt: number): void {
+    const ramp = tintRamp(color);
+    const want = dt * (8 + rx * 0.5);
+    const n = Math.floor(want) + (this.rand() < want % 1 ? 1 : 0);
+    for (let i = 0; i < n; i++) {
+      const a = this.rand() * Math.PI * 2;
+      const d = Math.sqrt(this.rand());
+      this.spawn('mote', x + Math.cos(a) * rx * d, y + Math.sin(a) * rx * 0.45 * d, {
+        life: 0.6 + this.rand() * 0.6,
+        size: 1 + this.rand() * 0.9,
+        color: this.rand() < 0.5 ? ramp[1] : color,
+        vx: (this.rand() - 0.5) * 6,
+        vy: -18 - this.rand() * 22,
+        drag: 1,
+      });
+    }
+    if (this.rand() < dt * 5) {
+      const a = this.rand() * Math.PI * 2;
+      const d = 0.4 + this.rand() * 0.5;
+      this.spawn('shard', x + Math.cos(a) * rx * d, y + Math.sin(a) * rx * 0.45 * d, {
+        life: 0.5,
+        size: 1.3,
+        color: '#ffffff',
+        color2: color,
+        vx: Math.cos(a) * 14,
+        vy: -60 - this.rand() * 30,
+        grav: 200,
       });
     }
   }

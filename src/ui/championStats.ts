@@ -100,7 +100,9 @@ export function championStatTiles(unit: UnitDef, purchased: string[]): StatTile[
             : unit.aoe === 'cone'
               ? 'per enemy in arc'
               : burst > 1
-              ? `${burst}-arrow burst`
+              ? unit.visual.shape === 'player-staff'
+                ? `${burst} mana bolts`
+                : `${burst}-arrow burst`
               : 'per target',
     },
     { label: 'Crit rate', value: pct(critChanceFor(unit, purchased)), sub: 'chance per hit' },

@@ -33,7 +33,7 @@ export interface SectionDef {
 
 export const SECTIONS: SectionDef[] = [
   { id: 'castle', name: 'The Castle', subtitle: 'Fight your way through the castle to get to the king.', icon: '🏰', color: '#8fa6c8' },
-  { id: 'capital', name: 'The Capital', subtitle: 'Hold the halls against the usurpers.', icon: '🏘️', color: '#f86262', wip: true },
+  { id: 'capital', name: 'The Capital', subtitle: 'Hold the halls against the usurpers.', icon: '🏘️', color: '#f86262' },
   { id: 'forest', name: 'The Forest', subtitle: 'Beasts and old growth stir in the deep wood.', icon: '🌲', color: '#5fd38a', wip: true },
   { id: 'inn', name: 'The Inn', subtitle: 'Something foul brews beneath the tavern.', icon: '🍺', color: '#f2b23c', wip: true },
 ];
@@ -366,8 +366,8 @@ const CASTLE_SPECS: LevelSpec[] = [
 const CAPITAL_SPECS: LevelSpec[] = [
   {
     id: 6,
-    name: 'Castle Door',
-    subtitle: "Your way into the castle - Guarded by Company 7",
+    name: 'Escape',
+    subtitle: "Now to make your way out.",
     baseHealth: 10, gem: 150,
     mood: 'goldenDusk',
     theme: {
@@ -378,11 +378,9 @@ const CAPITAL_SPECS: LevelSpec[] = [
       pathKind: 'dirt',
     },
     decor: [
-      { kind: 'castle', col: 12, row: 0 },
+      { kind: 'burningCastle', col: 12, row: 0 },
       { kind: 'house', col: 7, row: 2 },
       { kind: 'house', col: 0, row: 7 },
-      { kind: 'banner', col: 14, row: 1, color: '#8e1f2d' },
-      { kind: 'banner', col: 12, row: 1, color: '#8e1f2d' },
       { kind: 'tree', col: 14, row: 7 },
       { kind: 'tree', col: 1, row: 1 },
     ],
@@ -390,11 +388,13 @@ const CAPITAL_SPECS: LevelSpec[] = [
       {
         path: [{ col: 13, row: 2 }, { col: 13, row: 8 }, { col: 5, row: 8 }, { col: 5, row: 2 }, { col: -1, row: 2 }],
         waves: [
-          { groups: [{ enemyId: CAS.g, count: 5 }] },
-          { groups: [{ enemyId: CAS.g, count: 7 }] },
-          { groups: [{ enemyId: CAS.g, count: 5, spacing: 0.5 }, { enemyId: CAS.g, count: 6, spacing: 0.5, delay: 5 }] },
-          { groups: [{ enemyId: CAS.g, count: 7 }, { enemyId: CAS.r, count: 3, spacing: 0.4, delay: 2 }] },
-          bossWave(6, [{ enemyId: CAS.g, count: 5 }], 3),
+          { groups: [{ enemyId: CAS.g, count: 8 }, { enemyId: CAS.r, count: 3, delay: 8 }] },
+          { groups: [{ enemyId: CAS.r, count: 9 }, { enemyId: CAS.g2, count: 5, spacing: 0.5, delay: 5 }] },
+          { groups: [{ enemyId: CAS.m, count: 6 }, { enemyId: CAS.g, count: 12, spacing: 0.6 }] },
+          { groups: [{ enemyId: CAS.g2, count: 9 }, { enemyId: CAS.g, count: 6, delay: 3 }] },
+          { groups: [{ enemyId: CAS.r, count: 20, spacing: 0.5 }] },
+          { groups: [{ enemyId: CAS.g2, count: 6 }, { enemyId: CAS.m, count: 5, spacing: 0.4, delay: 2 }, { enemyId: CAS.r, count: 7 }] },
+          bossWave(6, [{ enemyId: CAS.r, count: 6 }], 3),
         ],
       },
     ],

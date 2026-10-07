@@ -25,8 +25,8 @@
  * old one is collected with its engine.
  */
 
-import { BOARD_HEIGHT, BOARD_WIDTH, TILE, type Vec2 } from '../domain/grid';
-import { DEFAULT_PATH_LAYERS, type BoardTheme } from '../domain/decor';
+import { BOARD_HEIGHT, BOARD_WIDTH, TILE, cellKey, type Vec2 } from '../domain/grid';
+import { DEFAULT_PATH_LAYERS, propCells, type BoardTheme } from '../domain/decor';
 import { atmosphereFor, type Atmosphere } from '../domain/atmosphere';
 import { coneAngleDeg, getUnit } from '../domain/units';
 import { getEnemy } from '../domain/enemies';
@@ -46,6 +46,7 @@ import {
   MAGIC_CAST_POINT,
   magicOrbAnchor,
   magicOrbRadius,
+  staffTip,
 } from './sprites';
 import { BOSS_BOX, DEFAULT_BOX, paintFigure, type FigureStyle } from './figure';
 import { bakeTerrain } from './terrain';
@@ -72,6 +73,7 @@ import {
   GREATER_ORB_LAND,
   GREATER_ORB_THROW_TIME,
   isSpeaking,
+  manaStormStance,
   PIERCING_CAST_ANIM_TIME,
   specialAnimTime,
 } from './types';
@@ -146,6 +148,12 @@ interface BoardState {
   /** Reused per frame to avoid allocation churn. */
   lights: Light[];
   drawables: Drawable[];
+  /**
+   * Per decor prop (by index): the cells it covers, and its eased occlusion
+   * alpha (1 = solid), so a fade glides rather than popping each frame.
+   */
+  propCells: Set<string>[];
+  propFade: number[];
   /** Each Greater Orb caster's drawn leap height, and any drop out of it (see `settleLeap`). */
   leaps: WeakMap<Tower, LeapState>;
 }
@@ -200,6 +208,8 @@ function stateFor(engine: GameEngine): BoardState {
     chimneys,
     lights: [],
     drawables: [],
+    propCells: (engine.level.decor ?? []).map((p) => new Set(propCells(p).map((c) => cellKey(c.col, c.row)))),
+    propFade: (engine.level.decor ?? []).map(() => 1),
     leaps: new WeakMap(),
   };
   STATES.set(engine, st);
@@ -244,6 +254,8 @@ export function drawBoard(
   for (const tw of engine.towers) {
     const q = quickdrawLevel(tw);
     if (q > 0) st.vfx.quickdraw(tw.pos.x, tw.pos.y, tw.def.visual.color, dt * q);
+    const pool = manaPoolLevel(tw);
+    if (pool > 0) st.vfx.manaPool(tw.pos.x, tw.pos.y + MANA_POOL_DY, MANA_POOL_RADIUS * pool, tw.def.visual.color, dt * pool);
   }
 
   ctx.clearRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
@@ -254,12 +266,14 @@ export function drawBoard(
   // 1. Ground.
   drawGround(ctx, engine, st);
   st.vfx.drawDecals(ctx);
+  drawManaPools(ctx, engine);
+  drawManaSwirls(ctx, engine, false);
   drawPathPreview(ctx, engine);
   drawPlacementHints(ctx, engine, ui);
   drawSelectedRange(ctx, engine, ui);
 
   // 2. World: props + figures, depth-sorted.
-  drawWorld(ctx, engine, ui, st);
+  drawWorld(ctx, engine, ui, st, dt);
   st.vfx.drawWorld(ctx);
   drawShots(ctx, engine);
 
@@ -275,6 +289,8 @@ export function drawBoard(
   drawSlamTelegraphs(ctx, engine);
   drawQuickdraws(ctx, engine);
   drawLongbowGlows(ctx, engine);
+  drawStaffGlows(ctx, engine);
+  drawManaSwirls(ctx, engine, true);
   drawProjectiles(ctx, engine, st.vfx, dt);
   drawThrownSpears(ctx, engine);
   drawPuffs(ctx, engine);
@@ -380,7 +396,7 @@ type Drawable =
   | { k: 'corpse'; base: number; c: Corpse }
   | { k: 'king'; base: number };
 
-function drawWorld(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: RenderUiState, st: BoardState): void {
+function drawWorld(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: RenderUiState, st: BoardState, dt: number): void {
   const decor = engine.level.decor ?? [];
   // Ground-layer props first (under every figure).
   for (const p of decor) {
@@ -408,7 +424,11 @@ function drawWorld(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: Render
   });
 
   // Occlusion: a tall prop drawn *in front of* a figure (figure's base is
-  // above the prop's) that overlaps it fades so the unit stays readable.
+  // above the prop's) that overlaps it fades so the unit stays readable. A
+  // figure on the prop's own cells is passing through its doorway (a foe
+  // leaving or reaching a castle gate), not hiding behind it, so the prop stays
+  // solid for it. The fade eases in and out instead of popping.
+  const fadeStep = Math.min(1, dt * 8);
   for (const d of list) {
     if (d.k !== 'prop') continue;
     const p = decor[d.i];
@@ -416,15 +436,21 @@ function drawWorld(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: Render
     if (!meta.occludes) continue;
     const a = propAnchor(p.col, p.row);
     const [x0, y0, x1, y1] = meta.bounds;
+    const own = st.propCells[d.i];
+    let target = 1;
     for (const o of list) {
       if (o.k !== 'tower' && o.k !== 'enemy') continue;
       if (o.base >= d.base) continue;
       const pos = o.k === 'tower' ? o.t.pos : o.e.pos;
+      if (own?.has(cellKey(Math.floor(pos.x / TILE), Math.floor(pos.y / TILE)))) continue;
       if (pos.x > a.x + x0 - 8 && pos.x < a.x + x1 + 8 && pos.y > a.y + y0 - 4 && pos.y - 20 < a.y + y1) {
-        d.alpha = 0.5;
+        target = 0.5;
         break;
       }
     }
+    const fade = st.propFade[d.i] ?? 1;
+    st.propFade[d.i] = Math.abs(target - fade) < 0.01 ? target : fade + (target - fade) * fadeStep;
+    d.alpha = st.propFade[d.i];
   }
 
   list.sort((a, b) => a.base - b.base);
@@ -502,9 +528,24 @@ function collectLights(engine: GameEngine, st: BoardState, time: number): Light[
       if (t.greaterOrb) {
         const k = greaterOrbRadius(c) / greaterOrbRadius(1);
         if (k > 0) out.push({ x: t.pos.x, y: t.pos.y - 32, radius: 40 + 90 * k, family: fam, intensity: 0.35 + 0.6 * k, tint });
+      } else if (t.def.visual.shape === 'player-staff') {
+        // The Staff's crystal kindling at the top of the raise.
+        out.push({ x: t.pos.x, y: t.pos.y - 24, radius: 26 + 40 * c, family: 'arcane', intensity: 0.25 + 0.5 * c, tint: t.def.visual.color });
       } else {
         out.push({ x: t.pos.x, y: t.pos.y - 6, radius: 30 + 60 * c, family: fam, intensity: 0.4 + 0.5 * c, tint });
       }
+    }
+    // The Mana Storm's hoisted crystal lights a wide pool, pulsing with each bolt.
+    const stance = manaStormStance(t);
+    if (stance > 0) {
+      const dir = t.aimTarget && t.aimTarget.x < t.pos.x ? -1 : 1;
+      const level = stance * (0.55 + 0.25 * stormFlash(t));
+      out.push({ x: t.pos.x + dir * 8, y: t.pos.y - 34, radius: 50 + 50 * stance, family: 'arcane', intensity: level, glow: 0.3, tint: t.def.visual.color });
+    }
+    // Its overflowing pool lights the ground around the caster's feet.
+    const spill = manaPoolLevel(t);
+    if (spill > 0) {
+      out.push({ x: t.pos.x, y: t.pos.y + MANA_POOL_DY, radius: MANA_POOL_RADIUS * 1.8 * spill, family: 'arcane', intensity: 0.5 * spill, glow: 0.15, tint: t.def.visual.color });
     }
     if (t.beamTimer > 0) {
       const ux = Math.cos(t.beamAngle);
@@ -527,6 +568,7 @@ function collectLights(engine: GameEngine, st: BoardState, time: number): Light[
     else if (p.style === 'magic') out.push({ x: p.pos.x, y: p.pos.y, radius: 46, family: 'arcane', intensity: 0.6 });
     else if (p.style === 'wind') out.push({ x: p.pos.x, y: p.pos.y, radius: 34, family: 'wind', intensity: 0.45 });
     else if (p.style === 'pierce') out.push({ x: p.pos.x, y: p.pos.y, radius: 64, family: 'arcane', intensity: 0.75, tint: p.color });
+    else if (p.style === 'mana' && !(p.seek && p.seek.delay > 0)) out.push({ x: p.pos.x, y: p.pos.y, radius: 40, family: 'arcane', intensity: 0.55, tint: p.color });
   }
   for (const s of engine.slices) {
     const lx = s.pos.x + Math.cos(s.angle) * s.lead;
@@ -1041,7 +1083,7 @@ function drawTower(
   if (strike > 0 && target) {
     // The Claymore's heavy swing carries the whole body a step further in; the
     // Longbow's heavy loose instead rocks the archer back a little.
-    const push = ease.outCubic(strike) * (shape === 'player-claymore' ? 6.5 : shape === 'player-longbow' ? -1.6 : 5);
+    const push = ease.outCubic(strike) * (shape === 'player-claymore' ? 6.5 : shape === 'player-longbow' ? -1.6 : shape === 'player-staff' ? 2.4 : 5);
     ox += ux * push;
     oy += uy * push;
     squash -= 0.04 * strike;
@@ -1055,10 +1097,12 @@ function drawTower(
   // The Magic adventurer leans back as it draws its swelling orb in, and leans
   // into a channelled Mana Ray, trembling with the strain of holding it. The
   // Greater Orb caster instead leaps (see `greaterOrbBody`), easing back down if
-  // a Mana Ray cuts the leap short (`settleLeap`).
+  // a Mana Ray cuts the leap short (`settleLeap`). The Staff caster leans back
+  // the same way as it raises the staff, and through a Mana Storm stands tall
+  // under the hoisted staff, trembling as the mana pours through it.
   const leap = settleLeap(st, t, greaterOrbBody(t, time), time);
   squash += leap.squash;
-  if (t.def.visual.shape === 'player-magic') {
+  if (shape === 'player-magic' || shape === 'player-staff') {
     if (t.charge > 0 && t.chargeMax > 0 && target && !t.greaterOrb) {
       const k = ease.inOutSine(1 - t.charge / t.chargeMax);
       ox -= ux * 1.6 * k;
@@ -1068,6 +1112,11 @@ function drawTower(
     if (t.beamTimer > 0) {
       ox += Math.cos(t.beamAngle) * 1.4 + Math.sin(time * 47) * 0.35;
       oy += Math.sin(t.beamAngle) * 0.7;
+    }
+    const stance = manaStormStance(t);
+    if (stance > 0) {
+      ox += Math.sin(time * 43) * 0.28 * stance;
+      squash -= 0.035 * ease.inOutSine(stance);
     }
   }
   // The Claymore leans back and sinks as it hefts the great blade up.
@@ -1128,7 +1177,7 @@ function drawTower(
   // Idle life: breathing (a gentle rise and settle about the feet) and a slow
   // weight shift. Damped while the champion is mid-attack.
   const phase = t.uid * 1.37;
-  const idle = strike > 0 || t.charge > 0 || t.specialAnim > 0 ? 0.3 : 1;
+  const idle = strike > 0 || t.charge > 0 || t.specialAnim > 0 || t.storm ? 0.3 : 1;
   const breath = Math.sin(time * 2.1 + phase) * idle;
   const sway = Math.sin(time * 0.85 + phase * 0.7) * 0.35 * idle;
 
@@ -1186,15 +1235,22 @@ function drawTower(
     // sprite reads it its own way (bowstring snap, sword swing). A throw drives
     // it from the longer `throwAnim`, a signature move (Cross Slash /
     // Earthsplitter) from `specialAnim`; a charge ramps it 0→1 across the wind-up.
-    const special = t.specialAnim > 0;
+    // The Staff's Mana Storm hold plays as its signature move, `anim` being how
+    // far the staff is hoisted.
+    const stance = shape === 'player-staff' ? manaStormStance(t) : 0;
+    const special = t.specialAnim > 0 || stance > 0;
     const throwing = t.throwAnim > 0 || special;
     const charging = t.charge > 0 && t.chargeMax > 0;
-    const rawAnim = special
+    const rawAnim = stance > 0
+      ? stance
+      : special
       ? t.specialAnim / specialAnimTime(shape) // linear: its blow is timed to the cut window
       : shape === 'player-magic'
         ? t.beamTimer > 0
           ? 1 // hands held thrust out through a Mana Ray channel
           : strike // throw → recover (its charge rides on `draw`)
+        : shape === 'player-staff'
+          ? strike // sweep → point → lower (its raise rides on `draw`)
         : shape === 'player-claymore' || shape === 'player-longbow'
           ? strike // linear release; the heft wind-up / slow draw rides on `draw`
           : charging
@@ -1206,12 +1262,13 @@ function drawTower(
                 : ease.outQuad(strike);
     // Quantized so attack poses reuse cached frames (12 steps is smooth at 0.18s;
     // the longer signature moves and the Claymore's fast cut need 24).
-    const animSteps = special || shape === 'player-claymore' || shape === 'player-longbow' ? 24 : 12;
+    const animSteps = special || shape === 'player-claymore' || shape === 'player-longbow' || shape === 'player-staff' ? 24 : 12;
     const anim = Math.round(rawAnim * animSteps) / animSteps;
     // The sprite's second input: the Bow's raise + draw, the Magic orb charge,
-    // the Claymore's heft or the Longbow's slow draw.
+    // the Claymore's heft, the Longbow's slow draw or the Staff's raise.
+    const charged = shape === 'player-magic' || shape === 'player-claymore' || shape === 'player-longbow' || shape === 'player-staff';
     const rawDraw =
-      shape === 'player-magic' || shape === 'player-claymore' || shape === 'player-longbow'
+      charged
         ? charging
           ? 1 - t.charge / t.chargeMax
           : 0
@@ -1219,11 +1276,7 @@ function drawTower(
     // Finer steps for the slow orb charge (so the cupping hands track the orb)
     // and the heft; finer still for the Greater Orb's leap, whose arms sweep
     // overhead in a short slice of a long charge.
-    const drawSteps = t.greaterOrb
-      ? 48
-      : shape === 'player-magic' || shape === 'player-claymore' || shape === 'player-longbow'
-        ? 24
-        : 12;
+    const drawSteps = t.greaterOrb ? 48 : charged ? 24 : 12;
     const draw = Math.round(rawDraw * drawSteps) / drawSteps;
     // The "empowered" flourish marks a champion whose signature upgrade is
     // bought — wind motes for the Wizard (Wind Slice → cone), arcane sparkles
@@ -1665,12 +1718,14 @@ const CAPTAIN_FOOT_LIFT = 9;
 const MERCENARY_FOOT_LIFT = 9;
 const WARDEN_FOOT_LIFT = 13; // the Iron Warden's heavy 1.5× frame
 const GOWZER_FOOT_LIFT = 6; // Gowzer's slight 1.15× frame
+const ROLAND_FOOT_LIFT = 9; // Captain Roland's 1.3× mounted frame
 function footLiftFor(id: string): number {
   if (id === 'boss5') return KING_FOOT_LIFT;
   if (id === 'boss1') return CAPTAIN_FOOT_LIFT;
   if (id === 'boss2') return MERCENARY_FOOT_LIFT;
   if (id === 'boss3') return WARDEN_FOOT_LIFT;
   if (id === 'boss4') return GOWZER_FOOT_LIFT;
+  if (id === 'boss6') return ROLAND_FOOT_LIFT;
   return 0;
 }
 
@@ -2079,15 +2134,19 @@ function drawShots(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
  */
 function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine, vfx: Vfx, dt: number): void {
   for (const p of engine.projectiles) {
+    if (p.seek && p.seek.delay > 0) continue; // a Staff bolt still waiting at the crystal
     const target = engine.enemies.find((e) => e.uid === p.targetUid && !e.dead);
     const dest = target ? target.pos : p.last;
-    // A piercing arrow flies straight on rather than homing.
-    const ang = p.pierce ? Math.atan2(p.pierce.dir.y, p.pierce.dir.x) : Math.atan2(dest.y - p.pos.y, dest.x - p.pos.x);
+    // A piercing arrow flies straight on rather than homing, and a Staff's mana
+    // bolt (or Mana Storm bolt) along its own arcing heading.
+    const heading = p.pierce?.dir ?? p.seek?.dir ?? p.rain?.dir;
+    const ang = heading ? Math.atan2(heading.y, heading.x) : Math.atan2(dest.y - p.pos.y, dest.x - p.pos.x);
     // Fading magical tail: draw the arrow's recent positions (world space, before
-    // the local rotate/scale) as motes that shrink and dim into the distance.
-    if (p.trail && p.trail.length) drawMagicTrail(ctx, p.trail, p.color);
+    // the local rotate/scale) as motes that shrink and dim into the distance. The
+    // Staff's bolts streak in the player's colour right to the core.
+    if (p.trail && p.trail.length) drawMagicTrail(ctx, p.trail, p.color, p.style === 'mana' ? shade(p.color, 0.6) : undefined);
     if (p.style === 'orb') vfx.trail('orb', p.pos.x, p.pos.y, p.color, dt);
-    else if (p.style === 'magic') vfx.trail('arcane', p.pos.x, p.pos.y, p.color, dt);
+    else if (p.style === 'magic' || p.style === 'mana') vfx.trail('arcane', p.pos.x, p.pos.y, p.color, dt);
     else if (p.style === 'wind') vfx.trail('wind', p.pos.x, p.pos.y, p.color, dt);
     else if (p.style === 'pierce') vfx.trail('arcane', p.pos.x, p.pos.y, p.color, dt);
     else if (quickdrawLevel(p.source) > 0) vfx.trail('arcane', p.pos.x, p.pos.y, p.color, dt);
@@ -2108,6 +2167,8 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine, vfx:
       drawChargingOrb(ctx, 0, 0, 5.5, p.color, 1);
     } else if (p.style === 'pierce') {
       drawPiercingArrow(ctx, p.color);
+    } else if (p.style === 'mana') {
+      drawManaBolt(ctx, p.color);
     } else {
       // An arrow loosed under Quickdraw streaks in as a bolt of the archer's colour.
       const q = quickdrawLevel(p.source);
@@ -2232,6 +2293,38 @@ function drawOrbGather(
 }
 
 /**
+ * A Staff's hardened mana bolt in flight, in its local frame (+x forward): a
+ * long crystalline shard in the caster's colour — a soft halo, the coloured
+ * body, a pale lit facet and a white-hot point — trailing the streak drawn by
+ * `drawMagicTrail`.
+ */
+function drawManaBolt(ctx: CanvasRenderingContext2D, color: string): void {
+  ctx.fillStyle = withAlpha(color, 0.3);
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 7, 3.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(5.5, 0);
+  ctx.lineTo(0, -2.1);
+  ctx.lineTo(-4.5, 0);
+  ctx.lineTo(0, 2.1);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = shade(color, 0.55);
+  ctx.beginPath();
+  ctx.moveTo(4.6, -0.2);
+  ctx.lineTo(0, -1.5);
+  ctx.lineTo(-2.4, -0.2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.beginPath();
+  ctx.arc(4, 0, 1, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/**
  * The Wizard's wind bullet — a compact swirl of gust drawn in the projectile's
  * local space (already translated to its position and rotated to face travel,
  * +x forward). A bright leading core with two curled tails trailing behind, so
@@ -2283,6 +2376,7 @@ function drawMagicTrail(
   ctx: CanvasRenderingContext2D,
   trail: { x: number; y: number }[],
   color: string,
+  core = '#f4eeff',
 ): void {
   const n = trail.length;
   if (n < 2) return;
@@ -2293,7 +2387,7 @@ function drawMagicTrail(
   const passes: [string, number, number][] = [
     // colour, base width, base alpha
     [color, 5.5, 0.28],
-    ['#f4eeff', 2.2, 0.5],
+    [core, 2.2, 0.5],
   ];
   for (const [col, baseW, baseA] of passes) {
     for (let i = 0; i < n - 1; i++) {
@@ -2307,7 +2401,7 @@ function drawMagicTrail(
     }
   }
   // A couple of bright shimmer sparks riding the freshest part of the streak.
-  ctx.fillStyle = '#f4eeff';
+  ctx.fillStyle = core;
   for (let i = 0; i < Math.min(3, n); i++) {
     const f = 1 - i / n;
     ctx.globalAlpha = 0.6 * f;
@@ -2837,6 +2931,269 @@ function drawPiercingArrow(ctx: CanvasRenderingContext2D, color: string): void {
   ctx.beginPath();
   ctx.arc(8, 0, 1.1, 0, Math.PI * 2);
   ctx.fill();
+}
+
+/** The Mana Storm pool's full half-width (px) and its centre below the tower (at the feet). */
+const MANA_POOL_RADIUS = 19;
+const MANA_POOL_DY = 10.5;
+/** Seconds the pool takes to spread to full size, and to drain at the channel's end. */
+const MANA_POOL_SPREAD = 0.7;
+const MANA_POOL_DRAIN = 0.45;
+
+/**
+ * How far a Mana Storm's pool has spread (0 → 1): welling up fast and spilling
+ * outward over `MANA_POOL_SPREAD`, then draining over the channel's last
+ * `MANA_POOL_DRAIN`. 0 when the tower isn't channelling one.
+ */
+function manaPoolLevel(t: Tower): number {
+  const s = t.storm;
+  if (!s) return 0;
+  const age = s.duration - s.timer;
+  return Math.max(0, Math.min(ease.outCubic(Math.min(1, age / MANA_POOL_SPREAD)), s.timer / MANA_POOL_DRAIN));
+}
+
+/**
+ * A Mana Storm's overflowing pool, on the ground under every figure: mana
+ * welling out around the caster's feet in its colour, spreading over the first
+ * moments of the channel. A wobbling blob whose edge keeps spilling out in
+ * slow lobes (bright rim, glowing heart), ripples running out from the centre
+ * and glints twinkling on its surface. Its motes and droplets come from
+ * `Vfx.manaPool`; its light from `collectLights`.
+ */
+function drawManaPools(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
+  const time = now() / 1000;
+  for (const t of engine.towers) {
+    const level = manaPoolLevel(t);
+    if (level <= 0) continue;
+    const color = t.def.visual.color;
+    const ramp = tintRamp(color);
+    const cx = t.pos.x;
+    const cy = t.pos.y + MANA_POOL_DY;
+    const rx = MANA_POOL_RADIUS * level;
+    const squash = 0.45;
+    const ph = t.uid * 1.7;
+    // The edge: a slow wobble plus spill lobes that swell outward and recede.
+    const edge = (a: number) =>
+      1 +
+      0.07 * Math.sin(3 * a + time * 1.3 + ph) +
+      0.05 * Math.sin(5 * a - time * 2.1) +
+      0.2 * Math.max(0, Math.sin(7 * a + time * 0.7 + ph)) ** 3;
+    const outline = (scale: number) => {
+      ctx.beginPath();
+      for (let i = 0; i <= 48; i++) {
+        const a = (i / 48) * Math.PI * 2;
+        const r = rx * scale * edge(a);
+        const x = cx + Math.cos(a) * r;
+        const y = cy + Math.sin(a) * r * squash;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+    };
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    // Soft outer bleed, then the pool's body with a glowing heart.
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(1, squash);
+    const bleed = ctx.createRadialGradient(0, 0, 0, 0, 0, rx * 1.45);
+    bleed.addColorStop(0, withAlpha(color, 0.22 * level));
+    bleed.addColorStop(1, withAlpha(color, 0));
+    ctx.fillStyle = bleed;
+    ctx.beginPath();
+    ctx.arc(0, 0, rx * 1.45, 0, Math.PI * 2);
+    ctx.fill();
+    const body = ctx.createRadialGradient(0, 0, 0, 0, 0, rx * 1.1);
+    body.addColorStop(0, withAlpha(ramp[1], 0.55));
+    body.addColorStop(0.5, withAlpha(color, 0.38));
+    body.addColorStop(1, withAlpha(color, 0.2));
+    ctx.restore();
+    // The body: clipped to the spilling outline, its gradient in the squashed
+    // pool space.
+    outline(1);
+    ctx.save();
+    ctx.clip();
+    ctx.translate(cx, cy);
+    ctx.scale(1, squash);
+    ctx.fillStyle = body;
+    ctx.fillRect(-rx * 1.5, -rx * 1.5, rx * 3, rx * 3);
+    ctx.restore();
+    // Bright rim along the spilling edge.
+    outline(1);
+    ctx.strokeStyle = withAlpha(ramp[1], 0.55 * level);
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    // Ripples running out from the centre to the edge.
+    for (let i = 0; i < 3; i++) {
+      const u = (time * 0.6 + i / 3 + ph) % 1;
+      outline(0.15 + 0.85 * u);
+      ctx.strokeStyle = withAlpha(ramp[1], 0.35 * Math.sin(u * Math.PI) * level);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    // Glints twinkling on the surface.
+    for (let i = 0; i < 4; i++) {
+      const a = i * 2.39996 + ph;
+      const d = 0.2 + 0.7 * ((i * 0.618) % 1);
+      const tw = Math.max(0, Math.sin(time * (2.2 + i * 0.37) + i * 1.9));
+      if (tw <= 0.05) continue;
+      ctx.fillStyle = withAlpha('#ffffff', 0.7 * tw * level);
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(a) * rx * d, cy + Math.sin(a) * rx * d * squash, 0.7 + tw * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+/** The Mana Storm swirl: ribbons, the height they climb (px) and the turns each makes doing so. */
+const MANA_SWIRL_RIBBONS = 3;
+const MANA_SWIRL_HEIGHT = 34;
+const MANA_SWIRL_TURNS = 1.3;
+
+/**
+ * The mana welling out of a Mana Storm's pool and spiralling up around the
+ * caster: `MANA_SWIRL_RIBBONS` glowing ribbons orbiting the body, each rising
+ * from the pool's rim as a helix that narrows and fades as it climbs, with
+ * bright pulses running up it. Drawn in two halves for depth: the arcs passing
+ * behind the caster (`front` false, on the ground layer before the figures) and
+ * those passing in front (`front` true, in the glow pass after them).
+ */
+function drawManaSwirls(ctx: CanvasRenderingContext2D, engine: GameEngine, front: boolean): void {
+  const time = now() / 1000;
+  for (const t of engine.towers) {
+    const level = manaPoolLevel(t);
+    if (level <= 0) continue;
+    const color = t.def.visual.color;
+    const ramp = tintRamp(color);
+    const cx = t.pos.x;
+    const cy = t.pos.y + MANA_POOL_DY;
+    const steps = 36;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    for (let k = 0; k < MANA_SWIRL_RIBBONS; k++) {
+      const base = time * 2.4 + (k * Math.PI * 2) / MANA_SWIRL_RIBBONS + t.uid;
+      const at = (s: number) => {
+        const a = base + s * MANA_SWIRL_TURNS * Math.PI * 2;
+        const r = MANA_POOL_RADIUS * level * (1.05 - 0.4 * s);
+        return { a, x: cx + Math.cos(a) * r, y: cy - s * MANA_SWIRL_HEIGHT * level + Math.sin(a) * r * 0.42 };
+      };
+      let prev = at(0);
+      for (let i = 1; i <= steps; i++) {
+        const s = i / steps;
+        const p = at(s);
+        // Behind the caster where the orbit is on its far (upper) side.
+        const mid = Math.sin((prev.a + p.a) / 2);
+        if (mid > 0 === front) {
+          const pulse = 0.55 + 0.45 * Math.sin(s * 14 - time * 7 + k * 2);
+          const fade = (1 - s) * Math.min(1, s * 6);
+          ctx.strokeStyle = withAlpha(i % 2 ? ramp[1] : color, 0.75 * fade * pulse * level);
+          ctx.lineWidth = 0.8 + 2 * (1 - s);
+          ctx.beginPath();
+          ctx.moveTo(prev.x, prev.y);
+          ctx.lineTo(p.x, p.y);
+          ctx.stroke();
+        }
+        prev = p;
+      }
+    }
+    ctx.restore();
+  }
+}
+
+/** Seconds a Mana Storm crystal flares after each bolt leaves it. */
+const STORM_FLASH_TIME = 0.14;
+
+/** A Mana Storm crystal's flare as a bolt leaves (1 at the launch → 0), else 0. */
+function stormFlash(t: Tower): number {
+  const s = t.storm;
+  if (!s || !Number.isFinite(s.every) || s.next <= 0) return 0;
+  const since = s.every - s.next;
+  return since >= 0 && since < STORM_FLASH_TIME ? 1 - since / STORM_FLASH_TIME : 0;
+}
+
+/**
+ * The Staff's crystal, drawn additively in the glow pass in the caster's colour:
+ * a faint idle shimmer, kindling brighter through the raise and flaring as the
+ * volley flies (fading as the staff lowers). Through a Mana Storm it burns hot
+ * overhead, flaring with each bolt, ringed by turning arcs, while motes of mana
+ * spiral up from the caster's feet into it. Placed on the sprite's crystal via
+ * `staffTip`.
+ */
+function drawStaffGlows(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
+  const time = now() / 1000;
+  for (const t of engine.towers) {
+    if (t.def.visual.shape !== 'player-staff') continue;
+    const color = t.def.visual.color;
+    const aim = t.aimTarget;
+    const dir = aim && aim.x < t.pos.x ? -1 : 1;
+    const stance = manaStormStance(t);
+    const charge = t.charge > 0 && t.chargeMax > 0 ? 1 - t.charge / t.chargeMax : 0;
+    const release = stance > 0 ? 0 : t.attackAnim / attackAnimTime('player-staff');
+    const tip = staffTip(release, charge, stance);
+    const x = t.pos.x + dir * tip.x * FIGURE_SCALE;
+    const y = t.pos.y + 11 + (tip.y - 11) * FIGURE_SCALE;
+    const flash = stormFlash(t);
+    const level = Math.max(
+      0.16 + 0.06 * Math.sin(time * 3 + t.uid),
+      charge,
+      release,
+      stance * (0.75 + 0.1 * Math.sin(time * 11 + t.uid) + 0.4 * flash),
+    );
+    const r = 4 + 9 * level;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, withAlpha('#ffffff', Math.min(1, 0.7 * level)));
+    g.addColorStop(0.35, withAlpha(color, Math.min(1, 0.55 * level)));
+    g.addColorStop(1, withAlpha(color, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    if (stance > 0) {
+      const ramp = tintRamp(color);
+      ctx.lineCap = 'round';
+      // Three arcs turning about the crystal.
+      ctx.strokeStyle = withAlpha(ramp[1], 0.6 * stance);
+      ctx.lineWidth = 1.2;
+      const ringR = 7 + 2.5 * flash;
+      for (let i = 0; i < 3; i++) {
+        const a = time * 4 + (i * Math.PI * 2) / 3;
+        ctx.beginPath();
+        ctx.arc(x, y, ringR, a, a + 1.1);
+        ctx.stroke();
+      }
+      // Motes drawn up from a ring about the feet, spiralling into the crystal.
+      const footY = t.pos.y + 10;
+      for (let i = 0; i < 9; i++) {
+        const u = (time * 0.85 + i / 9 + t.uid * 0.13) % 1;
+        const swirl = i * 2.4 + u * 4;
+        const spread = 16 * (1 - u * u);
+        const mx = x + (t.pos.x - x) * (1 - u) + Math.cos(swirl) * spread;
+        const my = footY + (y - footY) * ease.outQuad(u) + Math.sin(swirl) * spread * 0.35;
+        const alpha = Math.sin(u * Math.PI) * 0.8 * stance;
+        ctx.fillStyle = withAlpha(i % 2 ? ramp[1] : color, alpha);
+        ctx.beginPath();
+        ctx.arc(mx, my, 1.1 + 0.6 * (1 - u), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // A bright upward spark as each bolt leaves.
+      if (flash > 0) {
+        const sg = ctx.createLinearGradient(x, y, x, y - 22);
+        sg.addColorStop(0, withAlpha('#ffffff', 0.8 * flash));
+        sg.addColorStop(1, withAlpha(color, 0));
+        ctx.strokeStyle = sg;
+        ctx.lineWidth = 2.4 * flash;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y - 22);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
 }
 
 /**

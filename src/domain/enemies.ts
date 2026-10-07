@@ -193,7 +193,7 @@ interface BossMeta {
 // field may be added to an entry to override its calculated default.
 const BOSS_META: BossMeta[] = [
   { level: 1, name: 'Captain Aldric', icon: '🗡️', color: '#c3ccdc', health: 400, speed: 40, radius: 25 },
-  { level: 2, name: 'Garrick Vane', icon: '🔪', color: '#8a94a8', health: 600, speed: 60, radius: 20, dodgeChance: 0.20, mechanic: 'Evasive — sidesteps a quarter of all incoming hits, taking no damage from them.' },
+  { level: 2, name: 'Garrick Vane', icon: '🔪', color: '#8a94a8', health: 600, speed: 60, radius: 20, dodgeChance: 0.20, mechanic: 'Evasive — sidesteps a fifth of all incoming hits, taking no damage from them.' },
   { level: 3, name: 'The Iron Warden', icon: '🛡️', color: '#c05a6a', health: 350, speed: 30, radius: 30, physicalResist: 0.4, damageAura: { reduction: 0.3, radius: 96 }, mechanic: 'Aegis aura — every other enemy near the Warden takes 30% less damage.' },
   {
     level: 4,
@@ -204,7 +204,7 @@ const BOSS_META: BossMeta[] = [
   },
   { level: 5, name: 'King Kael', icon: '👑', color: '#e0574a', health: 900, speed: 20, radius: 30, mechanic: 'Rises from his throne as the final wave begins.' },
   // Capital
-  { level: 6, name: 'Thornmaw the Ancient', icon: '🌳', color: '#6a9a5a' },
+  { level: 6, name: 'Captain Roland', icon: '🗡️', color: '#c2d3f0', health: 650, speed: 90, radius: 28 },
 
 ];
 

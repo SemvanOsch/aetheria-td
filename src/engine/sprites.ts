@@ -10,7 +10,7 @@ import type { PlayerSpriteConfig } from '../domain/playerSprite';
 import type { Proficiency } from '../domain/proficiency';
 import { ease, shade, withAlpha } from './palette';
 import { GREATER_ORB_APEX, GREATER_ORB_CROUCH, GREATER_ORB_LAND } from './types';
-import { arm, belt, forearm, capeSide, legSide, neck, pauldron, seg, torsoFront, torsoSide, walkLegsFront, walkLegsSide, type ArmLook, type LegLook } from './anatomy';
+import { arm, belt, forearm, capeSide, legFront, legSide, neck, pauldron, seg, torsoFront, torsoSide, walkLegsFront, walkLegsSide, type ArmLook, type LegLook } from './anatomy';
 
 // `shade` lives in the shared palette now; re-exported for existing callers.
 export { shade };
@@ -1988,14 +1988,44 @@ export function drawGrunt2(
     ctx.fillStyle = '#2a2230'; // visor slit
     ctx.fillRect(-2, -11.2, 4, 1);
   }
-  // Red plume tuft on the crown (both facings).
-  ctx.fillStyle = plume;
-  ctx.beginPath();
-  ctx.moveTo(-1.3, -16.4);
-  ctx.quadraticCurveTo(0, -18.8, 1.3, -16.4);
-  ctx.quadraticCurveTo(0, -14.6, -1.3, -16.4);
-  ctx.closePath();
-  ctx.fill();
+  if (back) {
+    // The swept-back plume seen from behind: a full crest rising off the crown
+    // and cascading down the helm's centre seam to the nape, so the sergeant's
+    // red still reads as he marches away.
+    ctx.fillStyle = plume;
+    ctx.beginPath();
+    ctx.moveTo(-1.9, -16.2);
+    ctx.quadraticCurveTo(-1.6, -19.8, 0, -19.9);
+    ctx.quadraticCurveTo(1.6, -19.8, 1.9, -16.2);
+    ctx.quadraticCurveTo(2.5, -12, 1.5, -8.2);
+    ctx.quadraticCurveTo(0, -7.2, -1.5, -8.2);
+    ctx.quadraticCurveTo(-2.5, -12, -1.9, -16.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = shade(plume, -0.35); // horsehair strands
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(-0.8, -18.6);
+    ctx.quadraticCurveTo(-1.2, -13, -0.8, -8.2);
+    ctx.moveTo(0.8, -18.6);
+    ctx.quadraticCurveTo(1.2, -13, 0.8, -8.2);
+    ctx.stroke();
+    ctx.strokeStyle = shade(plume, 0.3); // lit crown
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(-1, -19);
+    ctx.quadraticCurveTo(0, -19.6, 1, -19);
+    ctx.stroke();
+  } else {
+    // Red plume tuft on the crown.
+    ctx.fillStyle = plume;
+    ctx.beginPath();
+    ctx.moveTo(-1.3, -16.4);
+    ctx.quadraticCurveTo(0, -18.8, 1.3, -16.4);
+    ctx.quadraticCurveTo(0, -14.6, -1.3, -16.4);
+    ctx.closePath();
+    ctx.fill();
+  }
 
   ctx.restore();
   ctx.restore();
@@ -3157,6 +3187,626 @@ export function drawCaptain(
   ctx.stroke();
 
   ctx.restore();
+  ctx.restore();
+}
+
+/**
+ * Procedural Captain Roland sprite — the Capital's first boss, captain of
+ * Squadron 8: a bare-headed knight in pale plate with long golden hair, riding
+ * a dark bay warhorse in a steel chanfron and a navy caparison blazoned with the
+ * squadron's gold eight-pointed star, a couched lance flying a swallowtail
+ * pennant. Scaled ≈1.3× like the other champions of the court. Three authored
+ * views ('side' profile mirrored on `faceLeft`; 'front' charging toward the
+ * viewer; 'back' riding away, the hair falling down his back), with `phase`
+ * (radians, from distance travelled) driving the gallop. Replaces the emoji
+ * token for `boss6`.
+ */
+export function drawRoland(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  view: 'side' | 'front' | 'back',
+  faceLeft: boolean,
+  phase: number,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (view === 'side' && faceLeft) ctx.scale(-1, 1);
+  ctx.scale(1.3, 1.3);
+
+  const plateLit = shade(color, 0.2);
+  const plateDark = shade(color, -0.3);
+  const steel = '#d6dde6';
+  const steelDark = '#8b95a3';
+  const gold = '#e7b64a';
+  const goldDark = '#a97e26';
+  const hair = '#e9c45a';
+  const hairLit = '#f8e09a';
+  const hairDark = '#b8892c';
+  const skin = '#ecc8a2';
+  const coat = '#6e4128'; // dark bay warhorse
+  const coatLit = shade(coat, 0.2);
+  const coatDark = shade(coat, -0.3);
+  const mane = '#22160f';
+  const hoof = '#1e1610';
+  const cloth = '#25397a'; // Squadron 8 navy
+  const clothLit = shade(cloth, 0.18);
+  const clothDark = shade(cloth, -0.3);
+  const wood = '#8a6a44';
+  const gauntlet = '#a4aeba';
+  const legs: LegLook = { cloth: plateDark, boot: steelDark, w: 2.9, bootUp: 0.7, knee: gold, toe: 2.4 };
+
+  const step = Math.sin(phase);
+  const bob = Math.abs(step);
+  const wave = Math.sin(phase * 2) * 0.8; // hair and pennant ripple
+
+  /** The squadron's eight-pointed gold star. */
+  const star8 = (cx: number, cy: number, r: number) => {
+    ctx.fillStyle = gold;
+    ctx.beginPath();
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2 - Math.PI / 2;
+      const rr = i % 2 === 0 ? r : r * 0.45;
+      if (i === 0) ctx.moveTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+      else ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+    }
+    ctx.closePath();
+    ctx.fill();
+  };
+  /** A swallowtail pennant hanging off a lance at (x,y), streaming toward `dir`. */
+  const pennant = (x: number, y: number, dir: number, len: number) => {
+    const w = wave;
+    ctx.fillStyle = cloth;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.quadraticCurveTo(x + dir * len * 0.5, y - 0.6 + w, x + dir * len, y + 0.4 + w);
+    ctx.lineTo(x + dir * len * 0.7, y + 1.8 + w * 0.6);
+    ctx.lineTo(x + dir * len, y + 3.4 + w);
+    ctx.quadraticCurveTo(x + dir * len * 0.5, y + 3 + w * 0.5, x, y + 3.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(x, y + 1.6);
+    ctx.quadraticCurveTo(x + dir * len * 0.4, y + 1.4 + w * 0.5, x + dir * len * 0.62, y + 1.8 + w * 0.6);
+    ctx.stroke();
+  };
+  /** A scalloped cloth hem from x0 to x1 along y (the caparison's edge). */
+  const scallops = (x0: number, x1: number, y: number, n: number) => {
+    const d = (x1 - x0) / n;
+    for (let i = 0; i < n; i++) {
+      const a = x0 + d * i;
+      ctx.quadraticCurveTo(a + d / 2, y + 1.6, a + d, y);
+    }
+  };
+  /** A lance standing upright at x from y0 (butt) to its tip, pennant flying. */
+  const uprightLance = (x: number, y0: number, dir: number) => {
+    seg(ctx, x, y0, x, -30, 0.85, 0.7, wood);
+    ctx.fillStyle = steel; // tip
+    ctx.beginPath();
+    ctx.moveTo(x - 0.9, -30);
+    ctx.lineTo(x, -34.5);
+    ctx.lineTo(x + 0.9, -30);
+    ctx.closePath();
+    ctx.fill();
+    pennant(x, -29.4, dir, 7);
+  };
+
+  if (view === 'side') {
+    // --- Profile (galloping along the row, +x forward) ---
+    const f = Math.cos(phase) * 3.6;
+    const b = Math.cos(phase + Math.PI) * 3.6;
+    const up = step;
+    const horseLeg = (x0: number, d: number, lift: number, front: boolean, c: string) => {
+      const hx = x0 + d;
+      const hy = 12 - lift;
+      const kx = x0 + d * 0.45 + (front ? 1 : -1) * (0.4 + lift * 0.9);
+      const ky = 7 - lift * 0.5;
+      seg(ctx, x0, 1, kx, ky, 2.3, 1.2, c);
+      seg(ctx, kx, ky, hx, hy - 1, 1.2, 0.95, c);
+      // Feathering over the hoof (a heavy warhorse).
+      seg(ctx, hx, hy - 2.2, hx + (front ? 0.2 : -0.1), hy - 0.6, 1.05, 1.35, shade(c, -0.15));
+      ctx.fillStyle = hoof;
+      ctx.beginPath();
+      ctx.ellipse(hx + (front ? 0.3 : -0.1), hy - 0.4, 1.4, 1, 0, 0, Math.PI * 2);
+      ctx.fill();
+    };
+    const farCoat = shade(coatDark, -0.12);
+    horseLeg(-5, -b, Math.max(0, -up) * 1.9, false, farCoat);
+    horseLeg(8.5, -f, Math.max(0, up) * 1.9, true, farCoat);
+    horseLeg(-7.5, b, Math.max(0, up) * 1.9, false, coatDark);
+    horseLeg(6, f, Math.max(0, -up) * 1.9, true, coatDark);
+
+    ctx.save();
+    ctx.translate(0, -bob * 0.7);
+
+    // Tail streaming off the rump.
+    ctx.strokeStyle = mane;
+    ctx.lineWidth = 3.4;
+    ctx.beginPath();
+    ctx.moveTo(-12, -2.6);
+    ctx.quadraticCurveTo(-17.5, -2 + wave, -16.5, 7);
+    ctx.stroke();
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(-12.6, -2);
+    ctx.quadraticCurveTo(-15.8, 1, -18, 5 + wave);
+    ctx.stroke();
+
+    // Barrel.
+    ctx.fillStyle = coat;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 12.6, 6.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Arched neck + head reaching forward, mane down the crest.
+    ctx.fillStyle = coat;
+    ctx.beginPath();
+    ctx.moveTo(7, -3.6);
+    ctx.quadraticCurveTo(11.5, -8, 13.6, -12.6);
+    ctx.lineTo(17.6, -12.2);
+    ctx.quadraticCurveTo(19.6, -8.6, 17.6, -6.4);
+    ctx.lineTo(14, -5.4);
+    ctx.quadraticCurveTo(11.6, -3, 9.6, -0.6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = coatLit;
+    ctx.beginPath();
+    ctx.ellipse(11.6, -6.4, 1.6, 3.2, -0.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = mane;
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.moveTo(7.6, -5);
+    ctx.quadraticCurveTo(11.4, -8.8, 13.8, -12.6);
+    ctx.stroke();
+    ctx.fillStyle = coatDark; // ear
+    ctx.beginPath();
+    ctx.moveTo(14, -12.4);
+    ctx.lineTo(13.4, -15.8);
+    ctx.lineTo(15.8, -12.8);
+    ctx.closePath();
+    ctx.fill();
+    // Chanfron: a steel face plate with a gold crest spike.
+    ctx.fillStyle = steel;
+    ctx.beginPath();
+    ctx.moveTo(14.6, -12.4);
+    ctx.lineTo(17.8, -12);
+    ctx.quadraticCurveTo(19.4, -9, 18.4, -7.6);
+    ctx.lineTo(16.6, -8.6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = gold;
+    ctx.beginPath();
+    ctx.moveTo(15.4, -12.3);
+    ctx.lineTo(16.4, -14.6);
+    ctx.lineTo(16.8, -12.1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#1a1210'; // eye + nostril
+    ctx.beginPath();
+    ctx.arc(15.6, -10.2, 0.75, 0, Math.PI * 2);
+    ctx.arc(18.2, -6.9, 0.45, 0, Math.PI * 2);
+    ctx.fill();
+    // Reins back to the rider's hidden bridle hand.
+    ctx.strokeStyle = '#3a2416';
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(17.4, -6.8);
+    ctx.quadraticCurveTo(11, -7, 4.6, -9.6);
+    ctx.stroke();
+
+    // Caparison draped over the barrel: navy, scalloped, gold-edged, starred.
+    ctx.fillStyle = cloth;
+    ctx.beginPath();
+    ctx.moveTo(-12.8, 4.6);
+    ctx.lineTo(-12.6, -2.2);
+    ctx.quadraticCurveTo(-9, -6.9, 0, -6.9);
+    ctx.quadraticCurveTo(7, -6.7, 9.6, -2.6);
+    ctx.lineTo(10.2, 4);
+    scallops(10.2, -12.8, 4.3, 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = clothLit;
+    ctx.beginPath();
+    ctx.ellipse(-1, -4.4, 8.5, 1.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = clothDark;
+    ctx.fillRect(-12.4, 2, 22.4, 2.2);
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(10.2, 4);
+    scallops(10.2, -12.8, 4.3, 7);
+    ctx.stroke();
+    star8(-4.6, -0.6, 2.6);
+
+    // --- Rider ---
+    ctx.fillStyle = '#5a3a20'; // saddle cantle + pommel
+    ctx.beginPath();
+    ctx.ellipse(-4.2, -8, 1.3, 2, -0.3, 0, Math.PI * 2);
+    ctx.ellipse(3.6, -7.6, 1, 1.4, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    capeSide(ctx, -1.8, -15, 8.4, 5, cloth, bob, gold);
+    // Long golden hair streaming back off the crown.
+    ctx.fillStyle = hair;
+    ctx.beginPath();
+    ctx.moveTo(-1.4, -21.8);
+    ctx.quadraticCurveTo(-6.2, -21.4, -7.8, -16.4);
+    ctx.quadraticCurveTo(-9.6, -12.6 + wave, -12, -11 + wave);
+    ctx.quadraticCurveTo(-8.6, -10.8, -6.6, -12.2);
+    ctx.quadraticCurveTo(-6, -9.8, -3.6, -9.4);
+    ctx.quadraticCurveTo(-2.4, -12.6, -1, -15.6);
+    ctx.lineTo(2.6, -17.4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = hairDark;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(-3, -20);
+    ctx.quadraticCurveTo(-7, -16, -10.6, -11.4 + wave);
+    ctx.moveTo(-1.8, -17);
+    ctx.quadraticCurveTo(-4.4, -13, -4.4, -10.2);
+    ctx.stroke();
+    ctx.strokeStyle = hairLit;
+    ctx.beginPath();
+    ctx.moveTo(-2.4, -21.2);
+    ctx.quadraticCurveTo(-6, -19.6, -7, -15.4);
+    ctx.stroke();
+
+    legSide(ctx, -0.2, -8.2, 2.4, -0.4, legs, 2);
+    ctx.strokeStyle = steelDark; // stirrup
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(1.4, -3.4);
+    ctx.lineTo(1.2, -0.2);
+    ctx.lineTo(4.4, -0.2);
+    ctx.stroke();
+    torsoSide(ctx, {
+      color, lit: plateLit, dark: plateDark,
+      top: -16.2, waistY: -10.8, hemY: -7, chest: 4.8, back: 4.2, waist: 3.4, hemF: 4.8, hemB: 5,
+    });
+    belt(ctx, -4.2, 4.4, -9.8, goldDark, gold, 0.6, 1.1, 2.6);
+    ctx.strokeStyle = gold; // breastplate ridge
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(3.2, -15);
+    ctx.quadraticCurveTo(4.8, -12.6, 3.8, -10.6);
+    ctx.stroke();
+    // Gorget, head, golden crown of hair and a thin gold circlet.
+    ctx.fillStyle = steelDark;
+    ctx.beginPath();
+    ctx.ellipse(0.6, -16.2, 2.6, 1.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.arc(1, -19.2, 3.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = hair;
+    ctx.beginPath();
+    ctx.moveTo(-2.2, -18.2);
+    ctx.quadraticCurveTo(-2.8, -22.8, 1, -22.8);
+    ctx.quadraticCurveTo(4.4, -22.6, 4.4, -19.8);
+    ctx.quadraticCurveTo(2.8, -21, 1.4, -20.6);
+    ctx.quadraticCurveTo(0, -19.4, -0.4, -16.6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = hairLit;
+    ctx.beginPath();
+    ctx.ellipse(0.4, -22, 2, 0.6, -0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(-1.8, -20.9);
+    ctx.quadraticCurveTo(1.2, -21.6, 4.1, -21);
+    ctx.stroke();
+    drawProfileFace(ctx, 1, -19.2, 3.1, skin, { eyeY: 0.5, brow: hairDark });
+
+    // Couched lance under the arm, pennant flying back off the tip.
+    seg(ctx, -7, -9.8, 21, -16, 0.9, 0.7, wood);
+    ctx.fillStyle = steel; // tip
+    ctx.beginPath();
+    ctx.moveTo(20.8, -16.9);
+    ctx.lineTo(26.2, -17.2);
+    ctx.lineTo(21.2, -15.1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = steelDark; // vamplate guarding the hand
+    ctx.beginPath();
+    ctx.moveTo(4.6, -14.2);
+    ctx.quadraticCurveTo(6.4, -12.4, 5.6, -10.2);
+    ctx.lineTo(7.8, -12.6);
+    ctx.closePath();
+    ctx.fill();
+    pennant(19.4, -16.2, -1, 7.5);
+    arm(ctx, 0.4, -14, 3.8, -11.6, { sleeve: plateDark, hand: gauntlet, w: 2.6, cuff: gold }, 1.4);
+    pauldron(ctx, 0.2, -14.6, 3.2, steel, -0.2);
+
+    ctx.restore();
+    ctx.restore();
+    return;
+  }
+
+  // --- Front / back (charging toward or riding away from the viewer) ---
+  const back = view === 'back';
+  for (const [lx, lift] of [[-5.6, Math.max(0, step) * 2.2], [5.6, Math.max(0, -step) * 2.2]] as const) {
+    seg(ctx, lx, 2, lx * 1.04, 7 - lift * 0.5, 2.3, 1.3, coatDark);
+    seg(ctx, lx * 1.04, 7 - lift * 0.5, lx, 10.6 - lift, 1.3, 1.05, coatDark);
+    seg(ctx, lx, 9.6 - lift, lx, 11 - lift, 1.1, 1.4, shade(coatDark, -0.15));
+    ctx.fillStyle = hoof;
+    ctx.beginPath();
+    ctx.ellipse(lx, 11.6 - lift, 1.5, 1, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // The rider rides up and down with the gallop.
+  const ry = -bob * 0.8;
+  const lanceX = back ? -9.6 : 9.6;
+  ctx.save();
+  ctx.translate(0, ry);
+  // Plated legs hanging either side of the horse.
+  legFront(ctx, -7.4, -8.4, -8.4, 1, legs, back);
+  legFront(ctx, 7.4, -8.4, 8.4, 1, legs, back);
+  if (!back) {
+    // Hair falling behind the shoulders, framing the head.
+    ctx.fillStyle = hairDark;
+    ctx.beginPath();
+    ctx.moveTo(-4.2, -22);
+    ctx.quadraticCurveTo(-6.2, -17, -5.8, -12.6);
+    ctx.lineTo(5.8, -12.6);
+    ctx.quadraticCurveTo(6.2, -17, 4.2, -22);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    // Short navy cape over the back.
+    ctx.fillStyle = cloth;
+    ctx.beginPath();
+    ctx.moveTo(-5.4, -17.2);
+    ctx.quadraticCurveTo(-7.2, -12, -6.6, -7.4);
+    ctx.quadraticCurveTo(0, -6.4, 6.6, -7.4);
+    ctx.quadraticCurveTo(7.2, -12, 5.4, -17.2);
+    ctx.closePath();
+    ctx.fill();
+  }
+  torsoFront(ctx, {
+    color, lit: plateLit, dark: plateDark,
+    top: -17.6, waistY: -11.2, hemY: -7.4, shoulder: 6, waist: 4.2, hem: 5.4,
+    back, seam: plateDark,
+  });
+  if (back) {
+    ctx.fillStyle = cloth; // cape panel down the spine, gold-edged
+    ctx.beginPath();
+    ctx.moveTo(-4, -17);
+    ctx.quadraticCurveTo(-4.6, -12, -4.4, -7.6);
+    ctx.quadraticCurveTo(0, -6.8, 4.4, -7.6);
+    ctx.quadraticCurveTo(4.6, -12, 4, -17);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(-4.4, -7.6);
+    ctx.quadraticCurveTo(0, -6.8, 4.4, -7.6);
+    ctx.stroke();
+  } else {
+    ctx.strokeStyle = gold; // sternum ridge
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(0, -15.6);
+    ctx.lineTo(0, -10.6);
+    ctx.stroke();
+  }
+  pauldron(ctx, -6.2, -15.6, 3, steel, -0.25);
+  pauldron(ctx, 6.2, -15.6, 3, steel, 0.25);
+
+  // Head.
+  ctx.fillStyle = steelDark; // gorget
+  ctx.beginPath();
+  ctx.ellipse(0, -17.4, 2.8, 1.2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  if (back) {
+    // Back of the head: a little nape, then the long hair spilling down the back.
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.arc(0, -19.6, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = hair;
+    ctx.beginPath();
+    ctx.moveTo(-3.6, -21.6);
+    ctx.arc(0, -21, 3.7, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.quadraticCurveTo(5.4, -16, 4.6 + wave * 0.3, -10.6);
+    ctx.quadraticCurveTo(2.4, -9.6, 0, -10.2);
+    ctx.quadraticCurveTo(-2.4, -9.6, -4.6 + wave * 0.3, -10.6);
+    ctx.quadraticCurveTo(-5.4, -16, -3.6, -21.6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = hairDark;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    for (const sx of [-2.4, 0, 2.4]) {
+      ctx.moveTo(sx * 0.6, -22.6);
+      ctx.quadraticCurveTo(sx * 1.3, -16, sx * 1.1, -10.6);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = hairLit;
+    ctx.beginPath();
+    ctx.moveTo(-1.6, -23.8);
+    ctx.quadraticCurveTo(-3.4, -19, -3, -14);
+    ctx.stroke();
+    ctx.strokeStyle = gold; // circlet round the back of the head
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(-3.6, -21.6);
+    ctx.quadraticCurveTo(0, -20.6, 3.6, -21.6);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.arc(0, -20.4, 3.2, 0, Math.PI * 2);
+    ctx.fill();
+    // Crown of hair, parted in the middle, locks falling past the jaw.
+    ctx.fillStyle = hair;
+    ctx.beginPath();
+    ctx.moveTo(-3.6, -19.6);
+    ctx.quadraticCurveTo(-3.8, -24.4, 0, -24.2);
+    ctx.quadraticCurveTo(3.8, -24.4, 3.6, -19.6);
+    ctx.quadraticCurveTo(2.6, -21.8, 0.4, -22.2);
+    ctx.lineTo(0, -21.2);
+    ctx.lineTo(-0.4, -22.2);
+    ctx.quadraticCurveTo(-2.6, -21.8, -3.6, -19.6);
+    ctx.closePath();
+    ctx.fill();
+    seg(ctx, -3.3, -20.4, -4.4, -14.2, 1.2, 0.9, hair);
+    seg(ctx, 3.3, -20.4, 4.4, -14.2, 1.2, 0.9, hair);
+    ctx.fillStyle = hairLit;
+    ctx.beginPath();
+    ctx.ellipse(-1.6, -23.2, 1.4, 0.5, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = gold; // circlet
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(-3.4, -21.6);
+    ctx.quadraticCurveTo(0, -22.6, 3.4, -21.6);
+    ctx.stroke();
+    // Face: brows, eyes, mouth.
+    ctx.strokeStyle = hairDark;
+    ctx.lineWidth = 0.45;
+    ctx.beginPath();
+    ctx.moveTo(-2, -20.6);
+    ctx.lineTo(-0.6, -20.4);
+    ctx.moveTo(0.6, -20.4);
+    ctx.lineTo(2, -20.6);
+    ctx.stroke();
+    ctx.fillStyle = '#24161a';
+    ctx.beginPath();
+    ctx.arc(-1.3, -19.7, 0.55, 0, Math.PI * 2);
+    ctx.arc(1.3, -19.7, 0.55, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = shade(skin, -0.4);
+    ctx.lineWidth = 0.35;
+    ctx.beginPath();
+    ctx.moveTo(-0.7, -18);
+    ctx.lineTo(0.7, -18);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  if (back) {
+    // Hindquarters under a starred caparison, tail through the crupper.
+    ctx.fillStyle = coat;
+    ctx.beginPath();
+    ctx.ellipse(0, -0.4, 9.6, 8.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = cloth;
+    ctx.beginPath();
+    ctx.moveTo(-10, 5.6);
+    ctx.quadraticCurveTo(-11, -6.4, 0, -8.8);
+    ctx.quadraticCurveTo(11, -6.4, 10, 5.6);
+    scallops(10, -10, 5.8, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = clothDark;
+    ctx.beginPath();
+    ctx.ellipse(0, 3.6, 9.4, 2.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(10, 5.6);
+    scallops(10, -10, 5.8, 6);
+    ctx.stroke();
+    star8(-5, -1, 2.2);
+    star8(5, -1, 2.2);
+    ctx.strokeStyle = mane;
+    ctx.lineWidth = 3.4;
+    ctx.beginPath();
+    ctx.moveTo(0, -6.4);
+    ctx.quadraticCurveTo(1.6 + wave, 2, 0.4, 10);
+    ctx.stroke();
+  } else {
+    // Chest under the caparison's front panel, then the armoured head.
+    ctx.fillStyle = coat;
+    ctx.beginPath();
+    ctx.ellipse(0, 1, 7.8, 7.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = cloth;
+    ctx.beginPath();
+    ctx.moveTo(-8.4, 6);
+    ctx.quadraticCurveTo(-9, -3.4, -4, -4.6);
+    ctx.lineTo(4, -4.6);
+    ctx.quadraticCurveTo(9, -3.4, 8.4, 6);
+    scallops(8.4, -8.4, 6.2, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = clothLit;
+    ctx.beginPath();
+    ctx.ellipse(-2.6, -1.4, 2.4, 3.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(8.4, 6);
+    scallops(8.4, -8.4, 6.2, 5);
+    ctx.stroke();
+    star8(0, 1.6, 2.6);
+    // Neck + head.
+    ctx.fillStyle = coat;
+    ctx.beginPath();
+    ctx.ellipse(0, -5, 3.4, 3.6, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, -8.4, 3.6, 4.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = coatDark; // ears
+    for (const ex of [-2.8, 2.8]) {
+      ctx.beginPath();
+      ctx.moveTo(ex, -11.8);
+      ctx.lineTo(ex * 1.3, -15.2);
+      ctx.lineTo(ex * 0.35, -12.2);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = steel; // chanfron down the face
+    ctx.beginPath();
+    ctx.moveTo(-2.4, -12.4);
+    ctx.lineTo(2.4, -12.4);
+    ctx.lineTo(1.4, -6.2);
+    ctx.lineTo(-1.4, -6.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = gold;
+    ctx.beginPath();
+    ctx.moveTo(-0.7, -12.4);
+    ctx.lineTo(0, -14.8);
+    ctx.lineTo(0.7, -12.4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = coat; // muzzle below the plate
+    ctx.beginPath();
+    ctx.ellipse(0, -5.4, 2.4, 1.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#1a1210'; // eyes + nostrils
+    ctx.beginPath();
+    ctx.arc(-2.7, -9.6, 0.7, 0, Math.PI * 2);
+    ctx.arc(2.7, -9.6, 0.7, 0, Math.PI * 2);
+    ctx.arc(-1, -5, 0.5, 0, Math.PI * 2);
+    ctx.arc(1, -5, 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = mane; // forelock spilling over the plate's top
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(0, -13.2);
+    ctx.lineTo(-0.8, -11.6);
+    ctx.stroke();
+  }
+
+  // Lance held upright, the gauntlet closed on it.
+  ctx.save();
+  ctx.translate(0, ry);
+  uprightLance(lanceX, 3, back ? 1 : -1);
+  arm(ctx, back ? -6 : 6, -15.4, lanceX, -11.6, { sleeve: plateDark, hand: gauntlet, w: 2.6, cuff: gold }, back ? -0.8 : 0.8);
+  ctx.restore();
+
   ctx.restore();
 }
 
@@ -4601,7 +5251,8 @@ export function hasEnemySprite(id: string): boolean {
     id === 'boss2' ||
     id === 'boss3' ||
     id === 'boss4' ||
-    id === 'boss5'
+    id === 'boss5' ||
+    id === 'boss6'
   );
 }
 
@@ -4636,6 +5287,7 @@ export function drawEnemySprite(
   else if (id === 'cas_mage') drawRoyalMage(ctx, color, view, faceLeft, p);
   else if (id === 'cas_brute') drawSiegeRam(ctx, color, view, faceLeft, p);
   else if (id === 'boss5') drawKing(ctx, color, view, faceLeft, p, sit);
+  else if (id === 'boss6') drawRoland(ctx, color, view, faceLeft, p);
 }
 
 /**
@@ -4648,6 +5300,7 @@ const ENEMY_CADENCE: Record<string, number> = {
   boss3: 0.16,
   boss4: 0.22,
   boss5: 0.16,
+  boss6: 0.2,
   cas_grunt: 0.22,
   cas_grunt2: 0.2,
   cas_grunt3: 0.21,
@@ -4684,7 +5337,8 @@ export function hasSprite(shape: string): boolean {
     shape === 'player-claymore' ||
     shape === 'player-bow' ||
     shape === 'player-longbow' ||
-    shape === 'player-magic'
+    shape === 'player-magic' ||
+    shape === 'player-staff'
   );
 }
 
@@ -4702,6 +5356,7 @@ export function playerWeaponForShape(shape: string): PlayerWeapon {
   if (shape === 'player-bow') return 'bow';
   if (shape === 'player-longbow') return 'longbow';
   if (shape === 'player-magic') return 'magic';
+  if (shape === 'player-staff') return 'staff';
   return 'none';
 }
 
@@ -4818,10 +5473,11 @@ const P_SHOULDER_Y = -5.6;
  * adventurer is drawn as a deployable champion, one per journal proficiency.
  * `'dual-swords'` (Blade), `'bow'` (Bow) and `'magic'` (the staff-less Magic
  * caster, who conjures the orb in raised bare hands) are the champion variants;
- * `'claymore'` is the Blade's two-handed great sword from its Claymore node, and
- * `'longbow'` the Bow's towering longbow from its Longbow node.
+ * `'claymore'` is the Blade's two-handed great sword from its Claymore node,
+ * `'longbow'` the Bow's towering longbow from its Longbow node, and `'staff'` the
+ * Magic caster's crystal-headed staff from its Arcane Staff node.
  */
-export type PlayerWeapon = 'none' | 'dual-swords' | 'claymore' | 'bow' | 'longbow' | 'magic';
+export type PlayerWeapon = 'none' | 'dual-swords' | 'claymore' | 'bow' | 'longbow' | 'magic' | 'staff';
 
 /** Headwear that hides the crown of the hair (only a fringe shows beneath). */
 const CROWN_COVERING = new Set(['cap', 'hat', 'helm']);
@@ -4836,7 +5492,8 @@ const CROWN_COVERING = new Set(['cap', 'hat', 'helm']);
  * adventurer's orb charge, or the Claymore's heft wind-up. `special` swaps the
  * weapon's normal strike for its signature move (the Blade's Cross Slash, the
  * Claymore's Earthsplitter slam, the Greater Orb's throw-down), with `anim`
- * running over that move's time. `empowered` makes the Magic adventurer's charge
+ * running over that move's time — or, for the Staff's Mana Storm hold, how far
+ * the staff is hoisted overhead. `empowered` makes the Magic adventurer's charge
  * the Greater Orb's leap (arms raised overhead, legs tucked).
  *
  * Layered back-to-front: cape → back hair (long / braid / ponytail) → legs →
@@ -4940,6 +5597,12 @@ export function drawPlayerSprite(
     } else {
       drawPlayerCastArms(ctx, look, backLook, anim, draw, b, sho, drawCloak);
     }
+  } else if (weapon === 'staff') {
+    // The Arcane Staff: held upright at rest, raised two-handed as it kindles
+    // (`draw`), then swept forward to point as the volley flies (`anim`). Its
+    // signature move (`special`) is the Mana Storm's overhead hold, with `anim`
+    // how far the staff is hoisted.
+    overHead = drawPlayerStaff(ctx, look, backLook, special ? 0 : anim, special ? 0 : draw, special ? anim : 0, b, sho, oc, drawCloak);
   } else if (weapon === 'dual-swords') {
     // The Blade holds both short swords in a raised guard and cuts with them, so
     // it poses its own arms (see `drawDualShortSwords`).
@@ -7212,4 +7875,184 @@ function drawPlayerGreaterOrbArms(
   forearm(ctx, -sho, P_SHOULDER_Y, rear.x, rear.y, backLook, rear.bend);
   forearm(ctx, sho, P_SHOULDER_Y, front.x, front.y, look, front.bend);
   return front.y < -9 ? () => forearm(ctx, sho, P_SHOULDER_Y, front.x, front.y, look, front.bend) : null;
+}
+
+// ============================================================================
+// The Arcane Staff — the Magic adventurer's staff (Arcane Staff node).
+// A plain wooden staff, brass-shod, whose carved crook cradles a crystal in the
+// adventurer's outfit colour. Every frame comes from `staffPose`, which the
+// renderer's glow pass also reads (`staffTip`) to light the crystal.
+// ============================================================================
+
+/** A staff frame: the front hand's grip, the staff's heading (butt → crystal), and that arm's elbow bend. */
+interface StaffGrip {
+  x: number;
+  y: number;
+  ang: number;
+  bend: number;
+}
+/** At rest: planted upright beside the body, leaning a touch forward. */
+const STAFF_REST: StaffGrip = { x: 6.2, y: -0.6, ang: -1.466, bend: -0.9 };
+/** Raised high in both hands as the crystal kindles (the cast's charge). */
+const STAFF_RAISED: StaffGrip = { x: 6.6, y: -6.2, ang: -1.361, bend: 0.8 };
+/** Swept forward to point at the foes as the volley flies. */
+const STAFF_POINT: StaffGrip = { x: 8, y: -5, ang: -0.314, bend: 0.4 };
+/**
+ * Hoisted high in both hands for the Mana Storm: held upright just in front of
+ * the face, the front hand up at the crown, the crystal to the sky.
+ */
+const STAFF_HIGH: StaffGrip = { x: 6.4, y: -15.6, ang: -1.5, bend: 1.4 };
+/** Grip → crystal, and grip → butt, along the staff. */
+const STAFF_HEAD = 15;
+const STAFF_BUTT = 11;
+/** How far down the shaft from the front hand the rear hand takes hold. */
+const STAFF_REAR_HOLD = 4.5;
+// Release phases (`release` 1 → 0 over `attackAnimTime('player-staff')`): swept
+// from raised to pointing above SWEEP, held pointing until LOWER, then lowered
+// back to rest.
+const STAFF_SWEEP = 0.78;
+const STAFF_LOWER = 0.45;
+
+/**
+ * The staff's pose for `release` (1 the instant the volley flies → 0), `charge`
+ * (0..1, the raise before it) and `stance` (0..1, how far it is hoisted into the
+ * Mana Storm's overhead hold, which overrides the other two): the grip, its
+ * heading and how far the rear hand has come up onto the shaft (`hold`, 0
+ * hanging → 1 gripping).
+ */
+function staffPose(release: number, charge: number, stance = 0): StaffGrip & { hold: number } {
+  const mix = (a: StaffGrip, z: StaffGrip, k: number): StaffGrip => ({
+    x: a.x + (z.x - a.x) * k,
+    y: a.y + (z.y - a.y) * k,
+    ang: a.ang + (z.ang - a.ang) * k,
+    bend: a.bend + (z.bend - a.bend) * k,
+  });
+  if (stance > 0) {
+    const k = ease.inOutSine(Math.min(1, stance));
+    return { ...mix(STAFF_REST, STAFF_HIGH, k), hold: Math.min(1, k * 1.6) };
+  }
+  const r = Math.max(0, Math.min(1, release));
+  if (r > 0) {
+    if (r > STAFF_SWEEP) return { ...mix(STAFF_RAISED, STAFF_POINT, ease.outCubic((1 - r) / (1 - STAFF_SWEEP))), hold: 1 };
+    if (r > STAFF_LOWER) return { ...STAFF_POINT, hold: 1 };
+    const k = ease.inOutSine(r / STAFF_LOWER);
+    return { ...mix(STAFF_REST, STAFF_POINT, k), hold: k };
+  }
+  const k = ease.inOutSine(Math.min(1, Math.max(0, charge) / 0.7));
+  return { ...mix(STAFF_REST, STAFF_RAISED, k), hold: k };
+}
+
+/**
+ * The staff's crystal for the given inputs (see `staffPose`), in local space
+ * facing +x. The renderer glows it; at the top of the raise (`staffTip(0, 1)`)
+ * it is where the engine looses the volley (`STAFF_MUZZLE` at board scale), and
+ * hoisted (`staffTip(0, 0, 1)`) where the Mana Storm's bolts leave
+ * (`STORM_MUZZLE`).
+ */
+export function staffTip(release: number, charge: number, stance = 0): { x: number; y: number } {
+  const p = staffPose(release, charge, stance);
+  return { x: p.x + Math.cos(p.ang) * STAFF_HEAD, y: p.y + Math.sin(p.ang) * STAFF_HEAD };
+}
+
+/**
+ * The Arcane Staff and both arms, in the base figure's local space (already
+ * flipped for `faceLeft`). See `staffPose` for the inputs. Layered: sleeves →
+ * `cloak` → forearms → staff → fists, so both hands close over the shaft.
+ * Returns a repaint of the near forearm, the staff and both fists for the caller
+ * to run after the head and headwear while the staff is hoisted overhead (so a
+ * hat brim or hair never hides them), else null.
+ */
+function drawPlayerStaff(
+  ctx: CanvasRenderingContext2D,
+  look: ArmLook,
+  backLook: ArmLook,
+  release: number,
+  charge: number,
+  stance: number,
+  b: { hw: number },
+  sho: number,
+  oc: string,
+  cloak: () => void,
+): (() => void) | null {
+  const p = staffPose(release, charge, stance);
+  const ux = Math.cos(p.ang);
+  const uy = Math.sin(p.ang);
+  const restR = { x: -b.hw + 1.5, y: 3.5 };
+  const onShaft = { x: p.x - ux * STAFF_REAR_HOLD, y: p.y - uy * STAFF_REAR_HOLD };
+  const rear = {
+    x: restR.x + (onShaft.x - restR.x) * p.hold,
+    y: restR.y + (onShaft.y - restR.y) * p.hold,
+    bend: 0.7 + 0.3 * p.hold,
+  };
+
+  arm(ctx, -sho, P_SHOULDER_Y, rear.x, rear.y, backLook, rear.bend);
+  arm(ctx, sho, P_SHOULDER_Y, p.x, p.y, look, p.bend);
+  cloak();
+  forearm(ctx, -sho, P_SHOULDER_Y, rear.x, rear.y, backLook, rear.bend);
+  forearm(ctx, sho, P_SHOULDER_Y, p.x, p.y, look, p.bend);
+
+  const staff = () => {
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.ang);
+    // In the staff's frame +x runs from the grip toward the crystal.
+    const shaft = (w: number, color: string, from: number, to: number, off = 0) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      ctx.moveTo(from, off);
+      ctx.lineTo(to, off);
+      ctx.stroke();
+    };
+    shaft(2.1, '#3e2814', -STAFF_BUTT, STAFF_HEAD - 2.6);
+    shaft(1.25, '#7a5230', -STAFF_BUTT + 0.3, STAFF_HEAD - 2.8);
+    shaft(0.4, 'rgba(255,230,190,0.35)', -STAFF_BUTT + 1, STAFF_HEAD - 3.4, -0.35);
+    // Brass shoe at the butt and a collar under the crook.
+    ctx.fillStyle = P_BRASS;
+    ctx.beginPath();
+    ctx.arc(-STAFF_BUTT, 0, 1.05, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(STAFF_HEAD - 4.2, -1.25, 1.3, 2.5);
+    // The carved crook: two prongs curling up around the crystal.
+    ctx.strokeStyle = '#3e2814';
+    ctx.lineWidth = 1.1;
+    for (const s of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(STAFF_HEAD - 3, s * 0.4);
+      ctx.quadraticCurveTo(STAFF_HEAD - 1.2, s * 2.7, STAFF_HEAD + 1.4, s * 1.7);
+      ctx.stroke();
+    }
+    // The crystal: a long faceted diamond in the adventurer's colour.
+    ctx.fillStyle = shade(oc, 0.3);
+    ctx.beginPath();
+    ctx.moveTo(STAFF_HEAD - 2.2, 0);
+    ctx.lineTo(STAFF_HEAD, -1.25);
+    ctx.lineTo(STAFF_HEAD + 2.6, 0);
+    ctx.lineTo(STAFF_HEAD, 1.25);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.beginPath();
+    ctx.moveTo(STAFF_HEAD - 1, -0.15);
+    ctx.lineTo(STAFF_HEAD, -0.95);
+    ctx.lineTo(STAFF_HEAD + 1.3, -0.15);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  };
+  const fists = () => {
+    fist(ctx, rear.x, rear.y, backLook);
+    fist(ctx, p.x, p.y, look);
+  };
+  staff();
+  fists();
+  // Hoisted overhead, the near forearm, the staff and the hands go back over
+  // the head (the far forearm stays behind it, reaching round to the shaft).
+  return p.y < -9
+    ? () => {
+        forearm(ctx, sho, P_SHOULDER_Y, p.x, p.y, look, p.bend);
+        staff();
+        fists();
+      }
+    : null;
 }

@@ -20,6 +20,22 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-10-07 · Arcane Staff & The Capital',
+    changes: [
+      'Magic: Arcane Staff. A new rival style to Greater Orb (500 EXP). Your adventurer takes up a crystal-tipped staff, raises it for each cast and fires three mana bolts (9 damage each). The bolts fan out upward, then curve in on a different enemy in range each; if there are fewer enemies than bolts, the extra bolts hit again. Its in-stage levels are Arcane Tempo and Arcane Force.',
+      'New ability, Arcane Storm (Arcane Staff): hold the staff overhead for 5 seconds and fire mana bolts at 2.5× your attack speed. Each bolt arcs up and falls on a random enemy in range (40 mana, 16s cooldown). Mana pools at your feet and spirals up around you while it lasts. It has its own animations, effects and sounds.',
+      'The Capital chapter is open. Its first stage, Castle Door, is now Escape: the castle burns behind you and you have to fight your way out through seven tougher waves of guards, rangers and mages.',
+      'New boss: Captain Roland replaces Thornmaw the Ancient. He’s a fast mounted knight with golden hair, riding a warhorse in Squadron 8 colours with his lance couched.',
+      'New prop: the Burning Castle, a sacked version of the castle with a collapsed tower, charred banners, flames and smoke. It is also in the Level Designer.',
+      'New battle music for the Capital, Hunted by the Crown: a fast, tense chase with alarm bells, pursuing drums and two rival horn calls.',
+      'Balance: Earthsplitter now costs 30 mana (was 35), has a 14s cooldown (was 16) and knocks enemies back much further. Quickdraw’s cooldown goes from 15s to 21s, and Mana Ray’s from 14s to 18s.',
+      'Armor bonuses no longer apply while your adventurer’s mastery is switched off.',
+      'Garrick Vane’s description now correctly says he dodges a fifth of all hits.',
+      'Greater Orb and some level descriptions are shorter. The journal champion page no longer shows the champion’s description, and its buttons are arranged in a neat two-column grid.',
+      'Champion stats show “3 mana bolts” for the Staff, and the developer champion stats page lists the Staff form. There is a new developer stage sheet (#stages) that lists every stage’s waves.',
+    ],
+  },
+  {
     version: '2026-10-07 · Fighting Styles',
     changes: [
       'Adventurer skill trees now branch after Ironclad into rival fighting styles (500 EXP each). You can learn both, but only the one you pick is active; switch any time with Activate path. Paths you have switched off are drawn dimmed in the tree, and learned nodes no longer show an Active/Learned label.',

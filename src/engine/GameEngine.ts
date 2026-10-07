@@ -75,6 +75,8 @@ import {
   GREATER_ORB_CHARGE_TIME,
   GREATER_ORB_CROUCH,
   GREATER_ORB_LAND,
+  MANA_STORM_LOWER,
+  MANA_STORM_RAISE,
   isSpeaking,
   PIERCING_CAST_ANIM_TIME,
   specialAnimTime,
@@ -139,7 +141,7 @@ function isHeroTower(tower: Tower): boolean {
 function fxElementFor(tower: Tower): FxElement {
   const shape = tower.def.visual.shape;
   if (shape === 'wizard') return 'wind';
-  if (shape === 'elf' || shape === 'player-magic') return 'arcane';
+  if (shape === 'elf' || shape === 'player-magic' || shape === 'player-staff') return 'arcane';
   if (shape === 'bard') return 'holy';
   return tower.def.damageType === 'magic' ? 'arcane' : 'steel';
 }
@@ -149,7 +151,9 @@ function fxElementFor(tower: Tower): FxElement {
  * element's fixed ramp. The Magic adventurer's arcane takes the player's colour.
  */
 function fxTintFor(tower: Tower | undefined): string | undefined {
-  return tower?.def.visual.shape === 'player-magic' ? tower.def.visual.color : undefined;
+  if (!tower) return undefined;
+  const shape = tower.def.visual.shape;
+  return shape === 'player-magic' || shape === 'player-staff' ? tower.def.visual.color : undefined;
 }
 
 // ─── TUNING: End-of-wave cash reward ─────────────────────────────────────────
@@ -243,6 +247,39 @@ export const ORB_SPEED = 235;
 const GREATER_ORB_MUZZLE = { x: 1.1, y: -35.7 };
 const GREATER_ORB_SPEED = 290;
 const GREATER_ORB_SCALE = 1.35;
+// The Staff (the Magic adventurer's Staff form): a brief raise of the staff
+// before each volley (the crystal kindling, see `drawPlayerStaff`), folded into
+// the attack cadence and capped to a share of the reload like the other charges.
+export const STAFF_CAST_TIME = 0.34;
+// Where the bolts leave the staff: its crystal at the top of the raise (see
+// `staffTip(0, 1)`, facing +x) at the board's figure scale.
+const STAFF_MUZZLE = { x: 10.9, y: -24.7 };
+// The volley's mana bolts: launched in a wide fan biased upward (`STAFF_FAN`
+// radians between neighbours), they coast on that heading for STAFF_BOLT_DRIFT,
+// then turn toward their foe ever harder (TURN + TURN_GROWTH × age rad/s) while
+// accelerating from SPEED to MAX_SPEED; past STAFF_BOLT_LOCK they fly straight
+// at it, so a bolt can never circle its target forever.
+const STAFF_FAN = 1.0;
+// Gap between the bolts of one volley leaving the crystal (matched by the
+// three zips of the `staffShot` cue).
+export const STAFF_BOLT_STAGGER = 0.07;
+const STAFF_BOLT_SPEED = 110;
+const STAFF_BOLT_ACCEL = 280;
+const STAFF_BOLT_MAX_SPEED = 300;
+const STAFF_BOLT_DRIFT = 0.1;
+const STAFF_BOLT_TURN = 2;
+const STAFF_BOLT_TURN_GROWTH = 10;
+const STAFF_BOLT_LOCK = 1.4;
+// Mana Storm (the Staff's ability): where its bolts leave the hoisted staff (the
+// crystal at `staffTip(0, 0, 1)`, facing +x, at the board's figure scale), and
+// each bolt's arc — up LIFT (± LIFT_JITTER) px above the higher of its ends,
+// nudged up to SPREAD px aside, over FLIGHT (± FLIGHT_JITTER) seconds.
+const STORM_MUZZLE = { x: 8.4, y: -35.5 };
+const STORM_BOLT_LIFT = 95;
+const STORM_BOLT_LIFT_JITTER = 18;
+const STORM_BOLT_SPREAD = 26;
+const STORM_BOLT_FLIGHT = 0.95;
+const STORM_BOLT_FLIGHT_JITTER = 0.12;
 // Knockback (the Wizard's Gale Force). A single cooldown lives on the *enemy*
 // (not per Wizard), so its shove rate is capped however many Wizards hit it —
 // it can be slowed but never permanently stalled. At 14px per 0.65s (~21.5px/s)
@@ -298,6 +335,9 @@ export type SfxName =
   | 'greaterOrbCast'
   | 'greaterOrbThrow'
   | 'greaterOrbBurst'
+  | 'staffCast'
+  | 'staffShot'
+  | 'staffHit'
   | 'cycloneSlash'
   | 'crossSlash'
   | 'claymoreSwing'
@@ -312,6 +352,8 @@ export type SfxName =
   | 'pierceShot'
   | 'manaRay'
   | 'manaRayTick'
+  | 'manaStorm'
+  | 'stormBolt'
   | 'bardPlay';
 
 // The Elf's magic arrows leap on impact: each bounce seeks the nearest living
@@ -699,6 +741,7 @@ export class GameEngine {
       pierceShots: 0,
       specialAnim: 0,
       slam: null,
+      storm: null,
       ability,
       abilityCooldown: 0,
       abilityCooldownMax: ability?.cooldown ?? 0,
@@ -863,6 +906,9 @@ export class GameEngine {
       case 'mana-ray':
         this.castManaRay(t);
         break;
+      case 'mana-storm':
+        this.castManaStorm(t);
+        break;
       case 'earthsplitter':
         this.castEarthsplitter(t);
         break;
@@ -875,14 +921,15 @@ export class GameEngine {
   }
 
   /**
-   * How far a tower's damaging ability reaches (Cyclone Slash and Mana Ray: its
-   * range; Earthsplitter: `reachMult`× it), or null for one that hits nobody
-   * (Quickdraw, a self-buff) and so never needs a target.
+   * How far a tower's damaging ability reaches (Cyclone Slash, Mana Ray and Mana
+   * Storm: its range; Earthsplitter: `reachMult`× it), or null for one that hits
+   * nobody (Quickdraw, a self-buff) and so never needs a target.
    */
   private abilityReach(t: Tower): number | null {
     switch (t.ability?.id) {
       case 'cyclone-slash':
       case 'mana-ray':
+      case 'mana-storm':
         return t.range;
       case 'earthsplitter':
         return t.range * (t.ability.reachMult ?? 1);
@@ -1180,6 +1227,117 @@ export class GameEngine {
     }
     if (crit && anyLanded && lastHit) this.critFloater(lastHit);
     this.sfx.push('manaRayTick');
+  }
+
+  /**
+   * Mana Storm (the Arcane Staff): the hero hoists the staff overhead in both
+   * hands and channels for the ability's `duration`, loosing mana bolts skyward
+   * `speedMult`× as fast as its normal attacks loose bolts; each rains down on a
+   * random foe in range (see `updateStorm`). No normal attacks meanwhile; any
+   * half-raised volley is dropped. Facing locks toward the aim at cast.
+   */
+  private castManaStorm(t: Tower): void {
+    const ability = t.ability!;
+    const duration = ability.duration ?? 0;
+    t.storm = { timer: duration, duration, next: MANA_STORM_RAISE, every: this.stormBoltEvery(t) };
+    t.charge = 0;
+    t.chargeMax = 0;
+    t.attackAnim = 0;
+    t.specialAnim = 0;
+    const aim = this.abilityAim(t, t.range);
+    if (aim) t.aimTarget = { ...aim };
+    this.sfx.push('manaStorm');
+    this.emitFx({ kind: 'cast', ability: 'manaStorm', x: t.pos.x, y: t.pos.y, color: t.def.visual.color, radius: t.range });
+    this.floaters.push({
+      pos: { x: t.pos.x, y: t.pos.y - 16 },
+      text: 'MANA STORM!',
+      color: t.def.visual.color,
+      ttl: 0.9,
+      maxTtl: 0.9,
+      size: 15,
+    });
+  }
+
+  /**
+   * Seconds between a Mana Storm's bolts: its normal bolt rate (attack speed,
+   * hastened by any buffs, × bolts per volley) sped up by the ability's `speedMult`.
+   */
+  private stormBoltEvery(t: Tower): number {
+    const rate =
+      t.attackSpeed *
+      t.attackSpeedBuffMult *
+      t.abilitySpeedBuffMult *
+      Math.max(1, t.burstCount) *
+      (t.ability?.speedMult ?? 1);
+    return rate > 0 ? 1 / rate : Infinity;
+  }
+
+  /**
+   * Advance a channelling Mana Storm: run down its timer and loose a bolt each
+   * `every` seconds at a random foe in range, from the moment the staff is up
+   * until it starts coming down. With nobody in range it holds the next bolt
+   * until someone steps in. Called from `updateTowers` in place of all normal
+   * firing while `storm` is set.
+   */
+  private updateStorm(t: Tower, dt: number): void {
+    const s = t.storm!;
+    s.timer = Math.max(0, s.timer - dt);
+    s.every = this.stormBoltEvery(t);
+    if (s.timer > MANA_STORM_LOWER) {
+      s.next -= dt;
+      while (s.next <= 0) {
+        const foes = this.enemies.filter(
+          (e) =>
+            !e.dead &&
+            !e.dying &&
+            e.rise <= 0 &&
+            !isSpeaking(e) &&
+            Math.hypot(e.pos.x - t.pos.x, e.pos.y - t.pos.y) <= t.range,
+        );
+        if (!foes.length) {
+          s.next = 0;
+          break;
+        }
+        this.fireStormBolt(t, foes[Math.floor(this.rng() * foes.length)]);
+        s.next += s.every;
+      }
+    }
+    if (s.timer === 0) {
+      t.storm = null;
+      // The staff comes down to rest, like the end of a volley.
+      t.attackAnim = 0;
+    }
+  }
+
+  /** Loose one Mana Storm bolt from the hoisted crystal, to rain down on `foe`. */
+  private fireStormBolt(t: Tower, foe: Enemy): void {
+    const crit = this.rollCrit(t);
+    const dir = t.aimTarget && t.aimTarget.x < t.pos.x ? -1 : 1;
+    const from = { x: t.pos.x + dir * STORM_MUZZLE.x, y: t.pos.y + STORM_MUZZLE.y };
+    const jitter = () => this.rng() * 2 - 1;
+    this.projectiles.push({
+      pos: { ...from },
+      targetUid: foe.uid,
+      last: { ...foe.pos },
+      speed: 0,
+      damage: t.damage * (t.ability?.damageMult ?? 1) * (crit ? t.critMultiplier : 1),
+      crit,
+      color: t.def.visual.color,
+      scale: 0.9,
+      style: 'mana',
+      source: t,
+      bounces: 0,
+      trail: [],
+      rain: {
+        from,
+        lift: STORM_BOLT_LIFT + jitter() * STORM_BOLT_LIFT_JITTER,
+        spread: jitter() * STORM_BOLT_SPREAD,
+        age: 0,
+        time: STORM_BOLT_FLIGHT + jitter() * STORM_BOLT_FLIGHT_JITTER,
+        dir: { x: 0, y: -1 },
+      },
+    });
+    this.sfx.push('stormBolt');
   }
 
   /**
@@ -1681,6 +1839,11 @@ export class GameEngine {
         this.updateBeam(t, dt);
         continue;
       }
+      // Channelling a Mana Storm (the Staff's rain of bolts): likewise.
+      if (t.storm) {
+        this.updateStorm(t, dt);
+        continue;
+      }
 
       // Economy units harvest gold instead of attacking.
       if (t.def.generator) {
@@ -1801,10 +1964,13 @@ export class GameEngine {
       // Greater Orb's charge is its whole leap (capped to a share of the reload,
       // like the draw, so attack-speed buffs still quicken it).
       const longbow = t.def.visual.shape === 'player-longbow';
-      if (t.aoe === 'cone' || t.aoe === 'circle' || longbow) {
+      const staff = t.def.visual.shape === 'player-staff';
+      if (t.aoe === 'cone' || t.aoe === 'circle' || longbow || staff) {
         const chargeTime = longbow
           ? Math.min(LONGBOW_DRAW_TIME, 0.6 / rate)
-          : t.aoe === 'circle'
+          : staff
+            ? Math.min(STAFF_CAST_TIME, 0.5 / rate)
+            : t.aoe === 'circle'
             ? t.greaterOrb
               ? Math.min(GREATER_ORB_CHARGE_TIME, 0.5 / rate)
               : ORB_CHARGE_TIME
@@ -1819,6 +1985,7 @@ export class GameEngine {
         // Greater Orb); a creak of the longbow's stave as the string comes back.
         if (t.aoe === 'circle') this.sfx.push(t.greaterOrb ? 'greaterOrbCast' : 'orbCast');
         if (longbow) this.sfx.push('longbowDraw');
+        if (staff) this.sfx.push('staffCast');
         continue;
       }
 
@@ -1986,6 +2153,10 @@ export class GameEngine {
     }
     if (shape === 'player-longbow') {
       this.fireLongbow(tower, target);
+      return;
+    }
+    if (shape === 'player-staff') {
+      this.fireStaff(tower, target);
       return;
     }
     const crit = this.rollCrit(tower);
@@ -2281,6 +2452,16 @@ export class GameEngine {
       // A piercing arrow flies straight on, striking everything in its path.
       if (p.pierce) {
         if (this.advancePierce(p, dt)) survivors.push(p);
+        continue;
+      }
+      // A Staff's mana bolt arcs out on its own heading before homing in.
+      if (p.seek) {
+        if (this.advanceSeek(p, dt)) survivors.push(p);
+        continue;
+      }
+      // A Mana Storm bolt arcs up and rains down onto its foe.
+      if (p.rain) {
+        if (this.advanceRain(p, dt)) survivors.push(p);
         continue;
       }
       const target = this.enemies.find((e) => e.uid === p.targetUid && !e.dead);
@@ -2640,6 +2821,174 @@ export class GameEngine {
       burstRadius: tower.burstRadius,
       trail: [],
     });
+  }
+
+  /**
+   * A Staff volley (the Magic adventurer's Staff form), loosed as the raised
+   * staff whips forward: `burstCount` hardened mana bolts at once from its
+   * crystal (`STAFF_MUZZLE`), each carrying its own pre-rolled damage. Each bolt
+   * seeks a *different* foe in range while there are enough — the primary target
+   * first, then the rest in this champion's targeting order — and with fewer foes
+   * than bolts the leftovers double up, cycling through them again. The bolts fan
+   * out upward (tilted toward the aim, each toward its own foe's side) and arc in
+   * (see `advanceSeek`).
+   */
+  private fireStaff(tower: Tower, target: Enemy): void {
+    const count = Math.max(1, tower.burstCount);
+    // Everyone else in reach, in this champion's targeting order.
+    let rest: { enemy: Enemy; remainingToExit: number; distance: number; health: number }[] = [];
+    for (const e of this.enemies) {
+      if (e === target || e.dead || e.dying || e.rise > 0 || isSpeaking(e)) continue;
+      const distance = Math.hypot(e.pos.x - tower.pos.x, e.pos.y - tower.pos.y);
+      if (distance > tower.range) continue;
+      rest.push({ enemy: e, remainingToExit: this.lanes[e.laneIndex].totalPathLength - e.dist, distance, health: e.health });
+    }
+    const foes: Enemy[] = [target];
+    while (foes.length < count && rest.length) {
+      const next = selectTarget(tower.targeting, rest);
+      if (!next) break;
+      foes.push(next.enemy);
+      rest = rest.filter((r) => r !== next);
+    }
+    const picks = Array.from({ length: count }, (_, i) => foes[i % foes.length]);
+
+    const dir = target.pos.x >= tower.pos.x ? 1 : -1;
+    const origin = { x: tower.pos.x + dir * STAFF_MUZZLE.x, y: tower.pos.y + STAFF_MUZZLE.y };
+    const aim = Math.atan2(target.pos.y - origin.y, target.pos.x - origin.x);
+    // The fan's centre: straight up, leaned toward the aim.
+    const centre = Math.atan2(-1 + Math.sin(aim) * 0.45, Math.cos(aim) * 0.45);
+    // Fan slots go to the foes by which side of the aim they lie on, so the
+    // bolts don't cross on their way in.
+    const side = (e: Enemy) => {
+      let d = Math.atan2(e.pos.y - origin.y, e.pos.x - origin.x) - aim;
+      if (d > Math.PI) d -= Math.PI * 2;
+      if (d < -Math.PI) d += Math.PI * 2;
+      return d;
+    };
+    picks.sort((a, b) => side(a) - side(b));
+    // Which slot of the stagger each fan position takes: the middle bolt first,
+    // then outward alternating sides (for 3 bolts: left 1, middle 0, right 2).
+    const mid = (count - 1) / 2;
+    const order = picks
+      .map((_, i) => i)
+      .sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid) || a - b)
+      .reduce<number[]>((acc, slot, n) => ((acc[slot] = n), acc), []);
+    picks.forEach((foe, i) => {
+      const crit = this.rollCrit(tower);
+      const heading = centre + (i - (count - 1) / 2) * STAFF_FAN;
+      this.projectiles.push({
+        pos: { ...origin },
+        targetUid: foe.uid,
+        last: { ...foe.pos },
+        speed: STAFF_BOLT_SPEED,
+        damage: tower.damage * (crit ? tower.critMultiplier : 1),
+        crit,
+        color: tower.def.visual.color,
+        scale: 1,
+        style: 'mana',
+        source: tower,
+        bounces: 0,
+        trail: [],
+        // Launch order runs out from the centre of the fan, then side to side.
+        seek: { dir: { x: Math.cos(heading), y: Math.sin(heading) }, age: 0, delay: STAFF_BOLT_STAGGER * order[i] },
+      });
+    });
+    this.sfx.push('staffShot');
+  }
+
+  /**
+   * Advance a Staff's seeking mana bolt one tick (see `Projectile.seek` and the
+   * `STAFF_BOLT_*` tuning): coast, then turn toward the target ever harder while
+   * accelerating, and strike on contact. A bolt whose foe has died flies on to
+   * where it fell and fizzles there, like any homing shot. Returns false once the
+   * bolt is spent.
+   */
+  private advanceSeek(p: Projectile, dt: number): boolean {
+    const s = p.seek!;
+    // Still waiting its turn at the crystal.
+    if (s.delay > 0) {
+      s.delay -= dt;
+      return true;
+    }
+    s.age += dt;
+    const target = this.enemies.find((e) => e.uid === p.targetUid && !e.dead);
+    if (target) p.last = { ...target.pos };
+    const dest = p.last;
+    const dx = dest.x - p.pos.x;
+    const dy = dest.y - p.pos.y;
+    const dist = Math.hypot(dx, dy);
+    p.speed = Math.min(STAFF_BOLT_MAX_SPEED, STAFF_BOLT_SPEED + STAFF_BOLT_ACCEL * s.age);
+    const step = p.speed * dt;
+    if (dist <= step + 3) {
+      if (target) {
+        const landed = this.damageEnemy(target, p.damage, p.source);
+        if (p.crit && landed) this.critFloater(target.pos);
+        if (landed) this.sfx.push('staffHit');
+      }
+      this.bursts.push({ pos: { ...dest }, color: p.color, ttl: 0.24, maxTtl: 0.24, radius: 6 });
+      return false;
+    }
+    if (s.age > STAFF_BOLT_DRIFT) {
+      const cur = Math.atan2(s.dir.y, s.dir.x);
+      const want = Math.atan2(dy, dx);
+      let diff = want - cur;
+      if (diff > Math.PI) diff -= Math.PI * 2;
+      if (diff < -Math.PI) diff += Math.PI * 2;
+      const turn = (STAFF_BOLT_TURN + STAFF_BOLT_TURN_GROWTH * s.age) * dt;
+      const ang = s.age > STAFF_BOLT_LOCK ? want : cur + Math.max(-turn, Math.min(turn, diff));
+      s.dir = { x: Math.cos(ang), y: Math.sin(ang) };
+    }
+    p.pos = { x: p.pos.x + s.dir.x * step, y: p.pos.y + s.dir.y * step };
+    if (p.trail) {
+      p.trail.unshift({ ...p.pos });
+      if (p.trail.length > MAGIC_TRAIL_LENGTH) p.trail.length = MAGIC_TRAIL_LENGTH;
+    }
+    return true;
+  }
+
+  /**
+   * Advance a Mana Storm bolt one tick (see `Projectile.rain`): along its high
+   * arc, whose far end follows the foe, striking on arrival. A bolt whose foe has
+   * died comes down where it fell and fizzles there. Returns false once spent.
+   */
+  private advanceRain(p: Projectile, dt: number): boolean {
+    const r = p.rain!;
+    r.age += dt;
+    const target = this.enemies.find((e) => e.uid === p.targetUid && !e.dead);
+    if (target) p.last = { ...target.pos };
+    const dest = p.last;
+    const u = Math.min(1, r.age / r.time);
+    if (u >= 1) {
+      if (target) {
+        const landed = this.damageEnemy(target, p.damage, p.source);
+        if (p.crit && landed) this.critFloater(target.pos);
+        if (landed) this.sfx.push('staffHit');
+      }
+      this.bursts.push({ pos: { ...dest }, color: p.color, ttl: 0.24, maxTtl: 0.24, radius: 6 });
+      return false;
+    }
+    // Cubic curve: straight up off the crystal, over, and straight down onto the foe.
+    const top = Math.min(r.from.y, dest.y) - r.lift;
+    const x1 = r.from.x + r.spread;
+    const v = 1 - u;
+    const a = v * v * v;
+    const b = 3 * v * v * u;
+    const c = 3 * v * u * u;
+    const d = u * u * u;
+    const next = {
+      x: a * r.from.x + b * x1 + c * dest.x + d * dest.x,
+      y: a * r.from.y + b * top + c * top + d * dest.y,
+    };
+    const mx = next.x - p.pos.x;
+    const my = next.y - p.pos.y;
+    const len = Math.hypot(mx, my);
+    if (len > 1e-3) r.dir = { x: mx / len, y: my / len };
+    p.pos = next;
+    if (p.trail) {
+      p.trail.unshift({ ...p.pos });
+      if (p.trail.length > MAGIC_TRAIL_LENGTH) p.trail.length = MAGIC_TRAIL_LENGTH;
+    }
+    return true;
   }
 
   /**

@@ -31,7 +31,7 @@ import { UnitSprite } from '../components/UnitSprite';
 /**
  * The hero champions, built from a default portrait with no armor applied, plus
  * the alternate weapon forms from their mastery nodes (the Blade's Claymore, the
- * Bow's Longbow).
+ * Bow's Longbow, the Magic's Staff).
  */
 const HERO_LABELS: Record<string, string> = {
   'player-blade': 'Blade Adventurer',
@@ -42,12 +42,13 @@ const HEROES: UnitDef[] = Object.values(PLAYER_CHAMPION_IDS)
   .map((id) => buildPlayerChampionDef(id, HERO_LABELS[id] ?? id, defaultPlayerSprite()))
   .concat(buildPlayerChampionDef('player-blade', 'Blade Adventurer (Claymore)', defaultPlayerSprite(), 'claymore'))
   .concat(buildPlayerChampionDef('player-bow', 'Bow Adventurer (Longbow)', defaultPlayerSprite(), 'longbow'))
+  .concat(buildPlayerChampionDef('player-magic', 'Magic Adventurer (Staff)', defaultPlayerSprite(), 'staff'))
   .filter((u): u is UnitDef => u !== null);
 
 const CHAMPIONS: UnitDef[] = [...ALL_UNITS, ...HEROES];
 
 /** Shapes of the alternate weapon forms, which share their champion's id. */
-const FORM_SHAPES = new Set(['player-claymore', 'player-longbow']);
+const FORM_SHAPES = new Set(['player-claymore', 'player-longbow', 'player-staff']);
 
 /** URL key for a champion's detail page — the id, or the shape for a weapon form (shares its id). */
 export const championKey = (u: UnitDef) => (FORM_SHAPES.has(u.visual.shape) ? u.visual.shape : u.id);

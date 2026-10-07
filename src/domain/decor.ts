@@ -57,6 +57,7 @@ export type PropKind =
   | 'fountain'
   | 'house'
   | 'castle'
+  | 'burningCastle'
   // Capital props: the townscape that surrounds the castle.
   | 'well'
   | 'marketStall'
@@ -132,6 +133,7 @@ export const PROP_PALETTE: PropInfo[] = [
   { kind: 'townhouse', label: 'Townhouse', category: 'capital' },
   { kind: 'house', label: 'House', category: 'capital' },
   { kind: 'castle', label: 'Castle', category: 'capital' },
+  { kind: 'burningCastle', label: 'Burning Castle', category: 'capital' },
 ];
 
 /**
@@ -157,6 +159,12 @@ export const PROP_FOOTPRINTS: Partial<
   // Very large buildings: a 3×2 house and a 3×3 castle (anchor = top-left cell).
   house: [[0, 0], [1, 0], [2, 0], [0, 1], [1, 1], [2, 1]],
   castle: [
+    [0, 0], [1, 0], [2, 0],
+    [0, 1], [1, 1], [2, 1],
+    [0, 2], [1, 2], [2, 2],
+  ],
+  // The sacked castle keeps the castle's footprint.
+  burningCastle: [
     [0, 0], [1, 0], [2, 0],
     [0, 1], [1, 1], [2, 1],
     [0, 2], [1, 2], [2, 2],

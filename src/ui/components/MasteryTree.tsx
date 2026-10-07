@@ -40,6 +40,7 @@ function nodeIcon(up: MasteryUpgradeDef): IconName {
   if (up.unlocksArmor) return 'shield';
   if (up.weaponForm === 'claymore') return 'claymore';
   if (up.weaponForm === 'longbow') return 'longbow';
+  if (up.weaponForm === 'staff') return 'staff';
   if (up.crossSlashEvery) return 'swords';
   if (up.burstShots) return 'volley';
   if (up.greaterOrb) return 'orb';

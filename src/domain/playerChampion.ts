@@ -38,12 +38,12 @@ export const HERO_BASE_MANA = 50;
 
 /**
  * An alternate weapon a mastery node can re-arm a player champion with (the
- * Blade adventurer's `claymore`, the Bow adventurer's `longbow`, each from its
- * `weaponForm` node). The form keeps the champion's id — mastery, ownership and
+ * Blade adventurer's `claymore`, the Bow adventurer's `longbow`, the Magic
+ * adventurer's `staff`, each from its `weaponForm` node). The form keeps the champion's id — mastery, ownership and
  * team slot are untouched — but rebuilds its whole def: attack, stats, in-stage
  * levels, ability and sprite.
  */
-export type HeroWeaponForm = 'claymore' | 'longbow';
+export type HeroWeaponForm = 'claymore' | 'longbow' | 'staff';
 
 /** The proficiency paths whose champion is fully implemented and grantable. */
 const IMPLEMENTED_PATHS: ReadonlySet<Proficiency> = new Set<Proficiency>([
@@ -104,7 +104,9 @@ export function buildPlayerChampionDef(
         ? buildLongbowChampion(id, name, sprite)
         : buildBowChampion(id, name, sprite, volley);
     case 'magic':
-      return buildMagicChampion(id, name, sprite);
+      return form === 'staff'
+        ? buildStaffChampion(id, name, sprite)
+        : buildMagicChampion(id, name, sprite);
     default:
       return null;
   }
@@ -251,13 +253,13 @@ function buildClaymoreChampion(
           name: 'Earthsplitter',
           description:
             'Slams the claymore down causing a fissure that runs out to 2× your range, striking ' +
-            'every enemy along it for 2.25× damage and knocking them back.',
+            'every enemy along it for 2× damage and knocking them back.',
           damageMult: 2.25,
           reachMult: 2,
           aoeWidth: 16,
-          knockback: 28,
-          cooldown: 16,
-          manaCost: 35,
+          knockback: 64,
+          cooldown: 14,
+          manaCost: 30,
           icon: '💥',
           image: '/earth_splitter.png',
         },
@@ -339,7 +341,7 @@ function buildBowChampion(
             'Enter a rapid-fire stance, increasing attack speed by 2.5x for 6 seconds.',
           speedMult: 2.5,
           duration: 6,
-          cooldown: 15,
+          cooldown: 21,
           manaCost: 25,
           icon: '🏹',
           image: '/quickdraw.png',
@@ -482,7 +484,7 @@ function buildMagicChampion(
         // auto-level into this tier.
         name: 'Mana Ray',
         description:
-          'Unlocks Mana Ray - channels a continuous beam of raw mana, searing every foe that walks through it.',
+          'Unlocks Mana Ray.',
         cost: 125,
         ability: {
           id: 'mana-ray',
@@ -494,10 +496,87 @@ function buildMagicChampion(
           duration: 3,
           aoeWidth: 18,
           tickInterval: 0.4,
-          cooldown: 14,
+          cooldown: 18,
           manaCost: 40,
           icon: '🔆',
           image: '/mana_ray.png',
+        },
+      },
+    ],
+    visual,
+  };
+}
+
+/**
+ * The Magic adventurer re-armed with a staff (the `staff` mastery node). Same id,
+ * mastery and team slot as the bare-handed caster, but more refined magic: no
+ * blast — each cast, after a brief raise of the staff, looses a volley of three
+ * hardened mana bolts (`burst`, all at once) that arc wide and home in, each on a
+ * different foe in range when there are enough (see the engine's `fireStaff`).
+ * Its ability is its own: the Mana Storm, a channelled rain of bolts.
+ */
+function buildStaffChampion(
+  id: string,
+  name: string,
+  sprite: PlayerSpriteConfig,
+): UnitDef {
+  const visual: UnitVisual = {
+    // The bolts and their trails take the player's own colour.
+    color: sprite.outfitColor,
+    icon: '🪄',
+    shape: 'player-staff',
+    playerConfig: sprite,
+  };
+  return {
+    id,
+    name,
+    description:
+      'A staff of refined magic, loosing three hardened mana bolts that seek out separate foes.',
+    rarity: 'hero',
+    // Per-bolt damage; every cast looses three.
+    damage: 9,
+    attackSpeed: 0.7,
+    range: 128,
+    targeting: 'first',
+    aoe: 'single',
+    attackType: 'ranged',
+    damageType: 'magic',
+    burst: 3,
+    cost: 0,
+    deployLimit: 1,
+    maxMana: HERO_BASE_MANA,
+    upgrades: [
+      {
+        name: 'Arcane Tempo',
+        description: 'Channel your magic with greater speed, increasing the rate at which you unleash your spells.',
+        cost: 40,
+        attackSpeed: 0.15,
+      },
+      {
+        name: 'Arcane Force',
+        description: 'Infuse your spells with greater arcane power, increasing the damage of every mana bolt.',
+        cost: 65,
+        damage: 5,
+      },
+      {
+        // Tier 3 grants no stat boost — it unlocks the Mana Storm *ability*, a
+        // channelled barrage. `cost` is read as the EXP threshold the hero pools
+        // to auto-level into this tier.
+        name: 'Mana Storm',
+        description:
+          'Unlocks Arcane Storm.',
+        cost: 125,
+        ability: {
+          id: 'mana-storm',
+          name: 'Arcane Storm',
+          description:
+            'Channel your mana to its absolute limit, firing mana bolts at 2.5x your attack speed before they rain down on your enemies dealing 1x damage.',
+          damageMult: 1,
+          speedMult: 2.5,
+          duration: 5,
+          cooldown: 16,
+          manaCost: 40,
+          icon: '🌠',
         },
       },
     ],

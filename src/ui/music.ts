@@ -6,7 +6,8 @@
  * so the Settings sliders and mute apply to it.
  *
  * Tracks: `menu` (home / menus / journal — a calm D-minor harp-and-flute piece)
- * and one battle theme per story chapter (`SECTION_MUSIC`). A chapter without a
+ * and one battle theme per story chapter (`SECTION_MUSIC`: `castle`, and
+ * `capital` — a C-minor chase after the king's fall). A chapter without a
  * theme of its own yet borrows the castle's.
  *
  * Usage: `setMusicTrack(id)` declares what should be playing (switching
@@ -19,11 +20,12 @@
 import type { SectionId } from '../domain/levels';
 import { audioBus } from './audioBus';
 
-export type MusicTrackId = 'menu' | 'castle';
+export type MusicTrackId = 'menu' | 'castle' | 'capital';
 
 /** Battle theme per story chapter. Unlisted chapters fall back to the castle's. */
 const SECTION_MUSIC: Partial<Record<SectionId, MusicTrackId>> = {
   castle: 'castle',
+  capital: 'capital',
 };
 
 export function battleTrackFor(section: SectionId): MusicTrackId {
@@ -504,7 +506,124 @@ const CASTLE: TrackDef = {
   },
 };
 
-const TRACKS: Record<MusicTrackId, TrackDef> = { menu: MENU, castle: CASTLE };
+// --- Capital battle: "Hunted by the Crown" — the king has fallen and the ----
+// --- royal army gives chase. Restless C minor: a sixteenth-note string -------
+// --- ostinato, the city's alarm bells, the pursuers' snare cadence and low ---
+// --- fanfare closing in, and the rebels' horn (the castle call, reborn). -----
+
+const CAPITAL_CHORDS: Chord[] = [
+  { bass: 36, tones: [55, 60, 63] }, // Cm
+  { bass: 36, tones: [55, 60, 63] }, // Cm
+  { bass: 32, tones: [56, 60, 63] }, // Ab
+  { bass: 34, tones: [58, 62, 65] }, // Bb
+  { bass: 36, tones: [55, 60, 63] }, // Cm
+  { bass: 37, tones: [56, 61, 65] }, // Db — the Neapolitan lurch
+  { bass: 41, tones: [56, 60, 65] }, // Fm
+  { bass: 43, tones: [55, 59, 62] }, // G
+];
+
+/** The royal army's fanfare: low, clipped and ominous, always just behind. */
+const ROYAL_FANFARE: Note[][] = [
+  [[48, 0.5], [48, 0.25], [48, 0.25], [55, 1], [null, 0.5], [55, 0.5], [51, 1]],
+  [[60, 1.5], [58, 0.5], [55, 1], [51, 1]],
+  [[48, 0.5], [48, 0.25], [48, 0.25], [56, 1], [null, 0.5], [56, 0.5], [60, 1]],
+  [[58, 1.5], [56, 0.5], [55, 1], [50, 1]],
+  [[48, 0.5], [48, 0.25], [48, 0.25], [55, 1], [null, 0.5], [55, 0.5], [51, 1]],
+  [[49, 0.5], [49, 0.25], [49, 0.25], [56, 1], [null, 0.5], [56, 0.5], [61, 1]],
+  [[60, 1.5], [56, 0.5], [53, 1], [56, 1]],
+  [[55, 1], [59, 1], [62, 1], [59, 0.5], [55, 0.5]],
+];
+
+/** The rebels' horn: opens on the castle's call (now in C minor), then runs. */
+const REBEL_CALL: Note[][] = [
+  [[60, 1.5], [67, 0.5], [67, 1], [70, 0.5], [72, 0.5]],
+  [[75, 1.5], [74, 0.5], [72, 1], [67, 1]],
+  [[68, 1], [72, 1], [75, 1.5], [74, 0.5]],
+  [[74, 2], [70, 1], [65, 1]],
+  [[60, 1.5], [67, 0.5], [67, 1], [72, 0.5], [75, 0.5]],
+  [[77, 1.5], [75, 0.5], [73, 1], [72, 1]],
+  [[72, 1], [68, 1], [65, 1], [68, 1]],
+  [[67, 2], [71, 1], [74, 0.5], [71, 0.5]],
+];
+
+/** The pursuers' marching snare, one velocity per sixteenth (0 = rest). */
+const PURSUIT_CADENCE = [1, 0, 0.5, 0.6, 0, 0.5, 1, 0, 0.7, 0, 0.5, 0.6, 1, 0.5, 0.6, 0.5];
+/** War-drum footfalls per sixteenth: a 3-3-2 stumble, then flat-out running. */
+const PURSUIT_DRUMS = [0.2, 0, 0, 0.12, 0, 0, 0.14, 0, 0.18, 0, 0.11, 0, 0.14, 0, 0.11, 0.08];
+/** A harmonic-minor string run up to the tonic, over the final bar's last half. */
+const ESCAPE_RUN = [59, 60, 62, 63, 65, 67, 68, 71];
+
+const CAPITAL: TrackDef = {
+  bpm: 150,
+  beatsPerBar: 4,
+  reverb: 0.26,
+  level: 0.78,
+  bar(c, bar, t, beat, intensity) {
+    const i = bar % 8;
+    const pass = Math.floor(bar / 8) % 4;
+    const ch = CAPITAL_CHORDS[i];
+    const hot = intensity >= 0.5;
+    const drive = 0.5 + 0.5 * intensity;
+    const fifth = ch.bass + 7;
+    const step = beat / 4;
+
+    // Restless sixteenths in the low strings: root, root, fifth, root a beat.
+    const root = ch.bass + 12;
+    for (let s = 0; s < 16; s++) {
+      const m = s % 4 === 2 ? root + 7 : root;
+      stringHit(c, t + s * step, m, step * 0.8, (s % 4 === 0 ? 0.055 : 0.032) * drive);
+    }
+    pad(c, t, ch.tones.map((m) => m - 12), beat * 4, 0.028 + 0.02 * intensity, 650);
+
+    // The city's alarm bells toll for the fallen king.
+    if (i % 2 === 0) bell(c, t, i % 4 === 0 ? 72 : 79, hot ? 0.03 : 0.04);
+
+    if (hot) {
+      // Flat-out chase: running war drums, the pursuers' cadence at full cry.
+      PURSUIT_DRUMS.forEach((v, s) => {
+        if (v) warDrum(c, t + s * step, v);
+      });
+      PURSUIT_CADENCE.forEach((v, s) => {
+        if (v) snare(c, t + s * step, v * 0.045);
+      });
+      timpani(c, t, ch.bass + 12, 0.15);
+      timpani(c, t + 2.5 * beat, fifth, 0.1);
+      timpani(c, t + 3 * beat, ch.bass + 12, 0.12);
+      if (i === 0) crash(c, t, 0.055);
+
+      const fanfare = pass === 0 || pass === 2 || pass === 3;
+      const rebels = pass === 1 || pass === 3;
+      if (fanfare) {
+        // On the last pass the army's fanfare runs under the rebels' horn.
+        const vel = pass === 3 ? 0.045 : 0.065;
+        playLine(ROYAL_FANFARE[i], t, beat, (at, m, dur) => horn(c, at, m, dur, vel));
+      }
+      if (rebels) playLine(REBEL_CALL[i], t, beat, (at, m, dur) => horn(c, at, m, dur, 0.065));
+      // Offbeat brass stabs push everything forward.
+      brass(c, t + 0.5 * beat, ch.tones, beat * 0.35, 0.05);
+      brass(c, t + 2.5 * beat, ch.tones, beat * 0.35, 0.045);
+      if (!rebels) brass(c, t + 3.5 * beat, ch.tones.map((m) => m + 12), beat * 0.3, 0.04);
+
+      if (i === 7) ESCAPE_RUN.forEach((m, k) => stringHit(c, t + (8 + k) * step, m, step * 0.9, 0.04 + k * 0.004));
+    } else {
+      // Build phase: a heartbeat on the timpani, and somewhere behind, the
+      // army's drums drawing nearer over the phrase.
+      timpani(c, t, ch.bass + 12, 0.12);
+      timpani(c, t + 0.5 * beat, ch.bass + 12, 0.07);
+      timpani(c, t + 2 * beat, fifth, 0.09);
+      const near = 0.006 + 0.0025 * i;
+      PURSUIT_CADENCE.forEach((v, s) => {
+        if (v) snare(c, t + s * step, v * near);
+      });
+      if (i === 0 || i === 4) {
+        // Their fanfare, still distant.
+        playLine(ROYAL_FANFARE[i].slice(0, 4), t, beat, (at, m, dur) => horn(c, at, m, dur, 0.03));
+      }
+    }
+  },
+};
+
+const TRACKS: Record<MusicTrackId, TrackDef> = { menu: MENU, castle: CASTLE, capital: CAPITAL };
 
 // ---------------------------------------------------------------------------
 // Sequencer

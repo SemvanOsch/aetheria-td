@@ -66,6 +66,10 @@ export function ChampionDetail({
   }
   if (unit.aoe === 'cone' && unit.visual.shape === 'player-claymore')
     notes.push(`Each heavy swing cleaves a ${coneAngleDeg(unit)}° arc, striking every enemy in front at once.`);
+  if (unit.visual.shape === 'player-staff')
+    notes.push(
+      `Each cast looses ${unit.burst ?? 3} mana bolts that arc wide and home in, each on a different enemy in range when there are enough; spare bolts strike again.`,
+    );
   if (unit.visual.shape === 'player-longbow')
     notes.push('Each shot is a slow, full draw that looses one heavy arrow from an enormous range.');
   if (thrown) notes.push(`Every ${thrown.every}th attack is thrown for ${thrown.rangeMult}× range.`);
@@ -148,7 +152,7 @@ export function ChampionDetail({
             ))}
 
             <div className="cd-label cd-levels-head">
-              Levels <span>{isHero ? 'earned with EXP each wave · reset every stage' : 'bought with gold · reset every stage'}</span>
+              Levels
             </div>
             <div className="cd-levels">
               {unit.upgrades.map((u, i) => {

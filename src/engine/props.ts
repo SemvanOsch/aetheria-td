@@ -1564,6 +1564,350 @@ const castle: PropArt = {
   },
 };
 
+// --- Burning castle: the same keep, sacked. 3×3. ----------------------------
+// The right tower's top has collapsed into a fire-filled shell, the left
+// tower's roof is burnt through, the keep's upper window is blown out, the
+// banners are charred rags and the gate glows from the blaze behind it.
+// Stone is dulled by smoke and every opening carries a soot streak.
+const BURN_HOT = '#ffb347';
+const BURN_CORE = '#ff5a1e';
+const burningCastle: PropArt = {
+  origin: [T, T],
+  ink: '#1e181c',
+  shadow: (g) => {
+    floorShadow(g, 8, 62, 84, 16, 0.6);
+    floorShadow(g, 54, 64, 26, 7, 0.5);
+  },
+  body: (g) => {
+    const st = '#80838d';
+    const poly = (pts: [number, number][]) => {
+      g.beginPath();
+      g.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
+      g.closePath();
+    };
+    /** Masonry clipped to an arbitrary (jagged) outline. */
+    const wall = (pts: [number, number][], base: string, seed: number) => {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [x, y] of pts) {
+        x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+      }
+      g.save();
+      poly(pts);
+      g.clip();
+      masonry(g, x0, y0, x1 - x0, y1 - y0, base, 6, seed);
+      g.restore();
+    };
+    /** A soot plume licking up the wall from an opening. */
+    const soot = (cx: number, y: number, w: number, h: number, a = 0.6) => {
+      g.fillStyle = vgrad(g, y - h, y, [[0, 'rgba(14,10,10,0)'], [0.55, `rgba(14,10,10,${a * 0.6})`], [1, `rgba(14,10,10,${a})`]]);
+      g.beginPath();
+      g.moveTo(cx - w / 2, y);
+      g.quadraticCurveTo(cx - w * 0.7, y - h * 0.5, cx - w * 0.15, y - h);
+      g.quadraticCurveTo(cx + w * 0.1, y - h * 0.7, cx + w * 0.25, y - h * 0.95);
+      g.quadraticCurveTo(cx + w * 0.75, y - h * 0.45, cx + w / 2, y);
+      g.closePath();
+      g.fill();
+    };
+    /** Hairline crack: a zigzag of dark mortar with a lit lower lip. */
+    const crack = (pts: [number, number][]) => {
+      for (const [col, w, dy] of [['rgba(10,8,12,0.75)', 1.1, 0], ['rgba(255,235,210,0.18)', 0.6, 0.9]] as const) {
+        g.strokeStyle = col;
+        g.lineWidth = w;
+        g.beginPath();
+        g.moveTo(pts[0][0], pts[0][1] + dy);
+        for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1] + dy);
+        g.stroke();
+      }
+    };
+    /** An opening glowing with the fire inside (hot bottom, ember-red rim). */
+    const fireHole = (pts: [number, number][], cx: number, cy: number, r: number) => {
+      g.fillStyle = '#120a0a';
+      poly(pts);
+      g.fill();
+      const gr = g.createRadialGradient(cx, cy + r * 0.4, 0.5, cx, cy, r);
+      gr.addColorStop(0, '#fff0b8');
+      gr.addColorStop(0.3, BURN_HOT);
+      gr.addColorStop(0.7, BURN_CORE);
+      gr.addColorStop(1, 'rgba(90,20,10,0.9)');
+      g.save();
+      poly(pts);
+      g.clip();
+      g.fillStyle = gr;
+      g.fillRect(cx - r * 1.5, cy - r * 1.5, r * 3, r * 3);
+      g.restore();
+      g.strokeStyle = '#2a1410';
+      g.lineWidth = 1.2;
+      poly(pts);
+      g.stroke();
+    };
+    /** A charred beam end poking out of the ruin. */
+    const beam = (x0: number, y0: number, x1: number, y1: number, w: number) => {
+      g.strokeStyle = '#1a1210';
+      g.lineWidth = w;
+      g.lineCap = 'butt';
+      g.beginPath();
+      g.moveTo(x0, y0);
+      g.lineTo(x1, y1);
+      g.stroke();
+      // Smouldering tip.
+      g.fillStyle = BURN_CORE;
+      g.beginPath();
+      g.arc(x1, y1, w * 0.45, 0, Math.PI * 2);
+      g.fill();
+    };
+    const cren = (left: number, top: number, width: number, n: number, mh: number, col: string, skip: number[] = [], chip: number[] = []) => {
+      const step = width / (n * 2 - 1);
+      for (let i = 0; i < n; i++) {
+        if (skip.includes(i)) continue;
+        const x = left + i * step * 2;
+        const h = chip.includes(i) ? mh * 0.45 : mh;
+        const y = top + (mh - h);
+        g.fillStyle = vgrad(g, y, top + mh, [[0, shade(col, 0.15)], [1, shade(col, -0.2)]]);
+        if (chip.includes(i)) {
+          poly([[x, top + mh], [x, y], [x + step * 0.4, y - 2], [x + step, y + 1.5], [x + step, top + mh]]);
+          g.fill();
+        } else {
+          g.fillRect(x, y, step, h);
+          g.fillStyle = 'rgba(255,255,255,0.12)';
+          g.fillRect(x, y, step, 1);
+        }
+      }
+    };
+
+    // Curtain wall, its walk broken where the right tower fell.
+    masonry(g, -58, -6, 116, 66, st, 6, 201);
+    g.fillStyle = 'rgba(0,0,0,0.22)';
+    g.fillRect(-58, -6, 116, 66);
+    cren(-58, -15, 116, 9, 9, st, [6, 7], [5]);
+
+    // Left tower: standing, but its slate roof is burnt through.
+    const lx = -60;
+    masonry(g, lx, -40, 26, 100, shade(st, -0.02), 6, 207 + lx);
+    g.fillStyle = hgrad(g, lx, lx + 26, [[0, 'rgba(255,240,220,0.1)'], [1, 'rgba(10,10,30,0.38)']]);
+    g.fillRect(lx, -40, 26, 100);
+    g.fillStyle = shade(st, -0.3);
+    g.fillRect(lx - 2, -44, 30, 5);
+    shingleRoof(g, [[lx - 4, -43], [lx + 13, -76], [lx + 30, -43]], '#2e3442', 4, 9 + lx);
+    // Scorch creeping over the slates from the hole.
+    g.fillStyle = vgrad(g, -76, -43, [[0, 'rgba(12,8,8,0.15)'], [1, 'rgba(12,8,8,0.55)']]);
+    poly([[lx - 4, -43], [lx + 13, -76], [lx + 30, -43]]);
+    g.fill();
+    fireHole([[lx + 14, -45], [lx + 12, -52], [lx + 16, -58], [lx + 19, -55], [lx + 22, -61], [lx + 26, -50], [lx + 27, -45]], lx + 20, -49, 9);
+    // Exposed rafters across the hole.
+    g.strokeStyle = '#1a1210';
+    g.lineWidth = 1.6;
+    g.beginPath();
+    g.moveTo(lx + 13, -66);
+    g.lineTo(lx + 25, -46);
+    g.moveTo(lx + 14, -50);
+    g.lineTo(lx + 28, -52);
+    g.stroke();
+    // Charred pennant: a bent pole and a rag.
+    g.strokeStyle = '#6a5a3a';
+    g.lineWidth = 1.2;
+    g.beginPath();
+    g.moveTo(lx + 13, -76);
+    g.lineTo(lx + 13, -82);
+    g.lineTo(lx + 9, -87);
+    g.stroke();
+    g.fillStyle = '#3a1418';
+    poly([[lx + 9, -87], [lx + 14, -86], [lx + 12, -84], [lx + 16, -82.5], [lx + 10.5, -82]]);
+    g.fill();
+    // Dark arrow slit, soot above it.
+    soot(lx + 13, -24, 10, 16, 0.45);
+    g.fillStyle = '#120c0e';
+    g.fillRect(lx + 11, -28, 4, 12);
+    g.fillStyle = BURN_CORE;
+    g.fillRect(lx + 12, -21, 2, 3);
+    crack([[lx + 4, -34], [lx + 8, -26], [lx + 6, -18], [lx + 10, -8], [lx + 8, 2]]);
+
+    // Right tower: its top has collapsed — a broken shell with the back wall
+    // standing higher than the front, a fire burning in the hollow between.
+    const rx = 34;
+    wall([[rx, 60], [rx, -24], [rx + 4, -30], [rx + 8, -27], [rx + 12, -38], [rx + 17, -34], [rx + 21, -42], [rx + 26, -36], [rx + 26, 60]], shade(st, -0.32), 215);
+    g.fillStyle = vgrad(g, -42, -8, [[0, 'rgba(255,120,40,0.15)'], [1, 'rgba(255,150,60,0.55)']]);
+    poly([[rx, -24], [rx + 4, -30], [rx + 8, -27], [rx + 12, -38], [rx + 17, -34], [rx + 21, -42], [rx + 26, -36], [rx + 26, -8], [rx, -8]]);
+    g.fill();
+    beam(rx + 5, -12, rx - 3, -32, 2.4);
+    beam(rx + 18, -12, rx + 28, -29, 2);
+    const front: [number, number][] = [[rx, 60], [rx, -12], [rx + 3, -16], [rx + 6, -13], [rx + 10, -21], [rx + 14, -17], [rx + 17, -24], [rx + 20, -19], [rx + 23, -22], [rx + 26, -15], [rx + 26, 60]];
+    wall(front, shade(st, -0.02), 207 + rx);
+    g.save();
+    poly(front);
+    g.clip();
+    g.fillStyle = hgrad(g, rx, rx + 26, [[0, 'rgba(255,240,220,0.1)'], [1, 'rgba(10,10,30,0.38)']]);
+    g.fillRect(rx, -30, 26, 90);
+    // Fire-glow on the broken lip, soot down from it.
+    g.fillStyle = vgrad(g, -24, -2, [[0, 'rgba(255,130,50,0.55)'], [0.35, 'rgba(20,12,10,0.6)'], [1, 'rgba(20,12,10,0)']]);
+    g.fillRect(rx, -26, 26, 26);
+    g.restore();
+    // Arrow slit blown wide.
+    fireHole([[rx + 10, -2], [rx + 9.5, 6], [rx + 11, 12], [rx + 16, 11], [rx + 16.5, 3], [rx + 15, -3]], rx + 13, 6, 7);
+    crack([[rx + 20, -18], [rx + 18, -8], [rx + 22, 2], [rx + 19, 14], [rx + 23, 26]]);
+    crack([[rx + 3, 18], [rx + 7, 26], [rx + 5, 34]]);
+
+    // Keep: chipped crenels, upper window blown out into a burning breach.
+    masonry(g, -26, -50, 52, 110, shade(st, 0.04), 6, 203);
+    g.fillStyle = hgrad(g, -26, 26, [[0, 'rgba(255,240,220,0.08)'], [0.5, 'rgba(0,0,0,0)'], [1, 'rgba(10,10,30,0.34)']]);
+    g.fillRect(-26, -50, 52, 110);
+    cren(-28, -60, 56, 4, 10, st, [2], [1]);
+    soot(0, -38, 30, 26, 0.75);
+    soot(0, -12, 18, 14, 0.6);
+    fireHole([[-8, -22], [-9, -31], [-6, -36], [-3, -41], [2, -39], [4, -42], [8, -35], [9, -27], [7, -22]], 0, -29, 12);
+    beam(-6, -24, -12, -30, 1.6);
+    // Lower window: glass gone, mullion snapped, fire behind.
+    fireHole([[-5, -1], [-5, -8], [-3.5, -11.5], [0, -13], [3.5, -11.5], [5, -8], [5, -1]], 0, -5, 8);
+    g.strokeStyle = '#2a2420';
+    g.lineWidth = 1.1;
+    g.beginPath();
+    g.moveTo(0, -1);
+    g.lineTo(0, -6);
+    g.moveTo(-5, -6);
+    g.lineTo(-1.5, -6.5);
+    g.stroke();
+    g.fillStyle = shade('#2a2420', 0.25);
+    g.fillRect(-7, -1, 14, 1.6);
+    crack([[-22, -46], [-18, -38], [-20, -30], [-15, -20]]);
+    crack([[14, -48], [12, -40], [17, -33], [15, -25], [19, -16]]);
+    // Keep banner burnt to tatters on a snapped pole.
+    g.strokeStyle = '#6a5a3a';
+    g.lineWidth = 1.4;
+    g.beginPath();
+    g.moveTo(0, -60);
+    g.lineTo(0, -72);
+    g.lineTo(5, -77);
+    g.stroke();
+    g.fillStyle = '#4a1820';
+    poly([[0, -71], [6, -70.5], [4, -68], [9, -66], [3, -65], [5, -62.5], [0, -63]]);
+    g.fill();
+    g.fillStyle = BURN_CORE;
+    g.fillRect(8, -66.5, 1.2, 1);
+
+    // Gatehouse: the arch scorched, the blaze roaring beyond it, the
+    // portcullis half-raised and buckled.
+    g.fillStyle = shade(st, 0.08);
+    g.beginPath();
+    g.moveTo(-20, 60);
+    g.lineTo(-20, 18);
+    g.arc(0, 18, 20, Math.PI, 0);
+    g.lineTo(20, 60);
+    g.closePath();
+    g.fill();
+    soot(0, 6, 34, 22, 0.7);
+    const gr = g.createRadialGradient(0, 58, 2, 0, 44, 30);
+    gr.addColorStop(0, '#ffe7a0');
+    gr.addColorStop(0.3, BURN_HOT);
+    gr.addColorStop(0.65, '#c2381a');
+    gr.addColorStop(1, '#1a0a0a');
+    g.fillStyle = gr;
+    g.beginPath();
+    g.moveTo(-16, 60);
+    g.lineTo(-16, 18);
+    g.arc(0, 18, 16, Math.PI, 0);
+    g.lineTo(16, 60);
+    g.closePath();
+    g.fill();
+    g.save();
+    g.beginPath();
+    g.moveTo(-16, 60);
+    g.lineTo(-16, 18);
+    g.arc(0, 18, 16, Math.PI, 0);
+    g.lineTo(16, 60);
+    g.closePath();
+    g.clip();
+    g.strokeStyle = '#2a2428';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(-10, 2);
+    g.lineTo(-10, 26);
+    g.moveTo(-3.3, 2);
+    g.lineTo(-3.3, 29);
+    g.moveTo(3.3, 2);
+    g.quadraticCurveTo(4, 18, 9, 30);
+    g.moveTo(10, 2);
+    g.lineTo(10, 14);
+    g.moveTo(-15, 14);
+    g.lineTo(15, 14);
+    g.moveTo(-15, 24);
+    g.lineTo(5, 25);
+    g.stroke();
+    g.restore();
+    // Torch sconces knocked askew, cold.
+    for (const [tx, tilt] of [[-24, -0.5], [24, 0.35]] as const) {
+      g.save();
+      g.translate(tx, 42);
+      g.rotate(tilt);
+      g.strokeStyle = IRON;
+      g.lineWidth = 1.6;
+      g.beginPath();
+      g.moveTo(0, 0);
+      g.lineTo(0, -6);
+      g.stroke();
+      ironCup(g, 0, -6, 3.2);
+      g.restore();
+    }
+
+    // Rubble from the fallen tower top, spilling past the wall foot.
+    const r = rng(431);
+    for (let i = 0; i < 16; i++) {
+      const bx = rx - 6 + r() * 42;
+      const by = 52 + r() * 10 - Math.max(0, 1 - Math.abs(bx - (rx + 13)) / 24) * 8;
+      const bw = 4 + r() * 6;
+      const bh = 3 + r() * 4;
+      const tone = shade(st, (r() - 0.5) * 0.25 - 0.05);
+      g.save();
+      g.translate(bx, by);
+      g.rotate((r() - 0.5) * 0.9);
+      g.fillStyle = tone;
+      rr(g, -bw / 2, -bh / 2, bw, bh, 1);
+      g.fill();
+      g.fillStyle = withAlpha(shade(tone, 0.35), 0.6);
+      g.fillRect(-bw / 2 + 0.6, -bh / 2 + 0.4, bw - 1.2, 0.8);
+      g.restore();
+    }
+    beam(rx - 2, 60, rx + 14, 50, 2.2);
+
+    // Smoke has dulled the whole pile: darken toward the burning upper storeys.
+    g.save();
+    g.globalCompositeOperation = 'source-atop';
+    g.fillStyle = vgrad(g, -90, 64, [[0, 'rgba(18,12,12,0.4)'], [0.55, 'rgba(18,12,12,0.12)'], [1, 'rgba(60,24,12,0.18)']]);
+    g.fillRect(-72, -92, 150, 160);
+    g.restore();
+  },
+  live: (g, t) => {
+    // Pulsing fire-glow through every opening.
+    const pulse = 0.75 + 0.25 * Math.sin(t * 6.3) * Math.sin(t * 3.7 + 1);
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    for (const [x, y, rad] of [[0, -30, 16], [0, 42, 22], [47, -18, 20], [-40, -50, 12], [47, 5, 9]] as const) {
+      const gr = g.createRadialGradient(x, y, 0, x, y, rad);
+      gr.addColorStop(0, `rgba(255,150,60,${0.32 * pulse})`);
+      gr.addColorStop(1, 'rgba(255,90,30,0)');
+      g.fillStyle = gr;
+      g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+    }
+    g.restore();
+    // The blaze in the fallen tower's shell.
+    flame(g, 39, -16, 6.5, t, 0.3);
+    flame(g, 47, -20, 8.5, t, 1.7);
+    flame(g, 55, -15, 6, t, 4.1);
+    // Through the left tower's roof.
+    flame(g, -40, -50, 4.5, t, 2.9);
+    flame(g, -36, -48, 3.2, t, 5.2);
+    // Out of the keep's breach, licking up the wall.
+    flame(g, -2, -24, 5.5, t, 0.9);
+    flame(g, 3, -25, 4, t, 3.4);
+    // Behind the gate.
+    flame(g, -8, 60, 5.5, t, 2.2);
+    flame(g, 2, 60, 7, t, 4.6);
+    flame(g, 10, 60, 4.5, t, 1.1);
+    // Smouldering rubble.
+    flame(g, 30, 58, 2.6, t, 3.8);
+    flame(g, 58, 60, 2.2, t, 0.5);
+  },
+};
+
 // --- Well: stone ring, shingled hood, winch and bucket. ---------------------
 const well: PropArt = {
   origin: [0, 0],
@@ -2048,6 +2392,7 @@ const PROP_ART: Record<Exclude<PropKind, 'battlements'>, PropArt> = {
   fountain,
   house,
   castle,
+  burningCastle,
   well,
   marketStall,
   lamppost,
@@ -2308,6 +2653,30 @@ export const PROP_META: Record<PropKind, PropMeta> = {
     flames: [
       { dx: T - 24, dy: T + 30 },
       { dx: T + 24, dy: T + 30 },
+    ],
+  },
+  // Bounds hold the static body; the live flames rise past them on purpose.
+  burningCastle: {
+    layer: 'standing',
+    bounds: [-16, -42, T * 2 + 24, 112],
+    base: 108,
+    occludes: true,
+    lights: [
+      { dx: T + 47, dy: T - 22, radius: 170, family: 'fire', intensity: 0.95, flicker: true, glow: 0.8 },
+      { dx: T - 40, dy: T - 52, radius: 110, family: 'fire', intensity: 0.65, flicker: true, glow: 0.6 },
+      { dx: T, dy: T - 28, radius: 110, family: 'fire', intensity: 0.7, flicker: true, glow: 0.6 },
+      { dx: T, dy: T + 50, radius: 140, family: 'fire', intensity: 0.85, flicker: true, glow: 0.6 },
+    ],
+    flames: [
+      { dx: T + 47, dy: T - 30, strength: 3 },
+      { dx: T - 39, dy: T - 56, strength: 1.4 },
+      { dx: T, dy: T - 32, strength: 1.4 },
+      { dx: T + 2, dy: T + 50, strength: 1.8 },
+      { dx: T + 30, dy: T + 54, strength: 0.4 },
+    ],
+    chimneys: [
+      { dx: T + 46, dy: T - 40 },
+      { dx: T - 39, dy: T - 62 },
     ],
   },
   well: { layer: 'standing', bounds: [-27, -48, 27, 24], base: 20, occludes: true },

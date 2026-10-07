@@ -21,7 +21,7 @@ import {
   addEnemyKills,
   equipArmor as equipArmorTx,
   equippedArmor,
-  isArmorUnlocked,
+  isArmorActive,
   playerChampionForms,
   playerChampionVolleys,
   salvageArmor as salvageArmorTx,
@@ -63,9 +63,12 @@ import {
 } from './summon';
 import { GameContext, type GameStore } from './gameContext';
 
-/** The armor whose bonuses apply: none until the armor node is learned. */
+/**
+ * The armor whose bonuses apply: none until the armor node is learned, nor while
+ * the hero's mastery is switched off.
+ */
 function wornArmor(state: GameState) {
-  return isArmorUnlocked(state) ? equippedArmor(state) : [];
+  return isArmorActive(state) ? equippedArmor(state) : [];
 }
 
 export function GameProvider({ children }: { children: ReactNode }) {

@@ -33,6 +33,7 @@ const WEAPON_ICON: Record<PlayerWeapon, IconName> = {
   bow: 'bow',
   longbow: 'longbow',
   magic: 'staff',
+  staff: 'staff',
 };
 
 /**

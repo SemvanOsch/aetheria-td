@@ -104,6 +104,7 @@ export function attackAnimTime(shape: string): number {
   if (shape === 'player-bow') return 0.24;
   if (shape === 'player-longbow') return 0.5;
   if (shape === 'player-magic') return 0.35;
+  if (shape === 'player-staff') return 0.42;
   return 0.18;
 }
 
@@ -143,6 +144,22 @@ export const GREATER_ORB_APEX = 0.38;
 export const GREATER_ORB_THROW_TIME = 0.62;
 export const GREATER_ORB_LAND = 0.55;
 export const GREATER_ORB_JUMP = 10;
+
+/**
+ * Mana Storm (the Arcane Staff's ability) stance timing, in seconds: the staff
+ * is hoisted overhead over `MANA_STORM_RAISE` (the first bolt looses as it gets
+ * there) and lowered again over the channel's last `MANA_STORM_LOWER`. Shared by
+ * the engine's firing and the renderer's pose (`manaStormStance`).
+ */
+export const MANA_STORM_RAISE = 0.22;
+export const MANA_STORM_LOWER = 0.25;
+
+/** How far the Mana Storm stance is held (0 at rest → 1 staff overhead) for a tower. */
+export function manaStormStance(t: Tower): number {
+  if (!t.storm) return 0;
+  const k = Math.min(1, (t.storm.duration - t.storm.timer) / MANA_STORM_RAISE, t.storm.timer / MANA_STORM_LOWER);
+  return Math.max(0, k);
+}
 
 /** Seconds a champion's signature-move animation (`Tower.specialAnim`) runs. */
 export function specialAnimTime(shape: string): number {
@@ -401,6 +418,15 @@ export interface Tower {
     knockback: number;
   } | null;
   /**
+   * A channelling Mana Storm (the Arcane Staff's ability): the staff held high
+   * overhead, it looses a steady stream of mana bolts skyward that rain down on
+   * random foes in range. `timer` counts down from `duration`; `next` is the
+   * countdown to the next bolt and `every` the current gap between bolts (the
+   * renderer flashes the crystal on each). No normal attacks while it runs. null
+   * when not channelling.
+   */
+  storm: { timer: number; duration: number; next: number; every: number } | null;
+  /**
    * Player-activated ability this tower has unlocked (the Blade's Cyclone Slash),
    * or null. Set from the unit's upgrade tiers (see `effectiveAbility`) on deploy
    * and refolded on every tier bump, so a hero auto-levelling into the ability's
@@ -591,10 +617,27 @@ export interface Projectile {
    * for an ordinary shot.
    */
   pierce?: { dir: Vec2; travelLeft: number; hit: number[] };
+  /**
+   * A seeking mana bolt (the Magic adventurer's Staff): it flies along its own
+   * heading (`dir`, a unit vector) instead of straight at the target, launched
+   * out wide and turning ever harder toward the foe as it ages (`age`, seconds),
+   * accelerating as it goes — so it arcs out before homing in. `delay` holds it
+   * unseen at the crystal for that many seconds first, so a volley's bolts fly
+   * out one after another. Undefined for an ordinary shot.
+   */
+  seek?: { dir: Vec2; age: number; delay: number };
+  /**
+   * A raining mana bolt (the Staff's Mana Storm): it flies a high arc over `time`
+   * seconds — straight up from `from` to `lift` px above the higher of its two
+   * ends, nudged sideways by `spread`, then straight down onto its foe (a cubic
+   * curve whose far end follows the target). `age` is the seconds flown and `dir`
+   * the current heading (for drawing). Undefined for an ordinary shot.
+   */
+  rain?: { from: Vec2; lift: number; spread: number; age: number; time: number; dir: Vec2 };
 }
 
 /** How a projectile is drawn in flight. */
-export type ProjectileStyle = 'arrow' | 'wind' | 'magic' | 'orb' | 'pierce';
+export type ProjectileStyle = 'arrow' | 'wind' | 'magic' | 'orb' | 'pierce' | 'mana';
 
 /**
  * Elemental family of an attack, for VFX only (sparks vs. gusts vs. arcane
@@ -668,6 +711,7 @@ export type FxEvent =
         | 'throw'
         | 'levelUp'
         | 'greaterOrb'
+        | 'manaStorm'
         | 'leap'
         | 'land';
       x: number;
