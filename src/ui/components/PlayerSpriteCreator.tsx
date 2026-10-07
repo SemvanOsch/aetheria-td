@@ -29,7 +29,9 @@ interface Props {
 const WEAPON_ICON: Record<PlayerWeapon, IconName> = {
   none: 'sword',
   'dual-swords': 'swords',
+  claymore: 'claymore',
   bow: 'bow',
+  longbow: 'longbow',
   magic: 'staff',
 };
 

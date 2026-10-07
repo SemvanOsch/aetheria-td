@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { GameProvider } from './application/store';
 import { App } from './ui/App';
 import { EnemyStats } from './ui/screens/EnemyStats';
-import { ChampionStats } from './ui/screens/ChampionStats';
+import { ChampionStats, findChampion } from './ui/screens/ChampionStats';
+import { ChampionStatDetail } from './ui/screens/ChampionStatDetail';
 import './ui/styles.css';
 
 // Developer-only enemy & champion stat sheets, kept out of the game UI. Reach
@@ -31,6 +32,10 @@ function Root() {
   }, []);
   if (hash === '#enemies') return <EnemyStats />;
   if (hash === '#champions') return <ChampionStats />;
+  if (hash.startsWith('#champions/')) {
+    const unit = findChampion(decodeURIComponent(hash.slice('#champions/'.length)));
+    return unit ? <ChampionStatDetail key={hash} unit={unit} /> : <ChampionStats />;
+  }
   return (
     <GameProvider>
       <App />

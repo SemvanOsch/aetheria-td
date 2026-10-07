@@ -22,6 +22,8 @@ import {
   equipArmor as equipArmorTx,
   equippedArmor,
   isArmorUnlocked,
+  playerChampionForms,
+  playerChampionVolleys,
   salvageArmor as salvageArmorTx,
   unequipArmor as unequipArmorTx,
   addGems,
@@ -71,7 +73,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     const initial = loadState();
     // Register the player's champion(s) so getUnit resolves them from the very
     // first render (Collection, deploy list, board) — before any commit runs.
-    syncPlayerChampions(initial.player, initial.ownedUnits, wornArmor(initial));
+    syncPlayerChampions(initial.player, initial.ownedUnits, wornArmor(initial), playerChampionForms(initial), playerChampionVolleys(initial));
     // Persist the migrated state at once: some migrations roll random values
     // (old armor re-rolls its stats), which must not re-roll on every load.
     saveState(initial);
@@ -84,9 +86,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const commit = useCallback((next: GameState) => {
     // Keep the player-champion registry matched to committed state (profile edits
     // change the avatar; a grant adds the champion; armor changes its stats and
-    // look). Cheap and idempotent, so it rides every commit rather than being
-    // threaded through each action.
-    syncPlayerChampions(next.player, next.ownedUnits, wornArmor(next));
+    // look; an active weapon-form node, like the Claymore, swaps its whole kit).
+    // Cheap and idempotent, so it rides every commit rather than being threaded
+    // through each action.
+    syncPlayerChampions(next.player, next.ownedUnits, wornArmor(next), playerChampionForms(next), playerChampionVolleys(next));
     stateRef.current = next;
     saveState(next);
     setState(next);

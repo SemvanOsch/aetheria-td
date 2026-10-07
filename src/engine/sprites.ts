@@ -9,6 +9,7 @@
 import type { PlayerSpriteConfig } from '../domain/playerSprite';
 import type { Proficiency } from '../domain/proficiency';
 import { ease, shade, withAlpha } from './palette';
+import { GREATER_ORB_APEX, GREATER_ORB_CROUCH, GREATER_ORB_LAND } from './types';
 import { arm, belt, forearm, capeSide, legSide, neck, pauldron, seg, torsoFront, torsoSide, walkLegsFront, walkLegsSide, type ArmLook, type LegLook } from './anatomy';
 
 // `shade` lives in the shared palette now; re-exported for existing callers.
@@ -4680,7 +4681,9 @@ export function hasSprite(shape: string): boolean {
     // The player's own adventurer(s) — drawn from a PlayerSpriteConfig; callers
     // must supply `playerConfig` to drawUnitSprite for these to render.
     shape === 'player-blade' ||
+    shape === 'player-claymore' ||
     shape === 'player-bow' ||
+    shape === 'player-longbow' ||
     shape === 'player-magic'
   );
 }
@@ -4693,9 +4696,11 @@ export const PROFICIENCY_WEAPON: Record<Proficiency, PlayerWeapon> = {
 };
 
 /** The held weapon a player-champion shape carries, or 'none'. */
-function playerWeaponForShape(shape: string): PlayerWeapon {
+export function playerWeaponForShape(shape: string): PlayerWeapon {
   if (shape === 'player-blade') return 'dual-swords';
+  if (shape === 'player-claymore') return 'claymore';
   if (shape === 'player-bow') return 'bow';
+  if (shape === 'player-longbow') return 'longbow';
   if (shape === 'player-magic') return 'magic';
   return 'none';
 }
@@ -4705,14 +4710,18 @@ function playerWeaponForShape(shape: string): PlayerWeapon {
  * is the shared attack-progress value (1 just after an attack, easing to 0 at
  * rest) — each sprite interprets it in its own way (the Archer's bowstring, the
  * Swordsman's sword swing). `throwing` marks the current attack as a special
- * throw (the Spearman's Javelin Toss) so its sprite plays the release instead of
- * a normal strike; other shapes ignore it. `empowered` marks a unit whose attack
+ * move so its sprite plays that instead of a normal strike — the Spearman's
+ * Javelin Toss, the Blade's Cross Slash, the Claymore's Earthsplitter slam, the
+ * Greater Orb's throw-down (with `anim` then running over the move's own, longer
+ * time); other shapes ignore it. `empowered` marks a unit whose attack
  * has been transformed by an upgrade (the Wizard's unlocked Wind Slice), adding
- * its ambient flourish; other shapes ignore it. `playerConfig` supplies the
+ * its ambient flourish, or the Magic adventurer casting the Greater Orb (its
+ * leaping overhead charge); other shapes ignore it. `playerConfig` supplies the
  * composed avatar for the `player-*` shapes (the player's own adventurer); it is
  * ignored by ordinary champions. `draw` (0..1) is the Bow adventurer's raise +
- * draw for its next shot (see `drawPlayerShortbow`) or the Magic adventurer's
- * orb charge (see `drawPlayerCastArms`); others ignore it. No-op for
+ * draw for its next shot (see `drawPlayerShortbow`), the Magic adventurer's
+ * orb charge (see `drawPlayerCastArms`) or the Claymore's heft wind-up (see
+ * `drawClaymore`); others ignore it. No-op for
  * shapes without a sprite; callers should gate on `hasSprite` and fall back to
  * the emoji token.
  */
@@ -4736,7 +4745,7 @@ export function drawUnitSprite(
   else if (shape === 'elf') drawElf(ctx, color, faceLeft, anim, empowered);
   else if (shape === 'bard') drawBard(ctx, color, faceLeft, anim);
   else if (shape.startsWith('player-') && playerConfig) {
-    drawPlayerSprite(ctx, playerConfig, faceLeft, anim, playerWeaponForShape(shape), draw);
+    drawPlayerSprite(ctx, playerConfig, faceLeft, anim, playerWeaponForShape(shape), draw, throwing, empowered);
   }
 }
 
@@ -4808,9 +4817,11 @@ const P_SHOULDER_Y = -5.6;
  * portrait (journal / profile); the martial variants are added when the
  * adventurer is drawn as a deployable champion, one per journal proficiency.
  * `'dual-swords'` (Blade), `'bow'` (Bow) and `'magic'` (the staff-less Magic
- * caster, who conjures the orb in raised bare hands) are the champion variants.
+ * caster, who conjures the orb in raised bare hands) are the champion variants;
+ * `'claymore'` is the Blade's two-handed great sword from its Claymore node, and
+ * `'longbow'` the Bow's towering longbow from its Longbow node.
  */
-export type PlayerWeapon = 'none' | 'dual-swords' | 'bow' | 'magic';
+export type PlayerWeapon = 'none' | 'dual-swords' | 'claymore' | 'bow' | 'longbow' | 'magic';
 
 /** Headwear that hides the crown of the hair (only a fringe shows beneath). */
 const CROWN_COVERING = new Set(['cap', 'hat', 'helm']);
@@ -4821,8 +4832,12 @@ const CROWN_COVERING = new Set(['cap', 'hat', 'helm']);
  * eases with an attack (1 just after a strike → 0 at rest) and drives any held
  * weapon's swing — the bare portrait ignores it. `weapon` layers a champion's
  * armament (e.g. the Blade adventurer's two short swords) over the base figure.
- * `draw` (0..1) is the Bow's raise + draw for its next shot, or the Magic
- * adventurer's orb charge.
+ * `draw` (0..1) is the Bow's raise + draw for its next shot, the Magic
+ * adventurer's orb charge, or the Claymore's heft wind-up. `special` swaps the
+ * weapon's normal strike for its signature move (the Blade's Cross Slash, the
+ * Claymore's Earthsplitter slam, the Greater Orb's throw-down), with `anim`
+ * running over that move's time. `empowered` makes the Magic adventurer's charge
+ * the Greater Orb's leap (arms raised overhead, legs tucked).
  *
  * Layered back-to-front: cape → back hair (long / braid / ponytail) → legs →
  * neck → outfit → cape clasp → arms + weapon → mantle / scarf → head → war paint
@@ -4835,11 +4850,16 @@ export function drawPlayerSprite(
   anim = 0,
   weapon: PlayerWeapon = 'none',
   draw = 0,
+  special = false,
+  empowered = false,
 ): void {
   ctx.save();
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   if (faceLeft) ctx.scale(-1, 1);
+  // The Greater Orb caster's leap (its charge) and throw-down (its signature move).
+  const greater = weapon === 'magic' && empowered;
+  const tuck = greater ? greaterOrbTuck(special ? anim : 0, special ? 0 : draw) : 0;
 
   const b = PLAYER_BUILDS[cfg.build] ?? PLAYER_BUILDS.average;
   const skin = cfg.skin;
@@ -4859,18 +4879,19 @@ export function drawPlayerSprite(
   drawPlayerBackHair(ctx, cfg.hair, hx, hy, r, b, hairC);
 
   // --- Legs (a robe hides them; only the boot toes peek out) ---
+  // Airborne (`tuck`), the feet draw up and the knees come forward.
   if (cfg.outfit !== 'robe') {
     const legs: LegLook = { cloth: P_TROUSERS, boot: P_BOOT, w: b.legW, bootUp: cfg.outfit === 'coat' ? 0.7 : 0.55 };
-    legSide(ctx, -1.4, 4, -b.leg, 11, { ...legs, cloth: shade(legs.cloth, -0.16), boot: shade(legs.boot, -0.12) }, 0.6);
-    legSide(ctx, 2, 4, b.leg + 0.2, 11, legs, 1);
+    legSide(ctx, -1.4, 4, -b.leg - 0.8 * tuck, 11 - 1.8 * tuck, { ...legs, cloth: shade(legs.cloth, -0.16), boot: shade(legs.boot, -0.12) }, 0.6 + 1.2 * tuck);
+    legSide(ctx, 2, 4, b.leg + 0.2 - 0.6 * tuck, 11 - 2.6 * tuck, legs, 1 + 1.6 * tuck);
   } else {
     ctx.fillStyle = shade(P_BOOT, -0.12);
     ctx.beginPath();
-    ctx.ellipse(-1.8, 11.1, 1.7, 0.95, 0, 0, Math.PI * 2);
+    ctx.ellipse(-1.8, 11.1 - 1.4 * tuck, 1.7, 0.95, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = P_BOOT;
     ctx.beginPath();
-    ctx.ellipse(2.6, 11.1, 1.8, 0.95, 0, 0, Math.PI * 2);
+    ctx.ellipse(2.6, 11.1 - 2 * tuck, 1.8, 0.95, 0, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -4894,22 +4915,39 @@ export function drawPlayerSprite(
   const look = playerArmLook(cfg.outfit, b, skin, oc, acc);
   const backLook: ArmLook = { ...look, sleeve: shade(look.sleeve, -0.12) };
   const sho = b.shoulder - 1.3;
+  // A raised near forearm repainted over the head and headwear (the Greater Orb's
+  // overhead hands), so a hat brim or long hair never hides it.
+  let overHead: (() => void) | null = null;
   if (weapon === 'bow') {
     // A bow shooter needs a proper archer pose (bow arm out to the grip, rear arm
     // on the string), so the shortbow poses its own arms in place of the default
     // hanging ones.
     drawPlayerShortbow(ctx, look, backLook, anim, draw, drawCloak);
+  } else if (weapon === 'longbow') {
+    // The towering longbow poses both arms like the shortbow; a signature move
+    // (`special`) is its Piercing Shot cast, with `anim` running over the cast.
+    drawPlayerLongbow(ctx, look, backLook, special ? 0 : anim, draw, special ? anim : 0, acc, drawCloak);
   } else if (weapon === 'magic') {
     // A staff-less caster: hands rest at the sides and only rise to cradle the orb
     // out in front as it charges (higher `anim`) — so the resting pose (cards,
     // idle on the board) matches the other champions. The orb itself is drawn by
     // the renderer (in front of the caster) so it can take the player's colour and
-    // animate its charge/flight/burst.
-    drawPlayerCastArms(ctx, look, backLook, anim, draw, b, sho, drawCloak);
+    // animate its charge/flight/burst. The Greater Orb gathers overhead through
+    // its leap (`draw`) and hurls it down as its signature move (`special`); a
+    // Mana Ray still holds the palms out like the plain cast.
+    if (greater && (special || draw > 0)) {
+      overHead = drawPlayerGreaterOrbArms(ctx, look, backLook, special ? anim : 0, special ? 0 : draw, b, sho, drawCloak);
+    } else {
+      drawPlayerCastArms(ctx, look, backLook, anim, draw, b, sho, drawCloak);
+    }
   } else if (weapon === 'dual-swords') {
     // The Blade holds both short swords in a raised guard and cuts with them, so
     // it poses its own arms (see `drawDualShortSwords`).
-    drawDualShortSwords(ctx, look, backLook, anim, sho, drawCloak);
+    drawDualShortSwords(ctx, look, backLook, anim, sho, drawCloak, special);
+  } else if (weapon === 'claymore') {
+    // Both hands on one long grip: the great blade poses both arms together
+    // (see `drawClaymore`).
+    drawClaymore(ctx, look, backLook, anim, draw, sho, drawCloak, special);
   } else {
     // Arms hanging at the sides, elbows easing outward.
     arm(ctx, -sho, P_SHOULDER_Y, -b.hw + 1.5, 3.5, backLook, 0.7);
@@ -4938,6 +4976,7 @@ export function drawPlayerSprite(
   drawPlayerFacialHair(ctx, cfg.facialHair, hx, hy, r, hairC);
   drawPlayerHair(ctx, cfg.hair, hx, hy, r, hairC, CROWN_COVERING.has(cfg.headwear));
   drawPlayerHeadwear(ctx, cfg.headwear, hx, hy, r, oc, headC);
+  overHead?.();
 
   ctx.restore();
 }
@@ -5874,6 +5913,18 @@ const OFF_GUARD: BladePose = { x: -0.6, y: 2.6, ang: 22, bend: 1.2 };
 const OFF_LOW: BladePose = { x: -4.2, y: 4.6, ang: 150, bend: 1 };
 const OFF_CUT: BladePose = { x: 8.4, y: -5.4, ang: -64, bend: 1.2 };
 
+// Cross Slash keyframes (the Blade's every-third-attack X cut). The hero coils
+// both blades wide — lead raised high with its blade laid back over the head,
+// off blade dropped low behind — then cuts both through the space ahead at
+// once: the lead chops down and the off rips up, so their tips cross in an X.
+// The follow-through holds both arms out before easing back to the guard.
+const LEAD_COIL: BladePose = { x: 4, y: -14.6, ang: -168, bend: 1.3 };
+const LEAD_XCUT: BladePose = { x: 9.6, y: 4.4, ang: 64, bend: 0.5 };
+const LEAD_XHOLD: BladePose = { x: 9.2, y: 5.2, ang: 74, bend: 0.5 };
+const OFF_COIL: BladePose = { x: -5.2, y: 5.4, ang: 168, bend: 0.9 };
+const OFF_XCUT: BladePose = { x: 8.8, y: -7.6, ang: -68, bend: 1 };
+const OFF_XHOLD: BladePose = { x: 8.4, y: -8.4, ang: -80, bend: 1 };
+
 const mixPose = (a: BladePose, c: BladePose, k: number): BladePose => ({
   x: a.x + (c.x - a.x) * k,
   y: a.y + (c.y - a.y) * k,
@@ -5901,6 +5952,29 @@ function swingPose(
   return mixPose(cut, guard, ease.inOutSine((u - c1) / (1 - c1)));
 }
 
+/**
+ * A signature move through `u` (0 = the instant it starts → 1 = back at rest):
+ * eased from `guard` into a visible `coil` that is reached a little before `c0`
+ * and held, a fast cut to `cut` over `[c0, c1]`, a held follow-through drifting
+ * to `hold` until `h`, then a smooth recovery to `guard`.
+ */
+function signaturePose(
+  u: number,
+  guard: BladePose,
+  coil: BladePose,
+  cut: BladePose,
+  hold: BladePose,
+  c0: number,
+  c1: number,
+  h: number,
+): BladePose {
+  if (u >= 1) return guard;
+  if (u < c0) return mixPose(guard, coil, ease.inOutSine(Math.min(1, u / (c0 * 0.8))));
+  if (u < c1) return mixPose(coil, cut, ease.outCubic((u - c0) / (c1 - c0)));
+  if (u < h) return mixPose(cut, hold, ease.outQuad((u - c1) / (h - c1)));
+  return mixPose(hold, guard, ease.inOutSine((u - h) / (1 - h)));
+}
+
 const DEG = Math.PI / 180;
 const LEAD_LEN = 11;
 const OFF_LEN = 10;
@@ -5918,6 +5992,9 @@ const OFF_LEN = 10;
  * forearm and over the mantle, and only the fist closes over its grip. The off
  * (far) side goes before the lead side throughout. The slash streaks are a
  * separate pass (`drawBladeTrails`) so the figure compositor doesn't ink them.
+ *
+ * `cross` plays the Cross Slash instead (`anim` then runs over
+ * `CROSS_SLASH_ANIM_TIME`): coil, then both blades cut at once in an X.
  */
 function drawDualShortSwords(
   ctx: CanvasRenderingContext2D,
@@ -5926,12 +6003,13 @@ function drawDualShortSwords(
   anim: number,
   sho: number,
   cloak: () => void,
+  cross = false,
 ): void {
   const steel = '#c9d2dc';
   const steelDark = '#8b95a3';
   const u = 1 - Math.max(0, Math.min(1, anim));
-  const lead = leadPoseAt(u);
-  const off = offPoseAt(u);
+  const lead = cross ? crossLeadPoseAt(u) : leadPoseAt(u);
+  const off = cross ? crossOffPoseAt(u) : offPoseAt(u);
   arm(ctx, -sho, P_SHOULDER_Y, off.x, off.y, backLook, off.bend);
   arm(ctx, sho, P_SHOULDER_Y, lead.x, lead.y, look, lead.bend);
   cloak();
@@ -5955,19 +6033,111 @@ const OFF_CUT_U: [number, number] = [0.3, 0.62];
 const leadPoseAt = (u: number) => swingPose(u, LEAD_GUARD, LEAD_RAISED, LEAD_CUT, ...LEAD_CUT_U);
 const offPoseAt = (u: number) => swingPose(u, OFF_GUARD, OFF_LOW, OFF_CUT, ...OFF_CUT_U);
 
+// The Cross Slash's shared cut window and follow-through end (in `u`): the blades
+// cross mid-cut at u ≈ 0.38, which is where the engine lands the X
+// (`CROSS_SLASH_HIT_DELAY` / `CROSS_SLASH_ANIM_TIME`).
+const CROSS_CUT_U: [number, number] = [0.3, 0.46];
+const CROSS_HOLD_U = 0.62;
+const crossLeadPoseAt = (u: number) =>
+  signaturePose(u, LEAD_GUARD, LEAD_COIL, LEAD_XCUT, LEAD_XHOLD, ...CROSS_CUT_U, CROSS_HOLD_U);
+const crossOffPoseAt = (u: number) =>
+  signaturePose(u, OFF_GUARD, OFF_COIL, OFF_XCUT, OFF_XHOLD, ...CROSS_CUT_U, CROSS_HOLD_U);
+
 /**
  * The Blade adventurer's slash streaks for attack value `anim` (same meaning as
  * in `drawUnitSprite`), drawn by the renderer straight after the figure in the
  * same local frame — outside the compositor, so they stay clean light rather
- * than inked shapes. `faceLeft` mirrors them like the sprite.
+ * than inked shapes. `faceLeft` mirrors them like the sprite. `cross` draws the
+ * Cross Slash's instead: a gleam on the coiled lead blade, then the X itself
+ * (`drawCrossStreaks`).
  */
-export function drawBladeTrails(ctx: CanvasRenderingContext2D, faceLeft: boolean, anim: number): void {
+export function drawBladeTrails(ctx: CanvasRenderingContext2D, faceLeft: boolean, anim: number, cross = false): void {
   const u = 1 - Math.max(0, Math.min(1, anim));
   if (u >= 1) return;
   ctx.save();
   if (faceLeft) ctx.scale(-1, 1);
-  drawBladeTrail(ctx, offPoseAt, u, ...OFF_CUT_U, OFF_LEN);
-  drawBladeTrail(ctx, leadPoseAt, u, ...LEAD_CUT_U, LEAD_LEN);
+  if (cross) {
+    // The gleam: swells as the coil is reached, gone as the cut begins.
+    const g = (u - 0.1) / (CROSS_CUT_U[0] - 0.1);
+    if (g > 0 && g < 1) {
+      const p = crossLeadPoseAt(u);
+      const r = LEAD_LEN * 0.72;
+      drawGleam(ctx, p.x + Math.cos(p.ang * DEG) * r, p.y + Math.sin(p.ang * DEG) * r, Math.sin(Math.PI * g));
+    }
+    drawCrossStreaks(ctx, u);
+  } else {
+    drawBladeTrail(ctx, offPoseAt, u, ...OFF_CUT_U, OFF_LEN);
+    drawBladeTrail(ctx, leadPoseAt, u, ...LEAD_CUT_U, LEAD_LEN);
+  }
+  ctx.restore();
+}
+
+// The Cross Slash's X: where its two cuts cross (chest height, ahead of the
+// hero), each cut's half-length, and its tilt from level.
+const X_CENTER = { x: 14.5, y: -4.5 };
+const X_HALF = 12;
+const X_TILT = 52 * DEG;
+
+/**
+ * The Cross Slash's X: two straight, tapered cuts that wipe across the space
+ * ahead as the blades pass through it over the cut window — the lead's chop
+ * from top-back down to bottom-front ("\"), the off blade's rip from
+ * bottom-back up to top-front ("/") — crossing at chest height, then fading.
+ * Mirrors the X mark the board paints over the foe it lands on.
+ */
+function drawCrossStreaks(ctx: CanvasRenderingContext2D, u: number): void {
+  const [c0, c1] = CROSS_CUT_U;
+  if (u <= c0) return;
+  const fade = u <= c1 ? 1 : Math.max(0, 1 - (u - c1) / 0.3);
+  if (fade <= 0) return;
+  const grow = ease.outCubic(Math.min(1, (u - c0) / (c1 - c0)));
+  const len = 2 * X_HALF * grow;
+  // Thick while the cut is fresh, thinning as it fades.
+  const w = 2.2 * (0.55 + 0.45 * fade);
+  for (const tilt of [X_TILT, -X_TILT]) {
+    ctx.save();
+    ctx.translate(X_CENTER.x - Math.cos(tilt) * X_HALF, X_CENTER.y - Math.sin(tilt) * X_HALF);
+    ctx.rotate(tilt);
+    for (const [style, k] of [
+      [`rgba(214,228,244,${0.55 * fade})`, 1],
+      [`rgba(255,255,255,${0.95 * fade})`, 0.42],
+    ] as const) {
+      ctx.fillStyle = style;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(len * 0.55, -w * k, len, 0);
+      ctx.quadraticCurveTo(len * 0.55, w * k, 0, 0);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+/** A four-point glint of light at (x, y), `k` (0..1) its strength. */
+function drawGleam(ctx: CanvasRenderingContext2D, x: number, y: number, k: number): void {
+  if (k <= 0) return;
+  const r = 1.4 + 3.6 * k;
+  ctx.save();
+  const halo = ctx.createRadialGradient(x, y, 0, x, y, r * 1.5);
+  halo.addColorStop(0, `rgba(255,255,255,${0.55 * k})`);
+  halo.addColorStop(1, 'rgba(214,228,244,0)');
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(x, y, r * 1.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = `rgba(255,255,255,${0.95 * k})`;
+  ctx.beginPath();
+  const w = r * 0.2;
+  ctx.moveTo(x, y - r);
+  ctx.lineTo(x + w, y - w);
+  ctx.lineTo(x + r, y);
+  ctx.lineTo(x + w, y + w);
+  ctx.lineTo(x, y + r);
+  ctx.lineTo(x - w, y + w);
+  ctx.lineTo(x - r, y);
+  ctx.lineTo(x - w, y - w);
+  ctx.closePath();
+  ctx.fill();
   ctx.restore();
 }
 
@@ -6012,6 +6182,354 @@ function drawBladeTrail(
     ctx.lineWidth = 0.3 + 0.9 * k;
     ctx.stroke();
     prev = pt;
+  }
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// The Claymore — the Blade adventurer's two-handed great sword (Claymore node).
+// ---------------------------------------------------------------------------
+
+/**
+ * One pose of the Claymore: the lead (near) hand on the grip just under the
+ * guard, the blade's angle (degrees from +x, y-down: -90 = straight up) and each
+ * elbow's bend. The back (far) hand sits `CLAY_GRIP_GAP` further down the grip,
+ * toward the pommel.
+ */
+interface ClaymorePose {
+  x: number;
+  y: number;
+  ang: number;
+  bend: number;
+  backBend: number;
+}
+
+/** Blade length past the guard, and the gap between the two hands on the grip. */
+const CLAY_LEN = 20;
+const CLAY_GRIP_GAP = 2.8;
+/** Distance from the lead hand to the blade's point (guard + blade). */
+const CLAY_REACH = 2.6 + CLAY_LEN + 0.8;
+
+// Keyframes, authored facing +x.
+//  - Rest: a high guard, the great blade raised forward in both hands.
+//  - Heft (the wind-up, driven by the charge): the blade is raised upright in
+//    front of the face (lift), then the hands climb beside the head as it tips
+//    back over it — so it never seems to sprout from behind the head.
+//  - Cleave: the blade comes over the top and down through the arc ahead, its
+//    weight carrying it on into a low follow-through, then it is lifted back.
+//  - Slam (Earthsplitter): hoisted straight up, then drawn back further over the
+//    head and held there trembling (the wind-up), then driven point-first into
+//    the ground ahead and held there a beat before it is wrenched free.
+const CLAY_REST: ClaymorePose = { x: 5.4, y: 1.4, ang: -64, bend: 1.2, backBend: 1.4 };
+const CLAY_LIFT: ClaymorePose = { x: 7, y: -7.4, ang: -100, bend: 1, backBend: 1.2 };
+const CLAY_HEFT: ClaymorePose = { x: 3.4, y: -14.2, ang: -160, bend: 1, backBend: 1.2 };
+const CLAY_CUT: ClaymorePose = { x: 9, y: 3, ang: 22, bend: 0.4, backBend: 0.7 };
+const CLAY_FOLLOW: ClaymorePose = { x: 8.4, y: 5, ang: 46, bend: 0.5, backBend: 0.8 };
+const CLAY_HOIST: ClaymorePose = { x: 4.8, y: -15.4, ang: -96, bend: 0.9, backBend: 1.1 };
+const CLAY_WIND: ClaymorePose = { x: 2.8, y: -16.4, ang: -128, bend: 1, backBend: 1.2 };
+const CLAY_SLAM: ClaymorePose = { x: 9.4, y: 4.6, ang: 62, bend: 0.4, backBend: 0.6 };
+const CLAY_STUCK: ClaymorePose = { x: 9, y: 5.2, ang: 64, bend: 0.45, backBend: 0.65 };
+
+const mixClay = (a: ClaymorePose, c: ClaymorePose, k: number): ClaymorePose => ({
+  x: a.x + (c.x - a.x) * k,
+  y: a.y + (c.y - a.y) * k,
+  ang: a.ang + (c.ang - a.ang) * k,
+  bend: a.bend + (c.bend - a.bend) * k,
+  backBend: a.backBend + (c.backBend - a.backBend) * k,
+});
+
+// Cut windows (in swing progress `u`). The cleave lands as the release begins
+// (the engine strikes the arc on release); the slam's blade meets the ground at
+// the end of its window, u = 0.571 — `EARTHSPLITTER_HIT_DELAY` /
+// `EARTHSPLITTER_ANIM_TIME` — so retime them together. Before it: the hoist
+// (to `CLAY_HOIST_U`), then the held wind-up.
+const CLAY_CUT_U: [number, number] = [0, 0.2];
+const CLAY_SLAM_U: [number, number] = [0.46, 0.571];
+const CLAY_HOIST_U = 0.18;
+
+/** The cleave's release `u` (0 = the swing starts from the heft → 1 = at rest). */
+function claymoreCleavePose(u: number): ClaymorePose {
+  if (u >= 1) return CLAY_REST;
+  const [c0, c1] = CLAY_CUT_U;
+  if (u < c1) return mixClay(CLAY_HEFT, CLAY_CUT, ease.outCubic((u - c0) / (c1 - c0)));
+  if (u < 0.45) return mixClay(CLAY_CUT, CLAY_FOLLOW, ease.outQuad((u - c1) / (0.45 - c1)));
+  return mixClay(CLAY_FOLLOW, CLAY_REST, ease.inOutSine((u - 0.45) / 0.55));
+}
+
+/** The Earthsplitter slam through `u` (0 = cast → 1 = back at rest). */
+function claymoreSlamPose(u: number): ClaymorePose {
+  if (u >= 1) return CLAY_REST;
+  const [c0, c1] = CLAY_SLAM_U;
+  if (u < CLAY_HOIST_U) return mixClay(CLAY_REST, CLAY_HOIST, ease.inOutSine(u / CLAY_HOIST_U));
+  if (u < c0) {
+    // The wind-up: drawn slowly back over the head and held there, the arms
+    // trembling under the weight harder the longer it is held.
+    const k = (u - CLAY_HOIST_U) / (c0 - CLAY_HOIST_U);
+    const p = mixClay(CLAY_HOIST, CLAY_WIND, ease.outCubic(Math.min(1, k * 1.4)));
+    const shake = 0.45 * k * Math.sin(u * 170);
+    return { ...p, x: p.x + shake * 0.6, y: p.y + shake * 0.4, ang: p.ang + shake * 3 };
+  }
+  // A heavy fall: it accelerates all the way down, then stops dead in the ground.
+  if (u < c1) return mixClay(CLAY_WIND, CLAY_SLAM, ease.inCubic((u - c0) / (c1 - c0)));
+  if (u < 0.78) return mixClay(CLAY_SLAM, CLAY_STUCK, ease.outQuad((u - c1) / (0.78 - c1)));
+  return mixClay(CLAY_STUCK, CLAY_REST, ease.inOutSine((u - 0.78) / 0.22));
+}
+
+/**
+ * How far the Earthsplitter's wind-up has gathered at slam progress `u`: 0
+ * through the hoist, ramping to 1 just as the blade falls, then 0 again.
+ */
+function claymoreGather(u: number): number {
+  const [c0, c1] = CLAY_SLAM_U;
+  if (u < CLAY_HOIST_U * 0.6 || u >= c1) return 0;
+  if (u < c0) {
+    const k = (u - CLAY_HOIST_U * 0.6) / (c0 - CLAY_HOIST_U * 0.6);
+    return k * k;
+  }
+  return 1;
+}
+
+/**
+ * The Claymore's pose for attack value `anim` (1 at the instant of a swing → 0
+ * at rest; read as `u = 1 - anim`), the heft wind-up `heft` (0..1, from the
+ * charge) and whether the Earthsplitter slam is playing.
+ */
+function claymorePoseAt(anim: number, heft: number, slam: boolean): ClaymorePose {
+  const u = 1 - Math.max(0, Math.min(1, anim));
+  if (slam) return claymoreSlamPose(u);
+  if (u < 1) return claymoreCleavePose(u);
+  const k = ease.inOutSine(Math.max(0, Math.min(1, heft)));
+  return k < 0.5 ? mixClay(CLAY_REST, CLAY_LIFT, k * 2) : mixClay(CLAY_LIFT, CLAY_HEFT, k * 2 - 1);
+}
+
+/**
+ * The Blade adventurer's Claymore and both arms, in the base figure's local
+ * space (already flipped for `faceLeft`). Three inputs drive it:
+ *  - `heft` (0..1, the charge before a swing): from the high guard at rest
+ *    (cards, idle), the hero hauls the great blade up and back over the head.
+ *  - `release` (1 the instant the swing is loosed → 0): the cleave — over the
+ *    top and down through the arc ahead, the weight carrying it into a low
+ *    follow-through, then lifted back to the guard.
+ *  - `slam`: plays the Earthsplitter instead (`release` running over
+ *    `EARTHSPLITTER_ANIM_TIME`): hoisted overhead, driven point-first into the
+ *    ground, held a beat, wrenched free.
+ * Both hands share the one long grip, the lead hand under the guard. Layered
+ * like the Blade: sleeves → `cloak` → the claymore → fists (far, then near).
+ * The swing's smear is a separate pass (`drawClaymoreTrails`).
+ */
+function drawClaymore(
+  ctx: CanvasRenderingContext2D,
+  look: ArmLook,
+  backLook: ArmLook,
+  release: number,
+  heft: number,
+  sho: number,
+  cloak: () => void,
+  slam = false,
+): void {
+  const p = claymorePoseAt(release, heft, slam);
+  const a = p.ang * DEG;
+  const bx = p.x - Math.cos(a) * CLAY_GRIP_GAP;
+  const by = p.y - Math.sin(a) * CLAY_GRIP_GAP;
+  arm(ctx, -sho, P_SHOULDER_Y, bx, by, backLook, p.backBend);
+  arm(ctx, sho, P_SHOULDER_Y, p.x, p.y, look, p.bend);
+  cloak();
+  drawClaymoreBlade(ctx, p.x, p.y, a);
+  fist(ctx, bx, by, backLook);
+  fist(ctx, p.x, p.y, look);
+}
+
+/**
+ * The great sword itself, gripped at the lead hand `(hx, hy)` and laid along
+ * `angle` (radians): a long leather-wrapped grip running back through both fists
+ * to a heavy pommel, a wide crossguard with flared quillons, a short blunt
+ * ricasso, then a broad blade tapering to its point with a fuller and a bright
+ * edge. Flat fills — the compositor shades and inks it with the figure.
+ */
+function drawClaymoreBlade(ctx: CanvasRenderingContext2D, hx: number, hy: number, angle: number): void {
+  const steel = '#c9d2dc';
+  const steelDark = '#7f8997';
+  const steelLit = '#eef3f8';
+  ctx.save();
+  ctx.translate(hx, hy);
+  ctx.rotate(angle);
+  // Grip: wrapped leather from the pommel up through both hands to the guard.
+  ctx.strokeStyle = '#4a3420';
+  ctx.lineWidth = 1.9;
+  ctx.beginPath();
+  ctx.moveTo(-CLAY_GRIP_GAP - 1.6, 0);
+  ctx.lineTo(1.5, 0);
+  ctx.stroke();
+  ctx.strokeStyle = '#2e2014';
+  ctx.lineWidth = 0.4;
+  for (let x = -CLAY_GRIP_GAP - 1.2; x < 1.2; x += 1.1) {
+    ctx.beginPath();
+    ctx.moveTo(x, -0.95);
+    ctx.lineTo(x + 0.6, 0.95);
+    ctx.stroke();
+  }
+  // Pommel: a heavy disc with a brass cap.
+  ctx.fillStyle = steelDark;
+  ctx.beginPath();
+  ctx.arc(-CLAY_GRIP_GAP - 2.4, 0, 1.35, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = P_BRASS;
+  ctx.beginPath();
+  ctx.arc(-CLAY_GRIP_GAP - 2.4, 0, 0.6, 0, Math.PI * 2);
+  ctx.fill();
+  // Crossguard: a wide bar, its quillons swept toward the blade with knobbed ends.
+  ctx.strokeStyle = steelDark;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(3.1, -4.8);
+  ctx.quadraticCurveTo(1.6, 0, 3.1, 4.8);
+  ctx.stroke();
+  ctx.fillStyle = steelDark;
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.arc(3.2, s * 4.9, 0.9, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = P_BRASS;
+  ctx.beginPath();
+  ctx.arc(2.1, 0, 0.75, 0, Math.PI * 2);
+  ctx.fill();
+  // Ricasso: a short blunt shoulder before the edge begins.
+  ctx.fillStyle = steelDark;
+  ctx.fillRect(2.6, -1.5, 1.9, 3);
+  // Broad blade, tapering to the point.
+  const tip = 2.6 + CLAY_LEN;
+  ctx.fillStyle = steel;
+  ctx.beginPath();
+  ctx.moveTo(4.4, -2.1);
+  ctx.lineTo(tip - 3.6, -1.45);
+  ctx.lineTo(tip + 0.8, 0);
+  ctx.lineTo(tip - 3.6, 1.45);
+  ctx.lineTo(4.4, 2.1);
+  ctx.closePath();
+  ctx.fill();
+  // Fuller groove down the middle, then a bright edge along the top.
+  ctx.strokeStyle = steelDark;
+  ctx.lineWidth = 0.6;
+  ctx.beginPath();
+  ctx.moveTo(4.6, 0.1);
+  ctx.lineTo(tip - 5, 0.05);
+  ctx.stroke();
+  ctx.strokeStyle = steelLit;
+  ctx.lineWidth = 0.7;
+  ctx.beginPath();
+  ctx.moveTo(4.6, -1.5);
+  ctx.lineTo(tip - 0.6, -0.4);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * The Earthsplitter's wind-up telegraph on the blade (slam progress `u`): as the
+ * claymore is held overhead it kindles — a molten glow along the edge that
+ * deepens the longer it is held, a flaring point, and embers shed off the steel
+ * — snuffed the instant the blade bites the ground. Additive, same local frame
+ * as `drawClaymoreTrails`.
+ */
+function drawClaymoreKindle(ctx: CanvasRenderingContext2D, faceLeft: boolean, u: number): void {
+  const g = claymoreGather(u);
+  if (g <= 0.01) return;
+  const p = claymoreSlamPose(u);
+  const ca = Math.cos(p.ang * DEG);
+  const sa = Math.sin(p.ang * DEG);
+  const at = (r: number) => ({ x: p.x + ca * r, y: p.y + sa * r });
+  const guard = at(2.6);
+  const tip = at(CLAY_REACH);
+  const flicker = 0.85 + 0.15 * Math.sin(u * 95);
+  ctx.save();
+  if (faceLeft) ctx.scale(-1, 1);
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+  // Molten haze and a hot core along the blade.
+  ctx.strokeStyle = `rgba(255,128,40,${0.32 * g * flicker})`;
+  ctx.lineWidth = 2 + 4.5 * g;
+  ctx.beginPath();
+  ctx.moveTo(guard.x, guard.y);
+  ctx.lineTo(tip.x, tip.y);
+  ctx.stroke();
+  ctx.strokeStyle = `rgba(255,214,140,${0.6 * g * flicker})`;
+  ctx.lineWidth = 0.6 + 1.1 * g;
+  ctx.stroke();
+  // A flare at the point.
+  const fr = 2.5 + 4 * g;
+  const flare = ctx.createRadialGradient(tip.x, tip.y, 0, tip.x, tip.y, fr);
+  flare.addColorStop(0, `rgba(255,236,190,${0.85 * g})`);
+  flare.addColorStop(0.4, `rgba(255,150,50,${0.45 * g})`);
+  flare.addColorStop(1, 'rgba(255,110,30,0)');
+  ctx.fillStyle = flare;
+  ctx.beginPath();
+  ctx.arc(tip.x, tip.y, fr, 0, Math.PI * 2);
+  ctx.fill();
+  // Embers peeling off the steel and drifting up.
+  for (let i = 0; i < 6; i++) {
+    const life = (u * 6 + i * 0.37) % 1;
+    const e = at(4 + ((i * 0.61) % 1) * CLAY_LEN);
+    const x = e.x + Math.sin(u * 40 + i * 2.3) * 1.6;
+    const y = e.y - life * 6;
+    ctx.fillStyle = `rgba(255,${170 + i * 12},90,${g * (1 - life) * 0.9})`;
+    ctx.beginPath();
+    ctx.arc(x, y, 0.45 + 0.35 * (1 - life), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/**
+ * The Claymore's swing smear for attack value `anim` (same meaning as in
+ * `drawUnitSprite`), drawn by the renderer straight after the figure in the same
+ * local frame, outside the compositor, like `drawBladeTrails`. A heavy weapon
+ * leaves a broad smear rather than a thin streak: a band swept between the
+ * blade's middle and its point, densest at the blade and fading to its tail,
+ * with a bright edge where the point travelled. `slam` draws the
+ * Earthsplitter's instead.
+ */
+export function drawClaymoreTrails(ctx: CanvasRenderingContext2D, faceLeft: boolean, anim: number, slam = false): void {
+  const u = 1 - Math.max(0, Math.min(1, anim));
+  if (u >= 1) return;
+  if (slam) drawClaymoreKindle(ctx, faceLeft, u);
+  const [c0, c1] = slam ? CLAY_SLAM_U : CLAY_CUT_U;
+  if (u <= c0) return;
+  const head = Math.min(u, c1);
+  const tail = Math.max(c0, head - (slam ? 0.09 : 0.16));
+  const fade = u <= c1 ? 1 : Math.max(0, 1 - (u - c1) / 0.24);
+  if (fade <= 0 || head - tail < 0.004) return;
+  const poseAt = slam ? claymoreSlamPose : claymoreCleavePose;
+  const along = (v: number, r: number) => {
+    const p = poseAt(v);
+    return { x: p.x + Math.cos(p.ang * DEG) * r, y: p.y + Math.sin(p.ang * DEG) * r };
+  };
+  ctx.save();
+  if (faceLeft) ctx.scale(-1, 1);
+  ctx.lineCap = 'round';
+  const N = 10;
+  let po = along(tail, CLAY_REACH + 0.6);
+  let pi = along(tail, CLAY_REACH * 0.42);
+  for (let i = 1; i <= N; i++) {
+    const k = i / N; // 0 at the tail → 1 at the blade
+    const v = tail + (head - tail) * k;
+    const o = along(v, CLAY_REACH + 0.6);
+    const n = along(v, CLAY_REACH * 0.42);
+    ctx.fillStyle = `rgba(214,228,244,${0.3 * k * fade})`;
+    ctx.beginPath();
+    ctx.moveTo(po.x, po.y);
+    ctx.lineTo(o.x, o.y);
+    ctx.lineTo(n.x, n.y);
+    ctx.lineTo(pi.x, pi.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255,255,255,${0.8 * k * fade})`;
+    ctx.lineWidth = 0.5 + 1.8 * k;
+    ctx.beginPath();
+    ctx.moveTo(po.x, po.y);
+    ctx.lineTo(o.x, o.y);
+    ctx.stroke();
+    po = o;
+    pi = n;
   }
   ctx.restore();
 }
@@ -6208,6 +6726,259 @@ function drawPlayerShortbow(
   fist(ctx, gx + 0.4, gy, look);
 }
 
+// ============================================================================
+// The Longbow — the Bow adventurer's towering bow (Longbow node).
+// ============================================================================
+
+/** Grip + tilt of the Longbow at rest (lowered, lower tip near the ground). */
+const LB_REST = { x: 8, y: -0.5, tilt: -0.1 };
+/** Grip + tilt when aimed (bow upright, arrow level at the chin). */
+const LB_AIM = { x: 10.5, y: -7, tilt: 0 };
+/** Grip + tilt + pull of the Piercing Shot cast: an arrow aimed at the sky. */
+const LB_CAST = { x: 6.5, y: -14, tilt: -1.15, pull: 0.55 };
+/** Half-length of a limb (grip → tip) when braced and slack. */
+const LB_LIMB = 13;
+/** How far the string travels back at full draw (beyond the limbs' flex). */
+const LB_DRAW = 9.5;
+/** Length of the Longbow's big arrow, nock to point. */
+const LB_ARROW = 19;
+// Release phases (`release` 1 → 0 over `attackAnimTime('player-longbow')`):
+// string snapped forward above SNAP, the bow held up through the follow-through
+// until LOWER, then lowered back to rest.
+const LB_SNAP = 0.88;
+const LB_LOWER = 0.4;
+
+/** One frame of the Longbow, in the figure's local space (facing +x). */
+interface LongbowPose {
+  gx: number;
+  gy: number;
+  tilt: number;
+  /** String pull, 0 (slack) → 1 (full draw). */
+  pull: number;
+  tipX: number;
+  tipY: number;
+  /** Nock point along the bow's frame x (the string's back-most point). */
+  nockX: number;
+  /** Lateral string shiver just after a loose. */
+  shiver: number;
+  /** The draw hand. */
+  hand: { x: number; y: number };
+  /** Whether an arrow is nocked. */
+  arrow: boolean;
+  frontBend: number;
+  rearBend: number;
+}
+
+/** Envelope of the Piercing Shot cast pose for `castAnim` (1 at cast → 0). */
+function longbowCastLevel(castAnim: number): number {
+  if (castAnim <= 0) return 0;
+  const u = 1 - Math.min(1, castAnim);
+  if (u < 0.3) return ease.inOutSine(u / 0.3);
+  if (u < 0.72) return 1;
+  return 1 - ease.inOutSine((u - 0.72) / 0.28);
+}
+
+/**
+ * The Longbow's pose. `draw` (0..1) is the slow draw before a shot: the bow
+ * rises upright over its first ~quarter, then the string is hauled back to the
+ * jaw, held at full draw for the last tenth. `release` (1 the instant the arrow
+ * is loosed → 0) is the shot: the string snaps forward, the draw hand flicks
+ * back past the ear, the bow stays up through the follow-through, then lowers.
+ * `castAnim` (1 → 0 over `PIERCING_CAST_ANIM_TIME`, 0 when not casting) blends
+ * in the Piercing Shot pose: the bow raised with its arrow aimed at the sky.
+ */
+function longbowPose(release: number, draw: number, castAnim: number): LongbowPose {
+  const r = Math.max(0, Math.min(1, release));
+  const d = Math.max(0, Math.min(1, draw));
+  const drawRaise = ease.inOutSine(Math.min(1, d / 0.28));
+  const shotRaise = r <= 0 ? 0 : r > LB_LOWER ? 1 : ease.inOutSine(r / LB_LOWER);
+  const raise = Math.max(drawRaise, shotRaise);
+  // The draw only pulls the string while a shot isn't still snapping forward.
+  let pull = d > 0 && r < LB_SNAP ? ease.inOutSine(Math.max(0, Math.min(1, (d - 0.12) / 0.78))) : 0;
+  let gx = LB_REST.x + (LB_AIM.x - LB_REST.x) * raise;
+  let gy = LB_REST.y + (LB_AIM.y - LB_REST.y) * raise;
+  let tilt = LB_REST.tilt + (LB_AIM.tilt - LB_REST.tilt) * raise;
+  const cast = longbowCastLevel(castAnim);
+  if (cast > 0) {
+    gx += (LB_CAST.x - gx) * cast;
+    gy += (LB_CAST.y - gy) * cast;
+    tilt += (LB_CAST.tilt - tilt) * cast;
+    pull += (LB_CAST.pull - pull) * cast;
+  }
+  const tipX = -2.2 - 2.8 * pull;
+  const tipY = LB_LIMB - 0.8 * pull;
+  const snapping = r > LB_SNAP && d === 0;
+  const shiver = r > LB_SNAP - 0.06 ? Math.sin(r * 110) * 1.1 * Math.min(1, (r - LB_SNAP + 0.06) / 0.18) : 0;
+  const nockX = tipX - LB_DRAW * pull;
+  const cos = Math.cos(tilt);
+  const sin = Math.sin(tilt);
+  const nock = { x: gx + nockX * cos, y: gy + nockX * sin };
+  // After the loose the draw hand flicks back past the ear, then eases home.
+  const flick = d > 0 ? 0 : r > LB_SNAP ? 1 : r > LB_LOWER ? ease.inOutSine((r - LB_LOWER) / (LB_SNAP - LB_LOWER)) : 0;
+  const hand = { x: nock.x - 3 * flick, y: nock.y - 1.6 * flick };
+  // Nocked only while drawing (or casting): the long arrow would otherwise jut
+  // far past the lowered bow and read as aiming.
+  const arrow = !snapping && (d > 0 || cast > 0);
+  return {
+    gx,
+    gy,
+    tilt,
+    pull,
+    tipX,
+    tipY,
+    nockX,
+    shiver,
+    hand,
+    arrow,
+    frontBend: 0.9 - 0.5 * raise,
+    // The draw arm folds tight with its elbow drawn back as the string comes in.
+    rearBend: 1.1 - 4.6 * pull * (1 - cast),
+  };
+}
+
+/**
+ * The nocked arrow of the Longbow for the given inputs (see `longbowPose`), in
+ * local space facing +x: its point and direction, or null when none is nocked.
+ * The renderer glows a kindled Piercing Shot arrow along this.
+ */
+export function longbowArrow(
+  release: number,
+  draw: number,
+  castAnim: number,
+): { x: number; y: number; angle: number; length: number } | null {
+  const p = longbowPose(release, draw, castAnim);
+  if (!p.arrow) return null;
+  const head = p.nockX + LB_ARROW;
+  return {
+    x: p.gx + head * Math.cos(p.tilt),
+    y: p.gy + head * Math.sin(p.tilt),
+    angle: p.tilt,
+    length: LB_ARROW,
+  };
+}
+
+/** Level (0..1) of the Piercing Shot cast pose — the renderer's flare follows it. */
+export function longbowCastGlow(castAnim: number): number {
+  return longbowCastLevel(castAnim);
+}
+
+/**
+ * The Bow adventurer's Longbow and both arms, in the base figure's local space
+ * (already flipped for `faceLeft`). See `longbowPose` for the inputs. Aimed at
+ * full draw the arrowhead sits at ~(15, -7), the engine's `LONGBOW_MUZZLE` at
+ * board scale. The grip is wrapped in the adventurer's accent colour. Layered
+ * like the shortbow: sleeves → `cloak` → forearms → bow, string and arrow →
+ * fists.
+ */
+function drawPlayerLongbow(
+  ctx: CanvasRenderingContext2D,
+  look: ArmLook,
+  backLook: ArmLook,
+  release: number,
+  draw: number,
+  castAnim: number,
+  accent: string,
+  cloak: () => void,
+): void {
+  const p = longbowPose(release, draw, castAnim);
+  const front = { x: p.gx + 0.3, y: p.gy };
+
+  arm(ctx, -2.4, -5.2, p.hand.x, p.hand.y, backLook, p.rearBend);
+  arm(ctx, 1.5, -5.2, front.x, front.y, look, p.frontBend);
+  cloak();
+  // Raised forearms sit over the mantle (the cast pose lifts the bow overhead).
+  forearm(ctx, -2.4, -5.2, p.hand.x, p.hand.y, backLook, p.rearBend);
+  forearm(ctx, 1.5, -5.2, front.x, front.y, look, p.frontBend);
+
+  ctx.save();
+  ctx.translate(p.gx, p.gy);
+  ctx.rotate(p.tilt);
+  // A long, gently bent D: thick at the grip, tapering to horn-tipped nocks.
+  const limbs = () => {
+    ctx.beginPath();
+    ctx.moveTo(p.tipX, -p.tipY);
+    ctx.quadraticCurveTo(2.9, -p.tipY * 0.52, 1.2, 0);
+    ctx.quadraticCurveTo(2.9, p.tipY * 0.52, p.tipX, p.tipY);
+  };
+  ctx.strokeStyle = '#5a3a1e';
+  ctx.lineWidth = 2.7;
+  limbs();
+  ctx.stroke();
+  ctx.strokeStyle = '#8a5a30';
+  ctx.lineWidth = 1.5;
+  limbs();
+  ctx.stroke();
+  ctx.save();
+  ctx.translate(0.55, 0);
+  ctx.strokeStyle = 'rgba(255,236,200,0.45)';
+  ctx.lineWidth = 0.6;
+  limbs();
+  ctx.stroke();
+  ctx.restore();
+  // Horn nocks capping each tip.
+  ctx.fillStyle = '#e8dcc0';
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.arc(p.tipX, s * p.tipY, 0.9, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Grip wrap in the adventurer's accent, with a dark leather binding.
+  ctx.strokeStyle = shade(accent, -0.15);
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(1.2, -2);
+  ctx.lineTo(1.2, 2);
+  ctx.stroke();
+  ctx.strokeStyle = '#2e1f12';
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(-0.3, -2);
+  ctx.lineTo(2.7, -2);
+  ctx.moveTo(-0.3, 2);
+  ctx.lineTo(2.7, 2);
+  ctx.stroke();
+  // String: tip → nock → tip.
+  ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+  ctx.lineWidth = 0.85;
+  ctx.beginPath();
+  ctx.moveTo(p.tipX, -p.tipY);
+  ctx.lineTo(p.nockX + p.shiver, 0);
+  ctx.lineTo(p.tipX, p.tipY);
+  ctx.stroke();
+  // The big arrow riding the string: shaft, broad fletching and a bodkin point.
+  if (p.arrow) {
+    const tail = p.nockX;
+    const head = p.nockX + LB_ARROW;
+    ctx.strokeStyle = '#d8d2c0';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(tail, 0);
+    ctx.lineTo(head - 2.4, 0);
+    ctx.stroke();
+    ctx.fillStyle = '#b8a888';
+    for (const s of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(tail + 0.6, 0);
+      ctx.lineTo(tail + 3.6, 0);
+      ctx.lineTo(tail + 1.2, s * 1.9);
+      ctx.lineTo(tail - 0.4, s * 1.7);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = '#c9d2dc';
+    ctx.beginPath();
+    ctx.moveTo(head - 3.2, -1.4);
+    ctx.lineTo(head + 0.5, 0);
+    ctx.lineTo(head - 3.2, 1.4);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  fist(ctx, p.hand.x, p.hand.y, backLook);
+  fist(ctx, front.x, front.y, look);
+}
+
 /** Body radius of the Magic adventurer's orb as it charges (`charge` 0..1). */
 export function magicOrbRadius(charge: number): number {
   return 1.2 + 4.3 * Math.max(0, Math.min(1, charge));
@@ -6294,4 +7065,151 @@ function drawPlayerCastArms(
   cloak();
   forearm(ctx, -sho, P_SHOULDER_Y, rear.x, rear.y, backLook, rear.bend);
   forearm(ctx, sho, P_SHOULDER_Y, front.x, front.y, look, front.bend);
+}
+
+// --- The Greater Orb (the Magic adventurer's mastery node) -------------------
+// Its charge (`charge` 0 → 1) is a leap: a crouch with the arms swung back, a
+// spring up with both arms sweeping overhead (apex at GREATER_ORB_APEX), then a
+// hang in the air while a huge orb swells above the head between the raised
+// palms. Its throw-down is a signature move (`release` 1 → 0 over the throw):
+// both arms whip over and forward-down, hold through the fall, and ease back to
+// the sides after touchdown (GREATER_ORB_LAND). The renderer lifts and squashes
+// the whole body along the same phases and paints the orb itself.
+
+/** Where the raised palms meet overhead (local, facing +x); the orb sits on them. */
+const GREATER_ORB_PALMS = { x: 1, y: -16.5 };
+/** Charge at which the orb starts to kindle overhead (just before the apex). */
+const GREATER_ORB_KINDLE = GREATER_ORB_APEX - 0.06;
+/** How far apart the raised hands stay, at least — clear of the head either side. */
+const GREATER_ORB_MIN_SPREAD = 4.6;
+
+/** Body radius of the Greater Orb as it swells overhead (`charge` 0..1); 0 before it kindles. */
+export function greaterOrbRadius(charge: number): number {
+  const k = (Math.min(1, charge) - GREATER_ORB_KINDLE) / (1 - GREATER_ORB_KINDLE);
+  return k <= 0 ? 0 : 1 + 5.6 * ease.inOutSine(k);
+}
+
+/** Distance from the palms' midpoint to each raised hand, which ends up cupping the orb's lower flanks. */
+function greaterOrbReach(charge: number): number {
+  return (greaterOrbRadius(charge) + 0.8) * Math.SQRT1_2;
+}
+
+/**
+ * Centre of the Greater Orb above the caster's head (local, facing +x; mirror x
+ * for `faceLeft`): resting on the raised palms, rising as it swells. The
+ * renderer paints the charging orb here, and the engine launches it from here
+ * at full charge (`GREATER_ORB_MUZZLE`).
+ */
+export function greaterOrbAnchor(charge: number): { x: number; y: number } {
+  return { x: GREATER_ORB_PALMS.x, y: GREATER_ORB_PALMS.y - greaterOrbReach(charge) };
+}
+
+/**
+ * How far the Greater Orb caster's legs are drawn up (0 standing → 1 tucked):
+ * up through the spring, dangling a little while it hangs, a kick as it throws,
+ * then reaching back down to land at GREATER_ORB_LAND.
+ */
+function greaterOrbTuck(release: number, charge: number): number {
+  if (release > 0) {
+    const u = 1 - Math.min(1, release);
+    if (u < 0.24) return 0.75 + 0.15 * ease.outQuad(u / 0.24);
+    if (u < GREATER_ORB_LAND) return 0.9 * (1 - ease.inOutSine((u - 0.24) / (GREATER_ORB_LAND - 0.24)));
+    return 0;
+  }
+  const c = Math.min(1, charge);
+  if (c < GREATER_ORB_CROUCH) return 0;
+  if (c < GREATER_ORB_APEX) return ease.inOutSine((c - GREATER_ORB_CROUCH) / (GREATER_ORB_APEX - GREATER_ORB_CROUCH));
+  return 1 - 0.25 * ease.inOutSine((c - GREATER_ORB_APEX) / (1 - GREATER_ORB_APEX));
+}
+
+/**
+ * The Greater Orb caster's arms, in the sprite's local space (authored facing
+ * +x). See the section note above for the beats. Returns a repaint of the raised
+ * near forearm for the caller to run after the head and headwear (so neither
+ * covers it), or null while the hands are low.
+ */
+function drawPlayerGreaterOrbArms(
+  ctx: CanvasRenderingContext2D,
+  look: ArmLook,
+  backLook: ArmLook,
+  release: number,
+  charge: number,
+  b: { hw: number },
+  sho: number,
+  cloak: () => void,
+): (() => void) | null {
+  type Hand = { x: number; y: number; bend: number };
+  const mix = (a: Hand, z: Hand, k: number): Hand => ({
+    x: a.x + (z.x - a.x) * k,
+    y: a.y + (z.y - a.y) * k,
+    bend: a.bend + (z.bend - a.bend) * k,
+  });
+  // A throw swings each arm round its shoulder (angle and length interpolated),
+  // so the hands arc over and down instead of cutting straight through the body.
+  const swing = (a: Hand, z: Hand, k: number, sx: number): Hand => {
+    const a0 = Math.atan2(a.y - P_SHOULDER_Y, a.x - sx);
+    const a1 = Math.atan2(z.y - P_SHOULDER_Y, z.x - sx);
+    const l0 = Math.hypot(a.x - sx, a.y - P_SHOULDER_Y);
+    const l1 = Math.hypot(z.x - sx, z.y - P_SHOULDER_Y);
+    const ang = a0 + (a1 - a0) * k;
+    const len = l0 + (l1 - l0) * k;
+    return { x: sx + Math.cos(ang) * len, y: P_SHOULDER_Y + Math.sin(ang) * len, bend: a.bend + (z.bend - a.bend) * k };
+  };
+  const restF: Hand = { x: b.hw - 0.5, y: 4, bend: -0.7 };
+  const restR: Hand = { x: -b.hw + 1.5, y: 3.5, bend: 0.7 };
+  // Swung back and down for the spring.
+  const dipF: Hand = { x: b.hw - 2.4, y: 5.4, bend: -1 };
+  const dipR: Hand = { x: -b.hw - 0.6, y: 4.8, bend: 0.9 };
+  // Raised in a wide V either side of the head, elbows out, palms under the orb.
+  const overhead = (c: number): [Hand, Hand] => {
+    const spread = Math.max(GREATER_ORB_MIN_SPREAD, greaterOrbReach(c));
+    return [
+      { x: GREATER_ORB_PALMS.x + spread, y: GREATER_ORB_PALMS.y, bend: 0.8 },
+      { x: GREATER_ORB_PALMS.x - spread, y: GREATER_ORB_PALMS.y, bend: -0.8 },
+    ];
+  };
+  // Hurled: both arms driven forward and down toward the foes below.
+  const thrownF: Hand = { x: 12, y: -1.2, bend: 0.4 };
+  const thrownR: Hand = { x: 5.6, y: 0.2, bend: 0.6 };
+
+  let front: Hand;
+  let rear: Hand;
+  if (release > 0) {
+    const u = 1 - Math.min(1, release);
+    const [upF, upR] = overhead(1);
+    if (u < 0.24) {
+      const k = ease.outCubic(u / 0.24);
+      front = swing(upF, thrownF, k, sho);
+      rear = swing(upR, thrownR, k, -sho);
+    } else if (u < 0.6) {
+      front = thrownF;
+      rear = thrownR;
+    } else {
+      const k = ease.inOutSine((u - 0.6) / 0.4);
+      front = mix(thrownF, restF, k);
+      rear = mix(thrownR, restR, k);
+    }
+  } else {
+    const c = Math.min(1, charge);
+    const [upF, upR] = overhead(c);
+    if (c < GREATER_ORB_CROUCH) {
+      const k = ease.inOutSine(c / GREATER_ORB_CROUCH);
+      front = mix(restF, dipF, k);
+      rear = mix(restR, dipR, k);
+    } else if (c < GREATER_ORB_APEX) {
+      const k = ease.outCubic((c - GREATER_ORB_CROUCH) / (GREATER_ORB_APEX - GREATER_ORB_CROUCH));
+      front = swing(dipF, upF, k, sho);
+      rear = swing(dipR, upR, k, -sho);
+    } else {
+      front = upF;
+      rear = upR;
+    }
+  }
+
+  arm(ctx, -sho, P_SHOULDER_Y, rear.x, rear.y, backLook, rear.bend);
+  arm(ctx, sho, P_SHOULDER_Y, front.x, front.y, look, front.bend);
+  cloak();
+  forearm(ctx, -sho, P_SHOULDER_Y, rear.x, rear.y, backLook, rear.bend);
+  forearm(ctx, sho, P_SHOULDER_Y, front.x, front.y, look, front.bend);
+  return front.y < -9 ? () => forearm(ctx, sho, P_SHOULDER_Y, front.x, front.y, look, front.bend) : null;
 }

@@ -123,17 +123,32 @@ export interface AbilityDef {
    */
   duration?: number;
   /**
-   * For a channelled beam ability (the Mage's Mana Ray): half-width of the beam
-   * corridor in pixels (the reach is the champion's range at cast). Falls back to
-   * a default if unset.
+   * For a channelled beam ability (the Mage's Mana Ray) or a ground fissure (the
+   * Claymore's Earthsplitter): half-width of the struck corridor in pixels. Falls
+   * back to a default if unset.
    */
   aoeWidth?: number;
+  /**
+   * For a fissure ability (the Claymore's Earthsplitter): how far the crack runs,
+   * as a multiple of the champion's range at cast. Falls back to 1 if unset.
+   */
+  reachMult?: number;
+  /**
+   * Distance in pixels the ability shoves every survivor it strikes back along
+   * its path (bosses take half). Omitted / 0 = no shove.
+   */
+  knockback?: number;
   /**
    * For a channelled beam ability: seconds between damage ticks (the Mana Ray
    * strikes everything in the beam once every `tickInterval`). Falls back to a
    * default if unset.
    */
   tickInterval?: number;
+  /**
+   * For an empowering ability (the Longbow's Piercing Shot): how many of the
+   * champion's next attacks it empowers. Omitted for every other ability.
+   */
+  charges?: number;
   /** Recharge time in seconds after each use. */
   cooldown: number;
   /**
@@ -288,7 +303,9 @@ export interface UnitVisual {
   | 'elf'
   | 'bard'
   | 'player-blade'
+  | 'player-claymore'
   | 'player-bow'
+  | 'player-longbow'
   | 'player-magic';
   /**
    * For the `player-*` shapes: the composed avatar config to render, so the board

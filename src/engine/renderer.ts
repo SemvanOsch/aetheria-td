@@ -28,16 +28,21 @@
 import { BOARD_HEIGHT, BOARD_WIDTH, TILE, type Vec2 } from '../domain/grid';
 import { DEFAULT_PATH_LAYERS, type BoardTheme } from '../domain/decor';
 import { atmosphereFor, type Atmosphere } from '../domain/atmosphere';
-import { coneAngleDeg, DEFAULT_BURST_RADIUS, getUnit } from '../domain/units';
+import { coneAngleDeg, getUnit } from '../domain/units';
 import { getEnemy } from '../domain/enemies';
 import {
   drawBladeTrails,
+  drawClaymoreTrails,
   drawEnemySprite,
   drawFeather,
   drawUnitSprite,
   enemyWalkPeriod,
+  greaterOrbAnchor,
+  greaterOrbRadius,
   hasEnemySprite,
   hasSprite,
+  longbowArrow,
+  longbowCastGlow,
   MAGIC_CAST_POINT,
   magicOrbAnchor,
   magicOrbRadius,
@@ -57,7 +62,19 @@ import {
   DEATH_FALL_TIME,
   DEATH_HOLD_TIME,
 } from './GameEngine';
-import { attackAnimTime, currentSpeechLine, isSpeaking } from './types';
+import {
+  attackAnimTime,
+  currentSpeechLine,
+  EARTHSPLITTER_HIT_DELAY,
+  GREATER_ORB_APEX,
+  GREATER_ORB_CROUCH,
+  GREATER_ORB_JUMP,
+  GREATER_ORB_LAND,
+  GREATER_ORB_THROW_TIME,
+  isSpeaking,
+  PIERCING_CAST_ANIM_TIME,
+  specialAnimTime,
+} from './types';
 import type { Enemy, Tower } from './types';
 import type { GameEngine } from './GameEngine';
 
@@ -129,6 +146,20 @@ interface BoardState {
   /** Reused per frame to avoid allocation churn. */
   lights: Light[];
   drawables: Drawable[];
+  /** Each Greater Orb caster's drawn leap height, and any drop out of it (see `settleLeap`). */
+  leaps: WeakMap<Tower, LeapState>;
+}
+
+/**
+ * Where a Greater Orb caster was last drawn in its leap (`lift`), and — once a
+ * Mana Ray has cut the leap short — the height it is dropping from and when the
+ * drop began (`dropAt` < 0 when not dropping).
+ */
+interface LeapState {
+  lift: number;
+  dropFrom: number;
+  dropAt: number;
+  landed: boolean;
 }
 
 const STATES = new WeakMap<GameEngine, BoardState>();
@@ -169,6 +200,7 @@ function stateFor(engine: GameEngine): BoardState {
     chimneys,
     lights: [],
     drawables: [],
+    leaps: new WeakMap(),
   };
   STATES.set(engine, st);
   return st;
@@ -221,6 +253,7 @@ export function drawBoard(
 
   // 1. Ground.
   drawGround(ctx, engine, st);
+  st.vfx.drawDecals(ctx);
   drawPathPreview(ctx, engine);
   drawPlacementHints(ctx, engine, ui);
   drawSelectedRange(ctx, engine, ui);
@@ -239,7 +272,9 @@ export function drawBoard(
   // 4. Glow: attacks and spells read as light.
   drawSlices(ctx, engine);
   drawBeams(ctx, engine);
+  drawSlamTelegraphs(ctx, engine);
   drawQuickdraws(ctx, engine);
+  drawLongbowGlows(ctx, engine);
   drawProjectiles(ctx, engine, st.vfx, dt);
   drawThrownSpears(ctx, engine);
   drawPuffs(ctx, engine);
@@ -453,12 +488,23 @@ function collectLights(engine: GameEngine, st: BoardState, time: number): Light[
     // Quickdraw's charged bow casts a soft light in the archer's colour.
     const qd = quickdrawLevel(t);
     if (qd > 0) out.push({ x: t.pos.x, y: t.pos.y - 4, radius: 56, family: 'holy', intensity: 0.45 * qd, glow: 0.35, tint: t.def.visual.color });
-    if (t.charge > 0 && t.chargeMax > 0) {
+    if (t.charge > 0 && t.chargeMax > 0 && t.def.visual.shape === 'player-longbow') {
+      // A plain draw is no spell: just a faint warmth in the archer's colour
+      // building toward the loose.
       const k = 1 - t.charge / t.chargeMax;
+      out.push({ x: t.pos.x, y: t.pos.y - 6, radius: 24 + 14 * k, family: 'holy', intensity: 0.12 + 0.18 * k, glow: 0.1, tint: t.def.visual.color });
+    } else if (t.charge > 0 && t.chargeMax > 0) {
+      const c = 1 - t.charge / t.chargeMax;
       const fam = t.def.visual.shape === 'wizard' ? 'wind' : 'arcane';
-      // The Magic adventurer's orb glows in its own colour.
+      // The Magic adventurer's orb glows in its own colour; the Greater Orb's
+      // swells overhead (glowing only once it kindles) and lights a wider pool.
       const tint = t.def.visual.shape === 'player-magic' ? t.def.visual.color : undefined;
-      out.push({ x: t.pos.x, y: t.pos.y - 6, radius: 30 + 60 * k, family: fam, intensity: 0.4 + 0.5 * k, tint });
+      if (t.greaterOrb) {
+        const k = greaterOrbRadius(c) / greaterOrbRadius(1);
+        if (k > 0) out.push({ x: t.pos.x, y: t.pos.y - 32, radius: 40 + 90 * k, family: fam, intensity: 0.35 + 0.6 * k, tint });
+      } else {
+        out.push({ x: t.pos.x, y: t.pos.y - 6, radius: 30 + 60 * c, family: fam, intensity: 0.4 + 0.5 * c, tint });
+      }
     }
     if (t.beamTimer > 0) {
       const ux = Math.cos(t.beamAngle);
@@ -477,9 +523,10 @@ function collectLights(engine: GameEngine, st: BoardState, time: number): Light[
     }
   }
   for (const p of engine.projectiles) {
-    if (p.style === 'orb') out.push({ x: p.pos.x, y: p.pos.y, radius: 80, family: 'arcane', intensity: 0.85, tint: p.color });
+    if (p.style === 'orb') out.push({ x: p.pos.x, y: p.pos.y, radius: 80 * p.scale, family: 'arcane', intensity: 0.85, tint: p.color });
     else if (p.style === 'magic') out.push({ x: p.pos.x, y: p.pos.y, radius: 46, family: 'arcane', intensity: 0.6 });
     else if (p.style === 'wind') out.push({ x: p.pos.x, y: p.pos.y, radius: 34, family: 'wind', intensity: 0.45 });
+    else if (p.style === 'pierce') out.push({ x: p.pos.x, y: p.pos.y, radius: 64, family: 'arcane', intensity: 0.75, tint: p.color });
   }
   for (const s of engine.slices) {
     const lx = s.pos.x + Math.cos(s.angle) * s.lead;
@@ -865,6 +912,93 @@ function contactShadow(ctx: CanvasRenderingContext2D, y: number, rx: number, ry:
 }
 
 /**
+ * The Greater Orb caster's whole-body motion, along the phases in `types.ts`:
+ * `lift` (board px off the floor) and a `squash` added to the figure's stretch
+ * (negative = crouched). The charge is the leap — a crouch, the spring (the
+ * crouch snapping into a stretch), then a hang at the apex with a slow bob that
+ * turns to a strained tremble as the orb fills. The throw-down holds the apex
+ * through the hurl, falls under gravity and lands in a squash that recovers.
+ * Zero for every other champion, and while a Mana Ray channels.
+ */
+function greaterOrbBody(t: Tower, time: number): { lift: number; squash: number } {
+  const none = { lift: 0, squash: 0 };
+  if (!t.greaterOrb || t.beamTimer > 0) return none;
+  if (t.specialAnim > 0) {
+    const u = 1 - t.specialAnim / GREATER_ORB_THROW_TIME;
+    if (u < 0.24) return { lift: GREATER_ORB_JUMP, squash: 0.03 * ease.hump(u / 0.24) };
+    if (u < GREATER_ORB_LAND) {
+      const k = (u - 0.24) / (GREATER_ORB_LAND - 0.24);
+      return { lift: GREATER_ORB_JUMP * (1 - k * k), squash: 0.04 * k };
+    }
+    const k = (u - GREATER_ORB_LAND) / (1 - GREATER_ORB_LAND);
+    return { lift: 0, squash: -0.12 * (1 - ease.outQuad(k)) };
+  }
+  if (t.charge > 0 && t.chargeMax > 0) {
+    const c = 1 - t.charge / t.chargeMax;
+    if (c < GREATER_ORB_CROUCH) return { lift: 0, squash: -0.11 * ease.inOutSine(c / GREATER_ORB_CROUCH) };
+    if (c < GREATER_ORB_APEX) {
+      const k = (c - GREATER_ORB_CROUCH) / (GREATER_ORB_APEX - GREATER_ORB_CROUCH);
+      return {
+        lift: GREATER_ORB_JUMP * ease.outCubic(k),
+        squash: -0.11 * Math.max(0, 1 - k * 4) + 0.07 * ease.hump(k),
+      };
+    }
+    const h = (c - GREATER_ORB_APEX) / (1 - GREATER_ORB_APEX);
+    const strain = Math.max(0, (h - 0.7) / 0.3);
+    const bob = Math.sin(time * 5) * 0.5 * (1 - strain) + Math.sin(time * 51) * 0.25 * strain;
+    return { lift: GREATER_ORB_JUMP + bob, squash: 0 };
+  }
+  return none;
+}
+
+/** Seconds a Greater Orb caster takes to fall out of a leap a Mana Ray cut short (its landing squash takes as long again). */
+const LEAP_DROP_TIME = 0.1;
+
+/**
+ * Smooth a Greater Orb caster out of a leap that a Mana Ray cuts short. The cast
+ * drops the engine's charge at once, so `greaterOrbBody` goes straight to the
+ * floor; instead the hero falls from the height it was last drawn at over
+ * `LEAP_DROP_TIME` (accelerating, like the throw's fall), touches down with dust
+ * and settles a quick squash. Otherwise passes `body` through, remembering its
+ * height for next frame.
+ */
+function settleLeap(
+  st: BoardState,
+  t: Tower,
+  body: { lift: number; squash: number },
+  time: number,
+): { lift: number; squash: number } {
+  if (!t.greaterOrb) return body;
+  let s = st.leaps.get(t);
+  if (!s) {
+    s = { lift: 0, dropFrom: 0, dropAt: -1, landed: false };
+    st.leaps.set(t, s);
+  }
+  if (t.beamTimer > 0 && s.lift > 0.01 && s.dropAt < 0) {
+    s.dropFrom = s.lift;
+    s.dropAt = time;
+    s.landed = false;
+  }
+  let out = body;
+  if (s.dropAt >= 0) {
+    const k = (time - s.dropAt) / LEAP_DROP_TIME;
+    if (k < 1) {
+      out = { lift: s.dropFrom * (1 - k * k), squash: 0.03 * k };
+    } else if (k < 2) {
+      if (!s.landed) {
+        s.landed = true;
+        st.vfx.consume([{ kind: 'cast', ability: 'land', x: t.pos.x, y: t.pos.y, color: t.def.visual.color, radius: 24 }]);
+      }
+      out = { lift: 0, squash: -0.09 * (2 - k) };
+    } else {
+      s.dropAt = -1;
+    }
+  }
+  s.lift = out.lift;
+  return out;
+}
+
+/**
  * One deployed champion: contact shadow, aura tells, then the figure through
  * the compositor with idle breathing, a weight-shift sway, an anticipation lean
  * before each strike and an eased lunge/follow-through after it.
@@ -902,9 +1036,12 @@ function drawTower(
   let ox = 0;
   let oy = 0;
   let squash = 0;
-  const strike = Math.max(0, Math.min(1, t.attackAnim / attackAnimTime(t.def.visual.shape)));
+  const shape = t.def.visual.shape;
+  const strike = Math.max(0, Math.min(1, t.attackAnim / attackAnimTime(shape)));
   if (strike > 0 && target) {
-    const push = ease.outCubic(strike) * 5;
+    // The Claymore's heavy swing carries the whole body a step further in; the
+    // Longbow's heavy loose instead rocks the archer back a little.
+    const push = ease.outCubic(strike) * (shape === 'player-claymore' ? 6.5 : shape === 'player-longbow' ? -1.6 : 5);
     ox += ux * push;
     oy += uy * push;
     squash -= 0.04 * strike;
@@ -916,9 +1053,13 @@ function drawTower(
     squash += 0.035 * wind;
   }
   // The Magic adventurer leans back as it draws its swelling orb in, and leans
-  // into a channelled Mana Ray, trembling with the strain of holding it.
+  // into a channelled Mana Ray, trembling with the strain of holding it. The
+  // Greater Orb caster instead leaps (see `greaterOrbBody`), easing back down if
+  // a Mana Ray cuts the leap short (`settleLeap`).
+  const leap = settleLeap(st, t, greaterOrbBody(t, time), time);
+  squash += leap.squash;
   if (t.def.visual.shape === 'player-magic') {
-    if (t.charge > 0 && t.chargeMax > 0 && target) {
+    if (t.charge > 0 && t.chargeMax > 0 && target && !t.greaterOrb) {
       const k = ease.inOutSine(1 - t.charge / t.chargeMax);
       ox -= ux * 1.6 * k;
       oy -= uy * 0.8 * k;
@@ -929,11 +1070,65 @@ function drawTower(
       oy += Math.sin(t.beamAngle) * 0.7;
     }
   }
+  // The Claymore leans back and sinks as it hefts the great blade up.
+  if (shape === 'player-claymore' && t.charge > 0 && t.chargeMax > 0 && target) {
+    const k = ease.inOutSine(1 - t.charge / t.chargeMax);
+    ox -= ux * 2.2 * k;
+    oy -= uy * 1.1 * k;
+    squash += 0.035 * k;
+  }
+  // The Longbow leans back into its slow draw, trembling with the strain as it
+  // holds at full draw.
+  if (shape === 'player-longbow' && t.charge > 0 && t.chargeMax > 0 && target) {
+    const k = ease.inOutSine(1 - t.charge / t.chargeMax);
+    const hold = Math.max(0, (k - 0.85) / 0.15);
+    ox -= ux * 1.4 * k + Math.sin(time * 53) * 0.25 * hold;
+    oy -= uy * 0.6 * k;
+    squash += 0.02 * k;
+  }
+  // Signature moves (`u` 0 → 1 through the move), toward the aim point:
+  //  - Cross Slash: settles back into the coil, then lunges through the X and
+  //    holds the follow-through before stepping back.
+  //  - Earthsplitter: stretches tall as the blade goes up, then drops its whole
+  //    weight into the slam — a crouch and a short step in — and rises again.
+  const sp = t.specialAnim > 0 ? 1 - t.specialAnim / specialAnimTime(shape) : -1;
+  if (sp >= 0 && aimPt) {
+    const d = Math.hypot(aimPt.x - x, aimPt.y - y) || 1;
+    const ax = (aimPt.x - x) / d;
+    const ay = (aimPt.y - y) / d;
+    const recover = 1 - ease.inOutSine(Math.max(0, (sp - 0.62) / 0.38));
+    if (shape === 'player-blade') {
+      const coil = sp < 0.3 ? ease.inOutSine(Math.min(1, sp / 0.24)) : 0;
+      const lunge = sp >= 0.3 ? ease.outCubic(Math.min(1, (sp - 0.3) / 0.12)) * recover : 0;
+      const push = lunge * 7 - coil * 2.4;
+      ox += ax * push;
+      oy += ay * push;
+      squash += coil * 0.045 - lunge * 0.05;
+    } else if (shape === 'player-longbow') {
+      // Piercing Shot: the archer straightens tall as the bow goes up to the sky.
+      squash -= 0.05 * longbowCastGlow(t.specialAnim / PIERCING_CAST_ANIM_TIME);
+    } else if (shape === 'player-magic') {
+      // The Greater Orb's throw-down: a small forward drive as the orb is hurled
+      // (its fall and landing ride on `greaterOrbBody`).
+      const drive = ease.hump(Math.min(1, sp / 0.4)) * 1.6;
+      ox += ax * drive;
+      oy += ay * drive * 0.5;
+    } else {
+      // Phases match `claymoreSlamPose`: hoist to 0.18, held wind-up (leaning
+      // back, rising onto the toes) to 0.46, the fall to 0.571, then recovery.
+      const lift = sp < 0.46 ? ease.inOutSine(Math.min(1, sp / 0.4)) : sp < 0.571 ? 1 - (sp - 0.46) / 0.111 : 0;
+      const drop = sp >= 0.571 ? (1 - ease.inOutSine(Math.min(1, (sp - 0.571) / 0.4))) : 0;
+      const push = drop * 3.2 - lift * 2;
+      ox += ax * push;
+      oy += ay * push * 0.5;
+      squash += drop * 0.09 - lift * 0.05;
+    }
+  }
 
   // Idle life: breathing (a gentle rise and settle about the feet) and a slow
   // weight shift. Damped while the champion is mid-attack.
   const phase = t.uid * 1.37;
-  const idle = strike > 0 || t.charge > 0 ? 0.3 : 1;
+  const idle = strike > 0 || t.charge > 0 || t.specialAnim > 0 ? 0.3 : 1;
   const breath = Math.sin(time * 2.1 + phase) * idle;
   const sway = Math.sin(time * 0.85 + phase * 0.7) * 0.35 * idle;
 
@@ -950,7 +1145,9 @@ function drawTower(
     ctx.scale(s, s);
     drawMoraleGlow(ctx, moraleStacks);
   }
-  contactShadow(ctx, 10.5, 15, 6);
+  // The shadow stays on the floor and shrinks while the Greater Orb caster is airborne.
+  const air = leap.lift / GREATER_ORB_JUMP;
+  contactShadow(ctx, 10.5, 15 * (1 - 0.3 * air), 6 * (1 - 0.3 * air), 1 - 0.45 * air);
   // The player's own champion gets a thin outline around its foot shadow, tinted
   // from its portrait's outfit colour — a subtle "this hero is yours" marker.
   // While its ability haste is active (the Bow's Quickdraw) the ring *flares*.
@@ -976,6 +1173,8 @@ function drawTower(
     ctx.restore();
   }
 
+  // Off the ground for the Greater Orb's leap (the foot ring stays below).
+  if (leap.lift) ctx.translate(0, -leap.lift);
   // Breathing + sway + squash about the feet.
   ctx.translate(sway, 11);
   ctx.scale(FIGURE_SCALE * (1 - 0.008 * breath - squash * 0.5), FIGURE_SCALE * (1 + 0.018 * breath + squash));
@@ -985,35 +1184,55 @@ function drawTower(
   if (hasSprite(t.def.visual.shape)) {
     // `anim` eases with the attack (1 just after a strike → 0 at rest); each
     // sprite reads it its own way (bowstring snap, sword swing). A throw drives
-    // it from the longer `throwAnim`; a charge ramps it 0→1 across the wind-up.
-    const throwing = t.throwAnim > 0;
+    // it from the longer `throwAnim`, a signature move (Cross Slash /
+    // Earthsplitter) from `specialAnim`; a charge ramps it 0→1 across the wind-up.
+    const special = t.specialAnim > 0;
+    const throwing = t.throwAnim > 0 || special;
     const charging = t.charge > 0 && t.chargeMax > 0;
-    const shape = t.def.visual.shape;
-    const rawAnim =
-      shape === 'player-magic'
+    const rawAnim = special
+      ? t.specialAnim / specialAnimTime(shape) // linear: its blow is timed to the cut window
+      : shape === 'player-magic'
         ? t.beamTimer > 0
           ? 1 // hands held thrust out through a Mana Ray channel
           : strike // throw → recover (its charge rides on `draw`)
-        : charging
-          ? ease.inOutSine(1 - t.charge / t.chargeMax)
-          : throwing
-            ? t.throwAnim / THROW_ANIM_TIME
-            : shape === 'player-blade' || shape === 'player-bow'
-              ? strike // linear: the Blade's cuts land with its two hits; the Bow's phases are timed
-              : ease.outQuad(strike);
-    // Quantized so attack poses reuse cached frames (12 steps is smooth at 0.18s).
-    const anim = Math.round(rawAnim * 12) / 12;
-    // The sprite's second input: the Bow's raise + draw, or the Magic orb charge.
-    const rawDraw = shape === 'player-magic' ? (charging ? 1 - t.charge / t.chargeMax : 0) : bowDraw(t, !!target);
-    // Finer steps for the slow orb charge, so the cupping hands track the orb.
-    const drawSteps = shape === 'player-magic' ? 24 : 12;
+        : shape === 'player-claymore' || shape === 'player-longbow'
+          ? strike // linear release; the heft wind-up / slow draw rides on `draw`
+          : charging
+            ? ease.inOutSine(1 - t.charge / t.chargeMax)
+            : throwing
+              ? t.throwAnim / THROW_ANIM_TIME
+              : shape === 'player-blade' || shape === 'player-bow'
+                ? strike // linear: the Blade's cuts land with its two hits; the Bow's phases are timed
+                : ease.outQuad(strike);
+    // Quantized so attack poses reuse cached frames (12 steps is smooth at 0.18s;
+    // the longer signature moves and the Claymore's fast cut need 24).
+    const animSteps = special || shape === 'player-claymore' || shape === 'player-longbow' ? 24 : 12;
+    const anim = Math.round(rawAnim * animSteps) / animSteps;
+    // The sprite's second input: the Bow's raise + draw, the Magic orb charge,
+    // the Claymore's heft or the Longbow's slow draw.
+    const rawDraw =
+      shape === 'player-magic' || shape === 'player-claymore' || shape === 'player-longbow'
+        ? charging
+          ? 1 - t.charge / t.chargeMax
+          : 0
+        : bowDraw(t, !!target);
+    // Finer steps for the slow orb charge (so the cupping hands track the orb)
+    // and the heft; finer still for the Greater Orb's leap, whose arms sweep
+    // overhead in a short slice of a long charge.
+    const drawSteps = t.greaterOrb
+      ? 48
+      : shape === 'player-magic' || shape === 'player-claymore' || shape === 'player-longbow'
+        ? 24
+        : 12;
     const draw = Math.round(rawDraw * drawSteps) / drawSteps;
     // The "empowered" flourish marks a champion whose signature upgrade is
     // bought — wind motes for the Wizard (Wind Slice → cone), arcane sparkles
-    // off the Elf's bow once Chain Enchantment lifts her bounce count.
+    // off the Elf's bow once Chain Enchantment lifts her bounce count, and the
+    // Magic adventurer's leaping overhead cast once the Greater Orb is active.
     const empowered =
       t.aoe === 'cone' ||
-      (t.def.visual.shape === 'elf' && t.bounces > (t.def.bounces ?? 0));
+      (t.def.visual.shape === 'elf' && t.bounces > (t.def.bounces ?? 0)) ||
+      (shape === 'player-magic' && t.greaterOrb);
     const style = boardStyle(st, t.def.visual.playerConfig?.outfitColor ?? t.def.visual.color);
     // The player's adventurer often shows bare, dark hair, which the full rim and
     // head lift wash to grey; give it the journal portrait's softer light.
@@ -1038,16 +1257,31 @@ function drawTower(
         ? undefined
         : `u|${t.def.visual.shape}|${t.def.visual.color}|${faceLeft ? 1 : 0}|${anim}|${throwing ? 1 : 0}|${empowered ? 1 : 0}|${draw}|${cfgKey(t.def.visual.playerConfig)}`,
     );
-    // The Blade adventurer's slash streaks, outside the compositor so they stay
-    // clean light (from the unquantized anim, so they sweep smoothly).
-    if (t.def.visual.shape === 'player-blade') drawBladeTrails(ctx, faceLeft, rawAnim);
+    // The Blade adventurer's slash streaks and the Claymore's smear, outside the
+    // compositor so they stay clean light (from the unquantized anim, so they
+    // sweep smoothly).
+    if (shape === 'player-blade') drawBladeTrails(ctx, faceLeft, rawAnim, special);
+    else if (shape === 'player-claymore') drawClaymoreTrails(ctx, faceLeft, rawAnim, special);
     // The Magic adventurer visibly gathers its orb during the wind-up.
     if (t.aoe === 'circle' && charging) {
       // Held where the sprite's hands cup it (same charge step as the sprite).
       const grow = draw;
       const accent = t.def.visual.playerConfig?.outfitColor ?? t.def.visual.color;
-      const o = magicOrbAnchor(grow);
-      drawChargingOrb(ctx, (faceLeft ? -1 : 1) * o.x, o.y, magicOrbRadius(grow), accent, grow);
+      if (t.greaterOrb) {
+        // The Greater Orb swells above the head on the raised palms, drawing
+        // motes in from the air around it.
+        const radius = greaterOrbRadius(grow);
+        if (radius > 0) {
+          const o = greaterOrbAnchor(grow);
+          const cx = (faceLeft ? -1 : 1) * o.x;
+          const k = radius / greaterOrbRadius(1);
+          drawOrbGather(ctx, cx, o.y, radius, accent, time, k);
+          drawChargingOrb(ctx, cx, o.y, radius, accent, k);
+        }
+      } else {
+        const o = magicOrbAnchor(grow);
+        drawChargingOrb(ctx, (faceLeft ? -1 : 1) * o.x, o.y, magicOrbRadius(grow), accent, grow);
+      }
     }
   } else {
     // Emoji fallback token: a lit disc with an inked rim.
@@ -1363,8 +1597,8 @@ function drawAoeIndicator(
 
   if (t.aoe === 'circle') {
     // The orb detonates at the aim point, so show the blast circle there (its
-    // `burstRadius`) plus a small cross marking the impact centre.
-    const radius = t.def.burstRadius ?? DEFAULT_BURST_RADIUS;
+    // mastery-widened `burstRadius`) plus a small cross marking the impact centre.
+    const radius = t.burstRadius;
     ctx.save();
     ctx.translate(point.x, point.y);
     ctx.globalAlpha = 0.2;
@@ -1847,13 +2081,15 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine, vfx:
   for (const p of engine.projectiles) {
     const target = engine.enemies.find((e) => e.uid === p.targetUid && !e.dead);
     const dest = target ? target.pos : p.last;
-    const ang = Math.atan2(dest.y - p.pos.y, dest.x - p.pos.x);
+    // A piercing arrow flies straight on rather than homing.
+    const ang = p.pierce ? Math.atan2(p.pierce.dir.y, p.pierce.dir.x) : Math.atan2(dest.y - p.pos.y, dest.x - p.pos.x);
     // Fading magical tail: draw the arrow's recent positions (world space, before
     // the local rotate/scale) as motes that shrink and dim into the distance.
     if (p.trail && p.trail.length) drawMagicTrail(ctx, p.trail, p.color);
     if (p.style === 'orb') vfx.trail('orb', p.pos.x, p.pos.y, p.color, dt);
     else if (p.style === 'magic') vfx.trail('arcane', p.pos.x, p.pos.y, p.color, dt);
     else if (p.style === 'wind') vfx.trail('wind', p.pos.x, p.pos.y, p.color, dt);
+    else if (p.style === 'pierce') vfx.trail('arcane', p.pos.x, p.pos.y, p.color, dt);
     else if (quickdrawLevel(p.source) > 0) vfx.trail('arcane', p.pos.x, p.pos.y, p.color, dt);
     ctx.save();
     ctx.translate(p.pos.x, p.pos.y);
@@ -1870,6 +2106,8 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine, vfx:
       // heading), so undo the travel rotation before painting it round.
       ctx.rotate(-ang);
       drawChargingOrb(ctx, 0, 0, 5.5, p.color, 1);
+    } else if (p.style === 'pierce') {
+      drawPiercingArrow(ctx, p.color);
     } else {
       // An arrow loosed under Quickdraw streaks in as a bolt of the archer's colour.
       const q = quickdrawLevel(p.source);
@@ -1961,6 +2199,35 @@ function drawChargingOrb(
   ctx.beginPath();
   ctx.arc(cx - radius * 0.12, cy - radius * 0.12, radius * (0.28 + 0.14 * k), 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
+}
+
+/**
+ * Motes spiralling in toward the swelling Greater Orb at (cx, cy) — the air
+ * being drawn into the spell. Each mote fades in far out, brightens as it
+ * closes, and vanishes into the orb's rim; `k` (0..1, the orb's growth) thickens
+ * the stream.
+ */
+function drawOrbGather(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  color: string,
+  time: number,
+  k: number,
+): void {
+  ctx.save();
+  ctx.fillStyle = shade(color, 0.45);
+  for (let i = 0; i < 7; i++) {
+    const p = (time * 1.4 + i / 7) % 1; // 0 far out → 1 arriving
+    const a = i * 2.39 + time * 2.4 + p * 1.6;
+    const d = radius + 1.5 + (1 - p) * 10;
+    ctx.globalAlpha = Math.min(1, p * 3) * (1 - p) * 1.8 * (0.35 + 0.65 * k);
+    ctx.beginPath();
+    ctx.arc(cx + Math.cos(a) * d, cy + Math.sin(a) * d * 0.85, 0.6 + 0.5 * p, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
@@ -2504,6 +2771,171 @@ function drawQuickdrawStreak(ctx: CanvasRenderingContext2D, color: string, q: nu
   ctx.restore();
 }
 
+/**
+ * The Longbow's piercing arrow in flight, in its local frame (+x forward): a
+ * long blazing streak and a halo in the archer's colour, then the big arrow
+ * itself with a white-hot point — it reads as light, never darkened.
+ */
+function drawPiercingArrow(ctx: CanvasRenderingContext2D, color: string): void {
+  const ramp = tintRamp(color);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  // Wide soft halo along the shaft.
+  const halo = ctx.createLinearGradient(-40, 0, 10, 0);
+  halo.addColorStop(0, withAlpha(color, 0));
+  halo.addColorStop(1, withAlpha(color, 0.5));
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.moveTo(-40, 0);
+  ctx.lineTo(2, -4.5);
+  ctx.quadraticCurveTo(12, 0, 2, 4.5);
+  ctx.closePath();
+  ctx.fill();
+  // Bright streak with a white core.
+  const streak = ctx.createLinearGradient(-30, 0, 8, 0);
+  streak.addColorStop(0, withAlpha(ramp[1], 0));
+  streak.addColorStop(1, withAlpha(ramp[1], 0.9));
+  ctx.strokeStyle = streak;
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(-30, 0);
+  ctx.lineTo(6, 0);
+  ctx.stroke();
+  const core = ctx.createLinearGradient(-16, 0, 8, 0);
+  core.addColorStop(0, 'rgba(255,255,255,0)');
+  core.addColorStop(1, 'rgba(255,255,255,0.9)');
+  ctx.strokeStyle = core;
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.moveTo(-16, 0);
+  ctx.lineTo(7, 0);
+  ctx.stroke();
+  ctx.restore();
+  // The arrow: shaft, fletching in the archer's colour, a glowing bodkin point.
+  ctx.strokeStyle = '#8a6036';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-7, 0);
+  ctx.lineTo(4, 0);
+  ctx.stroke();
+  ctx.strokeStyle = shade(color, 0.3);
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.moveTo(-5, 0);
+  ctx.lineTo(-8.5, -2.2);
+  ctx.moveTo(-5, 0);
+  ctx.lineTo(-8.5, 2.2);
+  ctx.stroke();
+  ctx.fillStyle = shade(color, 0.6);
+  ctx.beginPath();
+  ctx.moveTo(3.6, -2);
+  ctx.lineTo(9.5, 0);
+  ctx.lineTo(3.6, 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.95)';
+  ctx.beginPath();
+  ctx.arc(8, 0, 1.1, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/**
+ * The Longbow's Piercing Shot, drawn additively in the glow pass in the archer's
+ * colour:
+ *  - the cast: as the bow is raised to the sky its arrow kindles — a glow along
+ *    the shaft and a flaring, turning star at the point (the ring, sparks and
+ *    light pulse come from `Vfx`'s `piercingShot` cast);
+ *  - while piercing arrows remain nocked: the arrow on the string keeps a soft,
+ *    pulsing glow, and a small glowing pip per arrow floats above the archer.
+ */
+function drawLongbowGlows(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
+  const time = now() / 1000;
+  for (const t of engine.towers) {
+    if (t.def.visual.shape !== 'player-longbow') continue;
+    const castAnim = t.specialAnim > 0 ? t.specialAnim / PIERCING_CAST_ANIM_TIME : 0;
+    const cast = longbowCastGlow(castAnim);
+    if (cast <= 0 && t.pierceShots <= 0) continue;
+    const color = t.def.visual.color;
+    const ramp = tintRamp(color);
+    const aim = t.aimTarget;
+    const dir = aim && aim.x < t.pos.x ? -1 : 1;
+    // Local sprite point → board, through the figure's scale about its feet.
+    const toBoard = (lx: number, ly: number) => ({
+      x: t.pos.x + dir * lx * FIGURE_SCALE,
+      y: t.pos.y + 11 + (ly - 11) * FIGURE_SCALE,
+    });
+    const release = castAnim > 0 ? 0 : t.attackAnim / attackAnimTime('player-longbow');
+    const draw = t.charge > 0 && t.chargeMax > 0 ? 1 - t.charge / t.chargeMax : 0;
+    const arrow = longbowArrow(release, draw, castAnim);
+    const pulse = 0.75 + 0.25 * Math.sin(time * 9 + t.uid);
+    const level = Math.max(cast, t.pierceShots > 0 ? 0.55 * pulse : 0);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    if (arrow && level > 0) {
+      const head = toBoard(arrow.x, arrow.y);
+      const ang = dir > 0 ? arrow.angle : Math.PI - arrow.angle;
+      const len = arrow.length * FIGURE_SCALE;
+      const tail = { x: head.x - Math.cos(ang) * len, y: head.y - Math.sin(ang) * len };
+      // A glow running the length of the shaft…
+      const g = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
+      g.addColorStop(0, withAlpha(color, 0));
+      g.addColorStop(1, withAlpha(ramp[1], 0.7 * level));
+      ctx.strokeStyle = g;
+      ctx.lineWidth = 3 + 2 * cast;
+      ctx.beginPath();
+      ctx.moveTo(tail.x, tail.y);
+      ctx.lineTo(head.x, head.y);
+      ctx.stroke();
+      // …and a burning point.
+      const r = 6 + 10 * cast;
+      const pt = ctx.createRadialGradient(head.x, head.y, 0, head.x, head.y, r);
+      pt.addColorStop(0, withAlpha('#ffffff', 0.8 * level));
+      pt.addColorStop(0.35, withAlpha(color, 0.55 * level));
+      pt.addColorStop(1, withAlpha(color, 0));
+      ctx.fillStyle = pt;
+      ctx.beginPath();
+      ctx.arc(head.x, head.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      // The cast flares a turning four-point star at the point.
+      if (cast > 0) {
+        const spin = time * 3 + t.uid;
+        ctx.strokeStyle = withAlpha('#ffffff', 0.85 * cast);
+        ctx.lineWidth = 1.2;
+        for (let i = 0; i < 4; i++) {
+          const a = spin + (i * Math.PI) / 2;
+          const reach = (i % 2 ? 8 : 13) * cast;
+          ctx.beginPath();
+          ctx.moveTo(head.x, head.y);
+          ctx.lineTo(head.x + Math.cos(a) * reach, head.y + Math.sin(a) * reach);
+          ctx.stroke();
+        }
+      }
+    }
+    // One pip per piercing arrow still nocked, floating above the archer.
+    if (t.pierceShots > 0) {
+      const top = toBoard(0, -22);
+      for (let i = 0; i < t.pierceShots; i++) {
+        const px = top.x + (i - (t.pierceShots - 1) / 2) * 6;
+        const py = top.y + Math.sin(time * 4 + i * 1.3) * 0.8;
+        ctx.fillStyle = withAlpha(color, 0.45 * pulse);
+        ctx.beginPath();
+        ctx.arc(px, py, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = withAlpha(ramp[1], 0.95);
+        ctx.beginPath();
+        ctx.moveTo(px, py - 2.6);
+        ctx.lineTo(px + 1.6, py);
+        ctx.lineTo(px, py + 2.6);
+        ctx.lineTo(px - 1.6, py);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+}
+
 /** Seconds the Mana Ray takes to lance out to full reach when cast. */
 const BEAM_IGNITE = 0.16;
 /** Seconds over which it collapses to a thread at the end of the channel. */
@@ -2553,6 +2985,54 @@ function beamOrigin(t: Tower): Vec2 {
  *  - a flickering, crackling flare where it ends.
  * Particles shed along its length come from `Vfx.beam` (see `drawBoard`).
  */
+/**
+ * The Earthsplitter's telegraph (glow pass, additive): while the slam is wound
+ * up (`Tower.slam` pending), the crack's coming path smoulders on the floor — a
+ * faint molten band out along the locked aim that creeps out from the hero's
+ * feet and brightens as the blade is about to fall.
+ */
+function drawSlamTelegraphs(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
+  for (const t of engine.towers) {
+    const s = t.slam;
+    if (!s) continue;
+    const k = Math.max(0, Math.min(1, 1 - s.timer / EARTHSPLITTER_HIT_DELAY));
+    const show = ease.inOutSine(Math.min(1, k / 0.6));
+    if (show <= 0.01) continue;
+    const len = (s.reach - 12) * ease.outCubic(Math.min(1, k * 1.25));
+    if (len < 1) continue;
+    const flicker = 0.85 + 0.15 * Math.sin(s.timer * 47 + t.uid);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.translate(t.pos.x + Math.cos(s.angle) * 12, t.pos.y + Math.sin(s.angle) * 12 + 8);
+    ctx.rotate(s.angle);
+    const hw = s.halfWidth * (0.55 + 0.25 * k);
+    const band = ctx.createLinearGradient(0, -hw, 0, hw);
+    band.addColorStop(0, 'rgba(255,120,40,0)');
+    band.addColorStop(0.5, `rgba(255,130,45,${0.2 * show * flicker})`);
+    band.addColorStop(1, 'rgba(255,120,40,0)');
+    ctx.fillStyle = band;
+    ctx.beginPath();
+    ctx.moveTo(0, -hw * 0.5);
+    ctx.lineTo(len, -hw);
+    ctx.lineTo(len, hw);
+    ctx.lineTo(0, hw * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    // A thin hot seam down the middle, fading out toward its far end.
+    const seam = ctx.createLinearGradient(0, 0, len, 0);
+    seam.addColorStop(0, `rgba(255,214,140,${0.55 * show * flicker})`);
+    seam.addColorStop(1, 'rgba(255,170,80,0)');
+    ctx.strokeStyle = seam;
+    ctx.lineWidth = 1 + k;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(len, 0);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 function drawBeams(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
   const now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
   for (const t of engine.towers) {

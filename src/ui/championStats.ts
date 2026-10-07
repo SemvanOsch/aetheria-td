@@ -7,6 +7,8 @@ import {
 } from '../domain/units';
 import {
   masteryBounceDamageMult,
+  masteryBurst,
+  masteryCrossSlash,
   masteryFinalBounceDamageMult,
   masteryGenerateMult,
   masteryHarvest,
@@ -26,6 +28,10 @@ export interface StatTile {
 /** "5%", "12.5%", "20%" — trims trailing zeros. */
 const pct = (f: number) => `${+(f * 100).toFixed(2)}%`;
 
+/** 1 → "1st", 2 → "2nd", 3 → "3rd", 4 → "4th". */
+export const ordinal = (n: number) =>
+  `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+
 /** A champion's role word: Economy, Support, or its attack shape. */
 export function championRole(unit: UnitDef): string {
   return unit.generator ? 'Economy' : unit.bard ? 'Support' : aoeLabel(unit.aoe);
@@ -40,8 +46,9 @@ export function championStatTiles(unit: UnitDef, purchased: string[]): StatTile[
   // Combat stats with permanent mastery multipliers and worn armor applied.
   const { damage, attackSpeed, range } = masteryStats(unit, 0, purchased);
   // Per-arrow DPS; a burst shooter (the Bow adventurer) shows the volley size as
-  // an "×N" beside it rather than folding it into the number.
-  const burst = unit.burst ?? 1;
+  // an "×N" beside it rather than folding it into the number (with any mastery
+  // override, e.g. Fivefold Volley).
+  const burst = masteryBurst(unit, purchased);
   const dps = damage * attackSpeed;
   // Generator yields with permanent mastery bonuses (e.g. Better Soil) applied.
   const harvest = unit.generator ? masteryHarvest(unit.generator.amount, unit.id, purchased) : 0;
@@ -52,6 +59,8 @@ export function championStatTiles(unit: UnitDef, purchased: string[]): StatTile[
   const bounceFraction = masteryBounceDamageMult(unit.id, purchased) || BOUNCE_DAMAGE_MULTS[0];
   // An extra, weaker final leap from mastery (the Elf's Parting Shot), if learned.
   const finalBounceFraction = masteryFinalBounceDamageMult(unit.id, purchased);
+  // The Blade's periodic X cut, if its Cross Slash node is active (dual blades only).
+  const crossSlash = unit.visual.shape === 'player-blade' ? masteryCrossSlash(unit.id, purchased) : undefined;
 
   const cost: StatTile = {
     label: 'Cost · Limit',
@@ -88,12 +97,17 @@ export function championStatTiles(unit: UnitDef, purchased: string[]): StatTile[
           ? 'per enemy in line'
           : unit.aoe === 'circle'
             ? 'per enemy in blast'
-            : burst > 1
+            : unit.aoe === 'cone'
+              ? 'per enemy in arc'
+              : burst > 1
               ? `${burst}-arrow burst`
               : 'per target',
     },
     { label: 'Crit rate', value: pct(critChanceFor(unit, purchased)), sub: 'chance per hit' },
     { label: 'Crit damage', value: `+${Math.round((critMultiplierFor(unit, purchased) - 1) * 100)}%`, sub: 'bonus damage' },
+    ...(crossSlash
+      ? [{ label: 'Cross Slash', value: `${crossSlash.damageMult}×`, sub: `every ${ordinal(crossSlash.every)} attack` }]
+      : []),
     ...(bounces > 0
       ? [
         {

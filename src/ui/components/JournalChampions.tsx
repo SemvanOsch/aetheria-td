@@ -81,8 +81,12 @@ export function JournalChampions({ ready, onTurn }: Props) {
   const pages = Math.max(1, Math.ceil(all.length / PER_PAGE));
   const shown = all.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE);
 
-  const [detail, setDetail] = useState<UnitDef | null>(null);
-  const [masteryUnit, setMasteryUnit] = useState<UnitDef | null>(null);
+  // Open sheets hold an id and re-resolve the def each render: a mastery change
+  // (e.g. the Blade's Claymore form) rebuilds the def while a sheet is open.
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [masteryId, setMasteryId] = useState<string | null>(null);
+  const detail = detailId ? getUnit(detailId) ?? null : null;
+  const masteryUnit = masteryId ? getUnit(masteryId) ?? null : null;
   // The armory, when open, and the slot tab it opens on ('all' = every piece).
   const [armoryTab, setArmoryTab] = useState<ArmorSlot | 'all' | null>(null);
 
@@ -119,8 +123,8 @@ export function JournalChampions({ ready, onTurn }: Props) {
             availableExp={availableMasteryExp(state, selected.id)}
             masteryReady={hasAffordableMasteryUpgrade(state, selected.id)}
             onToggleTeam={() => toggleTeamMember(selected.id)}
-            onMastery={() => setMasteryUnit(selected)}
-            onDetail={() => setDetail(selected)}
+            onMastery={() => setMasteryId(selected.id)}
+            onDetail={() => setDetailId(selected.id)}
             armor={isPlayerChampionId(selected.id) ? equippedArmor(state) : undefined}
             armorLocked={!isArmorUnlocked(state)}
             onArmory={(slot) => setArmoryTab(slot ?? 'all')}
@@ -311,18 +315,18 @@ export function JournalChampions({ ready, onTurn }: Props) {
           availableExp={availableMasteryExp(state, detail.id)}
           purchased={effectiveMasteryUpgradesFor(state, detail.id)}
           onOpenMastery={() => {
-            setDetail(null);
-            setMasteryUnit(detail);
+            setDetailId(null);
+            setMasteryId(detail.id);
           }}
           onOpenArmory={
             isPlayerChampionId(detail.id) && isArmorUnlocked(state)
               ? () => {
-                setDetail(null);
+                setDetailId(null);
                 setArmoryTab('all');
               }
               : undefined
           }
-          onClose={() => setDetail(null)}
+          onClose={() => setDetailId(null)}
         />
       )}
       {masteryUnit && (
@@ -336,7 +340,7 @@ export function JournalChampions({ ready, onTurn }: Props) {
           onBuy={(upgradeId) => buyMasteryUpgrade(masteryUnit.id, upgradeId)}
           onSetActive={(upgradeId) => setActiveMasteryUpgrade(masteryUnit.id, upgradeId)}
           onToggleDisabled={(off) => setMasteryDisabled(masteryUnit.id, off)}
-          onClose={() => setMasteryUnit(null)}
+          onClose={() => setMasteryId(null)}
         />
       )}
       {armoryTab && <Armory initialTab={armoryTab} onClose={() => setArmoryTab(null)} />}

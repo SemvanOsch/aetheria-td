@@ -14,7 +14,7 @@ import { Icon, type IconName } from './Icon';
 import { CompassRose, CoverCorner, Flourish, PageCorners, WaxSeal } from './JournalArt';
 import { JournalChampions } from './JournalChampions';
 import { JournalBestiary } from './JournalBestiary';
-import type { PlayerWeapon } from '../../engine/sprites';
+import { adventurerWeapon } from '../portrait';
 import { playIntroSound } from '../introAudio';
 import { JOURNAL_CHAPTERS, chapterPageTexts, unlockedChapterCount } from '../../domain/journal';
 import {
@@ -63,13 +63,6 @@ const SECTION_ORDER: JournalSection[] = ['profile', 'champions', 'bestiary'];
 
 /** Cinematic phases: black → book opens → interactive page → book closes. */
 type Phase = 'intro' | 'opening' | 'page' | 'closing';
-
-/** The champion weapon each proficiency fights with (the plate and gear preview). */
-const WEAPON_FOR: Record<Proficiency, PlayerWeapon> = {
-  sword: 'dual-swords',
-  bow: 'bow',
-  magic: 'magic',
-};
 
 /** The journal's icon for each proficiency. */
 const PROF_ICON: Record<Proficiency, IconName> = {
@@ -652,7 +645,7 @@ export function PlayerIntro({
                           config={portrait}
                           size={236}
                           idle
-                          weapon={writtenProficiency ? WEAPON_FOR[writtenProficiency] : 'none'}
+                          weapon={writtenProficiency ? adventurerWeapon(writtenProficiency) : 'none'}
                           label={`${writtenName || 'Your adventurer'}, full portrait`}
                         />
                       </div>
@@ -914,7 +907,7 @@ export function PlayerIntro({
             initial={portrait ?? seededSprite()}
             onConfirm={confirmPortrait}
             onCancel={() => setShowCreator(false)}
-            weapon={writtenProficiency ? WEAPON_FOR[writtenProficiency] : undefined}
+            weapon={writtenProficiency ? adventurerWeapon(writtenProficiency) : undefined}
           />
         </div>
       )}

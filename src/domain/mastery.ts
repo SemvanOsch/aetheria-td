@@ -13,7 +13,9 @@
  */
 
 import type { EnemyDef } from './enemies';
+import type { HeroWeaponForm } from './playerChampion';
 import {
+  DEFAULT_BURST_RADIUS,
   effectiveBard,
   effectiveGenerate,
   effectiveStats,
@@ -168,6 +170,41 @@ export interface MasteryUpgradeDef {
    * the journal shows the slots locked. Read through `masteryUnlocksArmor`.
    */
   unlocksArmor?: boolean;
+  /**
+   * Every Nth attack is a Cross Slash (the Blade adventurer): both short swords
+   * cross in a single X cut for `crossSlashMult`× damage instead of the usual two
+   * half-damage cuts. Read through `masteryCrossSlash`.
+   */
+  crossSlashEvery?: number;
+  /** Damage multiplier of the Cross Slash (see `crossSlashEvery`). */
+  crossSlashMult?: number;
+  /**
+   * Overrides how many arrows a burst shooter (the Bow adventurer's shortbow)
+   * looses per volley — e.g. 5 for Fivefold Volley. Has no effect on a champion
+   * that doesn't fire in bursts. Read through `masteryBurst`.
+   */
+  burstShots?: number;
+  /**
+   * Multiplier on the blast radius of a champion's circle attack (the Magic
+   * adventurer's orb) — e.g. 1.3 = a 30% wider blast. Read through
+   * `masteryBurstRadius`.
+   */
+  burstRadiusMult?: number;
+  /**
+   * Turns the Magic adventurer's orb into the Greater Orb: the hero leaps up,
+   * gathers a huge orb above their head and hurls it down. Changes only the cast
+   * (its longer wind-up, the leap and throw-down animation, the bigger orb); the
+   * node's stat trade-off rides on its own `damageMult` / `attackSpeedMult` /
+   * `burstRadiusMult`. Read through `masteryGreaterOrb`.
+   */
+  greaterOrb?: boolean;
+  /**
+   * Re-arms the player champion with a different weapon (the Blade adventurer's
+   * Claymore, the Bow adventurer's Longbow). The champion's whole def is rebuilt for the form — its attack,
+   * stats, in-stage levels, ability and sprite — by `syncPlayerChampions`, so
+   * every surface picks it up through `getUnit`. Read through `masteryWeaponForm`.
+   */
+  weaponForm?: HeroWeaponForm;
 }
 
 /**
@@ -429,14 +466,14 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
     {
       id: 'dual_discipline',
       name: 'Honed will',
-      description: 'Strengthen your resolve, increasing damage dealt. - +10% damage.',
+      description: 'Strengthen your resolve, increasing damage dealt - +10% damage.',
       cost: 100,
       damageMult: 1.1,
     },
     {
       id: 'battle_lessons',
       name: 'Hero’s instinct',
-      description: 'Grow stronger from every encounter. - +10% instage Exp Earned.',
+      description: 'Grow stronger from every encounter - +10% instage Exp Earned.',
       cost: 100,
       requires: 'dual_discipline',
       heroExpMult: 1.1,
@@ -450,6 +487,31 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
       requires: 'battle_lessons',
       major: true,
       unlocksArmor: true,
+    },
+    // Two rival fighting styles after Ironclad: both may be learned, but only
+    // the chosen one is active.
+    {
+      id: 'cross_slash',
+      name: 'Cross Slash',
+      description:
+        'Your two blades learn to strike as one, unleashing a devastating X-shaped slash every third attack.',
+      cost: 500,
+      requires: 'perfect_balance',
+      major: true,
+      exclusiveGroup: 'blade_style',
+      crossSlashEvery: 3,
+      crossSlashMult: 1.8,
+    },
+    {
+      id: 'claymore',
+      name: 'Claymore',
+      description:
+        'Abandon speed for raw power. Wield a massive claymore capable of crushing multiple foes with a single strike.',
+      cost: 500,
+      requires: 'perfect_balance',
+      major: true,
+      exclusiveGroup: 'blade_style',
+      weaponForm: 'claymore',
     },
   ],
   // The player's Bow adventurer. Keyed by the stable path id like the Blade tree.
@@ -479,6 +541,30 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
       major: true,
       unlocksArmor: true,
     },
+    // Two rival archery styles after Ironclad: both may be learned, but only
+    // the chosen one is active.
+    {
+      id: 'fivefold_volley',
+      name: 'Fourfold Volley',
+      description:
+        'Add another arrow to each burst, raining down four shots instead of three.',
+      cost: 500,
+      requires: 'eagle_eye',
+      major: true,
+      exclusiveGroup: 'bow_style',
+      burstShots: 4,
+    },
+    {
+      id: 'longbow',
+      name: 'Longbow',
+      description:
+        'Abandon rapid volleys for a powerful longbow, gaining exceptional range and striking foes from afar.',
+      cost: 500,
+      requires: 'eagle_eye',
+      major: true,
+      exclusiveGroup: 'bow_style',
+      weaponForm: 'longbow',
+    },
   ],
   // The player's Magic adventurer. Keyed by the stable path id like the others.
   'player-magic': [
@@ -506,6 +592,22 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
       requires: 'arcane_study',
       major: true,
       unlocksArmor: true,
+    },
+    // Rival casting styles after Ironclad (only the Greater Orb so far): every
+    // member may be learned, but only the chosen one is active.
+    {
+      id: 'greater_orb',
+      name: 'Greater Orb',
+      description:
+        'Leap into the air, gather a massive orb above your head and hurl it down on your foes - 40% slower casting, but +70% damage and a 30% wider blast.',
+      cost: 500,
+      requires: 'arcane_mastery',
+      major: true,
+      exclusiveGroup: 'magic_style',
+      greaterOrb: true,
+      damageMult: 1.7,
+      attackSpeedMult: 0.6,
+      burstRadiusMult: 1.3,
     },
   ],
 };
@@ -883,6 +985,74 @@ export function masteryThrow(
     }
   }
   return undefined;
+}
+
+/**
+ * The champion's Cross Slash from purchased nodes — every `every` attacks is one
+ * X cut for `damageMult`× damage — or undefined if none is purchased.
+ */
+export function masteryCrossSlash(
+  unitId: string,
+  purchased: readonly string[],
+): { every: number; damageMult: number } | undefined {
+  for (const u of masteryTree(unitId)) {
+    if (u.crossSlashEvery && purchased.includes(u.id)) {
+      return { every: u.crossSlashEvery, damageMult: u.crossSlashMult ?? 1 };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Arrows a champion looses per burst volley, with any purchased override (the
+ * Bow's Fivefold Volley) applied — 1 for a champion that doesn't fire in bursts.
+ * The engine and every DPS / volley display read this.
+ */
+export function masteryBurst(unit: UnitDef, purchased: readonly string[]): number {
+  const base = Math.max(1, unit.burst ?? 1);
+  if (base <= 1) return 1;
+  return Math.max(base, masteryBurstShots(unit.id, purchased) ?? base);
+}
+
+/**
+ * The volley size a champion's purchased nodes set (the Bow's Fourfold Volley),
+ * or undefined when none do. Highest wins. Prefer `masteryBurst`, which applies
+ * it to the unit's own burst; this unit-free form lets the player champion's
+ * def builder word its description before the def exists.
+ */
+export function masteryBurstShots(unitId: string, purchased: readonly string[]): number | undefined {
+  let shots: number | undefined;
+  for (const u of masteryTree(unitId)) {
+    if (u.burstShots && purchased.includes(u.id)) shots = Math.max(shots ?? 0, u.burstShots);
+  }
+  return shots;
+}
+
+/**
+ * Blast radius (px) of a champion's circle attack (the Magic adventurer's orb)
+ * with any purchased widening applied (the Greater Orb), rounded to a whole
+ * pixel. The engine's detonation, the on-board blast preview and every radius
+ * display read this.
+ */
+export function masteryBurstRadius(unit: UnitDef, purchased: readonly string[]): number {
+  let mult = 1;
+  for (const u of masteryTree(unit.id)) {
+    if (u.burstRadiusMult && purchased.includes(u.id)) mult *= u.burstRadiusMult;
+  }
+  return Math.round((unit.burstRadius ?? DEFAULT_BURST_RADIUS) * mult);
+}
+
+/** Whether a champion's purchased nodes turn its orb into the Greater Orb. */
+export function masteryGreaterOrb(unitId: string, purchased: readonly string[]): boolean {
+  return masteryTree(unitId).some((u) => u.greaterOrb && purchased.includes(u.id));
+}
+
+/** The weapon form a champion's purchased nodes re-arm it with, if any. */
+export function masteryWeaponForm(
+  unitId: string,
+  purchased: readonly string[],
+): HeroWeaponForm | undefined {
+  return masteryTree(unitId).find((u) => u.weaponForm && purchased.includes(u.id))?.weaponForm;
 }
 
 /**

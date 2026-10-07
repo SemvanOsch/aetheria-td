@@ -26,7 +26,12 @@ import {
   type PlayerSpriteConfig,
 } from '../domain/playerSprite';
 import { normalizeProficiency, type Proficiency } from '../domain/proficiency';
-import { implementedPlayerChampionId, isPlayerChampionId } from '../domain/playerChampion';
+import {
+  PLAYER_CHAMPION_IDS,
+  implementedPlayerChampionId,
+  isPlayerChampionId,
+  type HeroWeaponForm,
+} from '../domain/playerChampion';
 import { ENEMY_KILLS_TO_UNLOCK, type EnemyDef } from '../domain/enemies';
 import { getSection, levelsForSection, type SectionId } from '../domain/levels';
 import { endlessLevelFor } from '../domain/endless';
@@ -49,6 +54,8 @@ import {
   masterySpent,
   masteryTree,
   masteryUnlocksArmor,
+  masteryBurstShots,
+  masteryWeaponForm,
 } from '../domain/mastery';
 
 /**
@@ -927,6 +934,33 @@ export function isArmorUnlocked(state: GameState): boolean {
   return state.ownedUnits.some(
     (id) => isPlayerChampionId(id) && masteryUnlocksArmor(id, masteryUpgradesFor(state, id)),
   );
+}
+
+/**
+ * The weapon form each player champion fights with, from its *effective* mastery
+ * (the Blade's active Claymore node; none while the node is swapped out or the
+ * champion's mastery is switched off). Fed to `syncPlayerChampions`, which
+ * rebuilds the def for that form.
+ */
+export function playerChampionForms(state: GameState): Record<string, HeroWeaponForm | undefined> {
+  const forms: Record<string, HeroWeaponForm | undefined> = {};
+  for (const id of Object.values(PLAYER_CHAMPION_IDS)) {
+    forms[id] = masteryWeaponForm(id, effectiveMasteryUpgradesFor(state, id));
+  }
+  return forms;
+}
+
+/**
+ * The burst size each player champion's *effective* mastery sets (the Bow's
+ * Fourfold Volley), or undefined. Fed to `syncPlayerChampions` so the def's
+ * description names the right volley.
+ */
+export function playerChampionVolleys(state: GameState): Record<string, number | undefined> {
+  const volleys: Record<string, number | undefined> = {};
+  for (const id of Object.values(PLAYER_CHAMPION_IDS)) {
+    volleys[id] = masteryBurstShots(id, effectiveMasteryUpgradesFor(state, id));
+  }
+  return volleys;
 }
 
 /** The pieces the adventurer wears, in slot order. */

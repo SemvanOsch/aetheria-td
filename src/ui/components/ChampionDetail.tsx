@@ -1,7 +1,13 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { attackTypeLabel, damageTypeLabel, upgradeEffectLabel, type UnitDef } from '../../domain/units';
-import { masteryThrow, masteryUpgradeCost, masteryUpgradeDeltas } from '../../domain/mastery';
+import { attackTypeLabel, coneAngleDeg, damageTypeLabel, upgradeEffectLabel, type UnitDef } from '../../domain/units';
+import {
+  masteryBurstRadius,
+  masteryGreaterOrb,
+  masteryThrow,
+  masteryUpgradeCost,
+  masteryUpgradeDeltas,
+} from '../../domain/mastery';
 import { playerChampionPath } from '../../domain/playerChampion';
 import { proficiencyDef } from '../../domain/proficiency';
 import { RARITIES } from '../../domain/rarity';
@@ -51,7 +57,17 @@ export function ChampionDetail({
   const notes: ReactNode[] = [];
   if (unit.aoe === 'line')
     notes.push('Pierces in a straight line to the end of its range, striking every enemy along the way.');
-  if (unit.aoe === 'circle') notes.push('A slow-charging orb bursts on impact, striking every enemy in the blast.');
+  if (unit.aoe === 'circle') {
+    notes.push(
+      masteryGreaterOrb(unit.id, purchased)
+        ? `Greater Orb: leaps up, gathers a huge orb overhead and hurls it down, striking every enemy in a ${masteryBurstRadius(unit, purchased)}px blast.`
+        : 'A slow-charging orb bursts on impact, striking every enemy in the blast.',
+    );
+  }
+  if (unit.aoe === 'cone' && unit.visual.shape === 'player-claymore')
+    notes.push(`Each heavy swing cleaves a ${coneAngleDeg(unit)}° arc, striking every enemy in front at once.`);
+  if (unit.visual.shape === 'player-longbow')
+    notes.push('Each shot is a slow, full draw that looses one heavy arrow from an enormous range.');
   if (thrown) notes.push(`Every ${thrown.every}th attack is thrown for ${thrown.rangeMult}× range.`);
 
   const expSource = unit.generator

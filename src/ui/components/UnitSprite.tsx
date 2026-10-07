@@ -54,7 +54,7 @@ export function UnitSprite({ unit, size = 48, animate = true }: Props) {
         // adventurer reaches forward with its shortbow, so it's anchored a little
         // left to keep the whole pose centred; the others sit centred.
         const s = size / 38;
-        const anchorX = shape === 'player-bow' ? 0.42 : 0.5;
+        const anchorX = shape === 'player-bow' ? 0.42 : shape === 'player-longbow' ? 0.45 : 0.5;
         ctx.translate(size * anchorX, size * 0.62);
         ctx.scale(s, s);
         paintPortrait(ctx, (g) => drawUnitSprite(g, shape, color, false, 0, false, false, playerConfig), style, key, t, phase);

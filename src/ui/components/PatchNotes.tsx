@@ -20,6 +20,23 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-10-07 · Fighting Styles',
+    changes: [
+      'Adventurer skill trees now branch after Ironclad into rival fighting styles (500 EXP each). You can learn both, but only the one you pick is active; switch any time with Activate path. Paths you have switched off are drawn dimmed in the tree, and learned nodes no longer show an Active/Learned label.',
+      'Blade: Cross Slash. Every third attack, both swords cross in one X-shaped cut for 1.8× damage. If its target dies first, the cut moves to the nearest foe in reach.',
+      'Blade: Claymore. Trade the dual swords for a giant two-handed claymore: slow, heavy swings (26 damage, 0.5 attacks/s) that cleave every foe in a 100° arc in front. It has its own in-stage levels (Sharper Blade, Longer Edge) and a new ability, Earthsplitter: the claymore slams down and opens a fissure out to twice your range, hitting everything along it for 2.25× damage and knocking survivors back (35 mana, 16s cooldown). A glowing crack shows where it will strike during the wind-up.',
+      'Bow: Fourfold Volley. Each burst fires four arrows instead of three.',
+      'Bow: Longbow. Trade the shortbow for a longbow: slow, full draws loosing one heavy arrow (36 damage) from an enormous 230 range. Its own in-stage levels are Heavy Draw and Longer Reach, and its ability is Piercing Shot: your next 3 arrows fly to the end of your range and hit every foe along the way (30 mana, 16s cooldown).',
+      'Magic: Greater Orb. Your hero leaps up, gathers a huge orb overhead and hurls it down. Casting is 40% slower, but the orb deals +70% damage with a 30% wider blast.',
+      'Each new style has its own animations, effects and sounds, and your adventurer holds the new weapon on the journal page, the Armory and every champion card.',
+      'Damaging abilities (Cyclone Slash, Mana Ray, Earthsplitter) can only be cast with an enemy in reach, and aim at the nearest one if your target is out of reach. Without one, the button dims and pressing it tells you no enemies are in range, without using any mana or cooldown.',
+      'New round medallion icons for every hero ability, including Earthsplitter.',
+      'Champion stats show Cross Slash when it is active, and the Claymore’s damage reads “per enemy in arc”.',
+      'Flourishing Blades (Blade adventurer’s second in-stage level) now gives +5 damage instead of +6. Ability and level descriptions are reworded and shorter.',
+      'Developer champion stats page: the Claymore and Longbow forms are listed, and clicking a champion opens a full breakdown page.',
+    ],
+  },
+  {
     version: '2026-10-06 · Armor & Hero Polish',
     changes: [
       'Armor for your adventurer: a helmet, chestplate, leg piece and boots in Common, Rare, Epic or Legendary. Bosses in endless runs have a 50% chance to drop a piece of their chapter’s set (the Castle’s Kingsguard); campaign bosses never drop armor. A toast shows each piece as it drops, and the result card lists everything you found.',

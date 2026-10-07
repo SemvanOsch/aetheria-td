@@ -28,7 +28,11 @@ import { UnitSprite } from '../components/UnitSprite';
  * browser console (see `main.tsx`).
  */
 
-/** The hero champions, built from a default portrait with no armor applied. */
+/**
+ * The hero champions, built from a default portrait with no armor applied, plus
+ * the alternate weapon forms from their mastery nodes (the Blade's Claymore, the
+ * Bow's Longbow).
+ */
 const HERO_LABELS: Record<string, string> = {
   'player-blade': 'Blade Adventurer',
   'player-bow': 'Bow Adventurer',
@@ -36,9 +40,18 @@ const HERO_LABELS: Record<string, string> = {
 };
 const HEROES: UnitDef[] = Object.values(PLAYER_CHAMPION_IDS)
   .map((id) => buildPlayerChampionDef(id, HERO_LABELS[id] ?? id, defaultPlayerSprite()))
+  .concat(buildPlayerChampionDef('player-blade', 'Blade Adventurer (Claymore)', defaultPlayerSprite(), 'claymore'))
+  .concat(buildPlayerChampionDef('player-bow', 'Bow Adventurer (Longbow)', defaultPlayerSprite(), 'longbow'))
   .filter((u): u is UnitDef => u !== null);
 
 const CHAMPIONS: UnitDef[] = [...ALL_UNITS, ...HEROES];
+
+/** Shapes of the alternate weapon forms, which share their champion's id. */
+const FORM_SHAPES = new Set(['player-claymore', 'player-longbow']);
+
+/** URL key for a champion's detail page — the id, or the shape for a weapon form (shares its id). */
+export const championKey = (u: UnitDef) => (FORM_SHAPES.has(u.visual.shape) ? u.visual.shape : u.id);
+export const findChampion = (key: string) => CHAMPIONS.find((u) => championKey(u) === key);
 
 type SortKey = 'name' | 'cost' | 'deployLimit' | 'damage' | 'attackSpeed' | 'range' | 'dps' | 'maxDps' | 'upgradeCost';
 
@@ -148,7 +161,11 @@ function ChampionTable({ rows }: { rows: UnitDef[] }) {
               const m = maxStats(u);
               const combat = isCombat(u);
               return (
-                <tr key={u.id}>
+                <tr
+                  key={`${u.id}|${u.visual.shape}`}
+                  className="es-link"
+                  onClick={() => { location.hash = `champions/${championKey(u)}`; }}
+                >
                   <td className="es-sprite">
                     <UnitSprite unit={u} size={40} animate={false} />
                   </td>
@@ -222,7 +239,7 @@ export function ChampionStats() {
       </nav>
       <ChampionTable key={tab} rows={shown} />
       <p className="es-faint">
-        Base catalog values — no mastery or armor. Every champion crits {Math.round(BASE_CRIT_CHANCE * 100)}% of the time for ×{CRIT_MULTIPLIER}. Max tier = all in-stage gold upgrades bought.
+        Base catalog values — no mastery or armor. Every champion crits {Math.round(BASE_CRIT_CHANCE * 100)}% of the time for ×{CRIT_MULTIPLIER}. Max tier = all in-stage gold upgrades bought. Click a champion for its full breakdown.
       </p>
     </div>
   );

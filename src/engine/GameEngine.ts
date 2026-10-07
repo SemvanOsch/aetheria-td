@@ -48,6 +48,10 @@ import {
   expForKill,
   GOLD_PER_EXP,
   masteryAdjacentDamageMult,
+  masteryBurst,
+  masteryBurstRadius,
+  masteryCrossSlash,
+  masteryGreaterOrb,
   masteryBard,
   masteryBounceDamageMult,
   masteryFinalBounceDamageMult,
@@ -62,7 +66,19 @@ import {
   type MasteryStats,
 } from '../domain/mastery';
 import { critChanceFor, critMultiplierFor } from '../domain/combat';
-import { attackAnimTime, isSpeaking } from './types';
+import {
+  attackAnimTime,
+  CROSS_SLASH_ANIM_TIME,
+  CROSS_SLASH_HIT_DELAY,
+  EARTHSPLITTER_ANIM_TIME,
+  EARTHSPLITTER_HIT_DELAY,
+  GREATER_ORB_CHARGE_TIME,
+  GREATER_ORB_CROUCH,
+  GREATER_ORB_LAND,
+  isSpeaking,
+  PIERCING_CAST_ANIM_TIME,
+  specialAnimTime,
+} from './types';
 import type {
   Burst,
   Cyclone,
@@ -194,9 +210,39 @@ export const CONE_CHARGE_TIME = 0.45;
 // the cone's telegraph so the caster is *visibly* charging the orb in front of
 // them before it launches. Like the cone's, it is folded into the attack cadence.
 export const ORB_CHARGE_TIME = 0.7;
+// Wind-up before a Claymore swing releases: the hero hefts the great blade back
+// over the shoulder (drawn from the charge, see `drawClaymore`), then the cleave
+// lands as it swings through. Folded into the attack cadence like the others.
+export const CLAYMORE_WINDUP_TIME = 0.34;
+// Radius the Claymore's swing crescent is drawn at — fixed, not the live range,
+// so range from in-stage levels / armor never pushes the arc out away from the
+// blade (the hit test still uses the full range).
+export const CLAYMORE_CLEAVE_FX_RADIUS = 70;
+// The Longbow's slow, full draw before each shot (the hero visibly hauls the
+// string back, see `drawPlayerLongbow`). Folded into the attack cadence like
+// the other charges, and capped to a share of the reload so attack-speed buffs
+// still quicken it.
+export const LONGBOW_DRAW_TIME = 0.85;
+// Where the Longbow's arrow leaves the bow: the arrowhead at full draw (local
+// ~(15, -7) facing +x, see `drawPlayerLongbow`) at the board's figure scale.
+const LONGBOW_MUZZLE = { x: 16.8, y: -9.2 };
+// The Longbow's heavy arrows fly fast and straight; piercing arrows faster still.
+const LONGBOW_ARROW_SPEED = 640;
+const PIERCE_ARROW_SPEED = 760;
+// Half-width of a piercing arrow's strike corridor (plus each foe's own radius).
+export const PIERCE_HALF_WIDTH = 8;
 // The charged orb drifts slowly toward its target so its flight (and the coming
 // detonation) reads clearly, unlike the quick arrows/bolts.
 export const ORB_SPEED = 235;
+// The Greater Orb (the Magic adventurer's mastery node) is hurled down from
+// overhead at the top of the caster's leap: it leaves from the swollen orb's
+// centre above the raised hands (local ~(1, -21.7) facing +x, see
+// `greaterOrbAnchor`, at the board's figure scale and lifted `GREATER_ORB_JUMP`),
+// flies a little faster than the drifting small orb, and is drawn at a scale
+// that matches the orb the hands held.
+const GREATER_ORB_MUZZLE = { x: 1.1, y: -35.7 };
+const GREATER_ORB_SPEED = 290;
+const GREATER_ORB_SCALE = 1.35;
 // Knockback (the Wizard's Gale Force). A single cooldown lives on the *enemy*
 // (not per Wizard), so its shove rate is capped however many Wizards hit it —
 // it can be slowed but never permanently stalled. At 14px per 0.65s (~21.5px/s)
@@ -249,8 +295,21 @@ export type SfxName =
   | 'elfHit'
   | 'orbCast'
   | 'orbBurst'
+  | 'greaterOrbCast'
+  | 'greaterOrbThrow'
+  | 'greaterOrbBurst'
   | 'cycloneSlash'
+  | 'crossSlash'
+  | 'claymoreSwing'
+  | 'claymoreHit'
+  | 'earthsplitter'
+  | 'earthsplitterRise'
   | 'quickdraw'
+  | 'longbowDraw'
+  | 'longbowShot'
+  | 'longbowHit'
+  | 'pierceCast'
+  | 'pierceShot'
   | 'manaRay'
   | 'manaRayTick'
   | 'bardPlay';
@@ -568,6 +627,7 @@ export class GameEngine {
     const purchased = this.masteryUpgrades[def.id] ?? [];
     const stats = this.towerStats(def, 0);
     const thrown = masteryThrow(def.id, purchased);
+    const crossSlash = masteryCrossSlash(def.id, purchased);
     const preloadMax = masteryPreload(def.id, purchased);
     const bard = masteryBard(def, 0, purchased);
     // An activated ability is normally unlocked by a later tier, so tier 0 has
@@ -601,8 +661,10 @@ export class GameEngine {
       preloadMax,
       preloaded: 0,
       preloadTimer: stats.attackSpeed > 0 ? 1 / stats.attackSpeed : 0,
-      burstCount: Math.max(1, def.burst ?? 1),
+      burstCount: masteryBurst(def, purchased),
       burstLeft: 0,
+      burstRadius: masteryBurstRadius(def, purchased),
+      greaterOrb: masteryGreaterOrb(def.id, purchased),
       invested: def.cost,
       heroExp: 0,
       bardEvery: bard?.every ?? 0,
@@ -632,6 +694,11 @@ export class GameEngine {
       beamRange: 0,
       beamTickTimer: 0,
       followUp: null,
+      crossSlashEvery: crossSlash?.every ?? 0,
+      crossSlashMult: crossSlash?.damageMult ?? 1,
+      pierceShots: 0,
+      specialAnim: 0,
+      slam: null,
       ability,
       abilityCooldown: 0,
       abilityCooldownMax: ability?.cooldown ?? 0,
@@ -769,8 +836,9 @@ export class GameEngine {
   /**
    * Fire a deployed tower's player-activated ability (the Blade's Cyclone Slash).
    * Returns true if it fired. Fails when the battle isn't in progress, the tower
-   * has no ability unlocked, or it's still recharging. On success the ability
-   * resolves immediately and its cooldown is armed.
+   * has no ability unlocked, it's still recharging, it lacks the mana, or a
+   * damaging ability has nobody in reach (`abilityHasTarget`). On success the
+   * ability resolves immediately and its cooldown is armed.
    */
   activateAbility(uid: number): boolean {
     if (this.outcome !== 'playing') return false;
@@ -780,6 +848,8 @@ export class GameEngine {
     // Abilities are paid for in mana; can't cast without enough in the pool.
     const manaCost = t.ability.manaCost ?? 0;
     if (t.mana < manaCost) return false;
+    // A damaging ability with nobody to hit isn't cast (nor paid for).
+    if (!this.abilityHasTarget(t)) return false;
     switch (t.ability.id) {
       case 'cyclone-slash':
         this.castCycloneSlash(t);
@@ -787,8 +857,14 @@ export class GameEngine {
       case 'quickdraw':
         this.castQuickdraw(t);
         break;
+      case 'piercing-shot':
+        this.castPiercingShot(t);
+        break;
       case 'mana-ray':
         this.castManaRay(t);
+        break;
+      case 'earthsplitter':
+        this.castEarthsplitter(t);
         break;
       default:
         return false; // unknown ability id — nothing to fire
@@ -796,6 +872,59 @@ export class GameEngine {
     t.abilityCooldown = t.abilityCooldownMax;
     t.mana = Math.max(0, t.mana - manaCost); // spend the mana on a successful cast
     return true;
+  }
+
+  /**
+   * How far a tower's damaging ability reaches (Cyclone Slash and Mana Ray: its
+   * range; Earthsplitter: `reachMult`× it), or null for one that hits nobody
+   * (Quickdraw, a self-buff) and so never needs a target.
+   */
+  private abilityReach(t: Tower): number | null {
+    switch (t.ability?.id) {
+      case 'cyclone-slash':
+      case 'mana-ray':
+        return t.range;
+      case 'earthsplitter':
+        return t.range * (t.ability.reachMult ?? 1);
+      default:
+        return null;
+    }
+  }
+
+  /** The nearest living, targetable foe within `reach` of a tower (body edge counts). */
+  private nearestFoeWithin(t: Tower, reach: number): Enemy | undefined {
+    let best: Enemy | undefined;
+    let bestD = Infinity;
+    for (const e of this.enemies) {
+      if (e.dead || e.dying || e.rise > 0 || isSpeaking(e)) continue;
+      const d = Math.hypot(e.pos.x - t.pos.x, e.pos.y - t.pos.y) - e.def.radius;
+      if (d <= reach && d < bestD) {
+        best = e;
+        bestD = d;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Whether a tower's ability has someone to hit right now: always for a
+   * self-buff, else a living, targetable foe within its reach. Read by the HUD
+   * too, so the button shows "no enemies in range" instead of wasting a cast.
+   */
+  abilityHasTarget(t: Tower): boolean {
+    const reach = this.abilityReach(t);
+    return reach == null || this.nearestFoeWithin(t, reach) != null;
+  }
+
+  /**
+   * The point a damaging ability aims at: the tower's live target when it is
+   * within the ability's reach, else the nearest foe that is.
+   */
+  private abilityAim(t: Tower, reach: number): { x: number; y: number } | null {
+    const live =
+      t.targetUid != null ? this.enemies.find((e) => e.uid === t.targetUid && !e.dead && !e.dying) : undefined;
+    if (live && Math.hypot(live.pos.x - t.pos.x, live.pos.y - t.pos.y) - live.def.radius <= reach) return live.pos;
+    return this.nearestFoeWithin(t, reach)?.pos ?? null;
   }
 
   /**
@@ -838,6 +967,79 @@ export class GameEngine {
   }
 
   /**
+   * Earthsplitter (the Claymore): the hero hefts the great blade overhead and
+   * slams it into the ground, tearing a fissure out along its aim to `reachMult`×
+   * its range and `aoeWidth` either side. Aim, reach and damage (one crit roll)
+   * lock at cast; the crack strikes `EARTHSPLITTER_HIT_DELAY` later, as the blade
+   * meets the ground (see `landSlam`). Any half-hefted swing is dropped, and the
+   * hero makes no normal attacks until the slam has played out.
+   */
+  private castEarthsplitter(t: Tower): void {
+    const ability = t.ability!;
+    // Aim at the current target, else the nearest foe in reach (one is
+    // guaranteed by `activateAbility`), else the last aim point.
+    const reach = t.range * (ability.reachMult ?? 1);
+    const aim = this.abilityAim(t, reach) ?? t.aimTarget;
+    const angle = aim ? Math.atan2(aim.y - t.pos.y, aim.x - t.pos.x) : 0;
+    const crit = this.rollCrit(t);
+    t.slam = {
+      timer: EARTHSPLITTER_HIT_DELAY,
+      angle,
+      reach,
+      halfWidth: ability.aoeWidth ?? 16,
+      damage: t.damage * (ability.damageMult ?? 1) * (crit ? t.critMultiplier : 1),
+      crit,
+      knockback: ability.knockback ?? 0,
+    };
+    t.charge = 0;
+    t.chargeMax = 0;
+    t.attackAnim = 0;
+    t.specialAnim = EARTHSPLITTER_ANIM_TIME;
+    this.sfx.push('earthsplitterRise');
+    // Face down the fissure for the whole slam (no live target to turn toward).
+    t.targetUid = null;
+    t.aimTarget = { x: t.pos.x + Math.cos(angle) * reach, y: t.pos.y + Math.sin(angle) * reach };
+  }
+
+  /**
+   * The Earthsplitter's blade meets the ground: the fissure strikes every living,
+   * targetable foe along it and hurls the survivors back down their path (bosses,
+   * being heavier, half as far).
+   */
+  private landSlam(t: Tower): void {
+    const s = t.slam;
+    t.slam = null;
+    if (!s) return;
+    const ux = Math.cos(s.angle);
+    const uy = Math.sin(s.angle);
+    this.sfx.push('earthsplitter');
+    // The crack opens just ahead of the hero's feet, where the blade bites in.
+    this.emitFx({
+      kind: 'fissure',
+      x: t.pos.x + ux * 12,
+      y: t.pos.y + uy * 12 + 8,
+      angle: s.angle,
+      length: s.reach - 12,
+    });
+    let anyLanded = false;
+    for (const e of this.enemies) {
+      if (e.dead || e.dying || e.rise > 0 || isSpeaking(e)) continue;
+      const ex = e.pos.x - t.pos.x;
+      const ey = e.pos.y - t.pos.y;
+      const proj = ex * ux + ey * uy; // distance along the fissure
+      if (proj < -e.def.radius || proj > s.reach + e.def.radius) continue;
+      if (Math.abs(ex * uy - ey * ux) > s.halfWidth + e.def.radius) continue;
+      if (!this.damageEnemy(e, s.damage, t)) continue;
+      anyLanded = true;
+      if (s.knockback > 0 && !e.dead && !e.dying) {
+        e.knockbackRemaining += s.knockback * (e.def.boss ? 0.5 : 1);
+        e.knockbackCooldown = KNOCKBACK_COOLDOWN;
+      }
+    }
+    if (s.crit && anyLanded) this.critFloater({ x: t.pos.x + ux * 24, y: t.pos.y + uy * 24 });
+  }
+
+  /**
    * Quickdraw (the Bow adventurer): a timed self-buff that severely hastens the
    * champion's fire rate for a short spell. Reuses the same attack-speed buff
    * slot as the Bard's tune (the firing cadence and the buff panel already read
@@ -861,6 +1063,32 @@ export class GameEngine {
   }
 
   /**
+   * Piercing Shot (the Longbow): nock `charges` piercing arrows — each of the
+   * hero's next shots flies straight on to the end of its range, striking every
+   * foe in its path (see `fireLongbow`). A short activation pose plays first
+   * (the bow raised to the sky as the arrow kindles). Casting never costs the
+   * longbow its rhythm: the reload and any half-done draw keep running behind
+   * the pose (see `updateTowers`), so a shot that came due meanwhile looses the
+   * moment the pose ends.
+   */
+  private castPiercingShot(t: Tower): void {
+    const ability = t.ability!;
+    t.pierceShots = ability.charges ?? 1;
+    t.attackAnim = 0;
+    t.specialAnim = PIERCING_CAST_ANIM_TIME;
+    this.sfx.push('pierceCast');
+    this.emitFx({ kind: 'cast', ability: 'piercingShot', x: t.pos.x, y: t.pos.y, color: t.def.visual.color, radius: 44 });
+    this.floaters.push({
+      pos: { x: t.pos.x, y: t.pos.y - 16 },
+      text: 'PIERCING SHOT!',
+      color: t.def.visual.color,
+      ttl: 0.9,
+      maxTtl: 0.9,
+      size: 15,
+    });
+  }
+
+  /**
    * Mana Ray (the Mage adventurer): begin channelling a fixed beam. The aim is
    * *locked* the instant it is cast — toward the current/last target, else the
    * nearest foe, else straight ahead — and stays put for the whole channel,
@@ -869,30 +1097,19 @@ export class GameEngine {
    */
   private castManaRay(t: Tower): void {
     const ability = t.ability!;
-    // Resolve a locked aim point: the live target, then the last aim, then the
-    // nearest living enemy anywhere, then straight to the right.
-    const live = t.targetUid != null
-      ? this.enemies.find((e) => e.uid === t.targetUid && !e.dead)
-      : undefined;
-    let aim = live?.pos ?? t.aimTarget ?? null;
-    if (!aim) {
-      let best: Enemy | undefined;
-      let bestD = Infinity;
-      for (const e of this.enemies) {
-        if (e.dead || e.dying || e.rise > 0 || isSpeaking(e)) continue;
-        const d = Math.hypot(e.pos.x - t.pos.x, e.pos.y - t.pos.y);
-        if (d < bestD) { best = e; bestD = d; }
-      }
-      aim = best?.pos ?? { x: t.pos.x + 1, y: t.pos.y };
-    }
+    // Resolve a locked aim point: the live target, else the nearest foe in range
+    // (one is guaranteed by `activateAbility`), else the last aim.
+    const aim = this.abilityAim(t, t.range) ?? t.aimTarget ?? { x: t.pos.x + 1, y: t.pos.y };
     t.beamAngle = Math.atan2(aim.y - t.pos.y, aim.x - t.pos.x);
     t.beamRange = t.range;
     t.beamTimer = ability.duration ?? 0;
     t.beamTickTimer = 0; // first sear lands on the first frame of the channel
-    // Drop any orb wind-up so nothing releases when the beam ends, and face the
-    // beam (the acquisition code is skipped while channelling).
+    // Drop any orb wind-up so nothing releases when the beam ends (a Greater Orb
+    // caster drops out of its leap, and any landing pose is cut short), and face
+    // the beam (the acquisition code is skipped while channelling).
     t.charge = 0;
     t.chargeMax = 0;
+    t.specialAnim = 0;
     t.aimTarget = {
       x: t.pos.x + Math.cos(t.beamAngle) * t.beamRange,
       y: t.pos.y + Math.sin(t.beamAngle) * t.beamRange,
@@ -1283,9 +1500,10 @@ export class GameEngine {
         knockbackCooldown: 0,
         // A boss on a reveal lane rises off its throne before walking.
         rise: def.boss && this.laneRevealAt[laneIndex] !== undefined ? 1 : 0,
-        // An enemy with intro lines walks in a short way (-1) before speaking.
-        speechIndex: def.spawnLines ? -1 : 0,
-        speechTimer: def.spawnLines ? SPEECH_LINE_TIME : 0,
+        // An enemy with intro lines walks in a short way (-1) before speaking. In
+        // endless runs it starts past its last line, so it never stops to speak.
+        speechIndex: !def.spawnLines ? 0 : this.level.endless ? def.spawnLines.length : -1,
+        speechTimer: def.spawnLines && !this.level.endless ? SPEECH_LINE_TIME : 0,
         dodge: 0,
         wardReduction: 0,
         dying: false,
@@ -1432,6 +1650,15 @@ export class GameEngine {
         if (t.followUp.timer <= 0) this.landFollowUp(t);
       }
       if (t.throwAnim > 0) t.throwAnim = Math.max(0, t.throwAnim - dt);
+      if (t.specialAnim > 0) {
+        const before = t.specialAnim;
+        t.specialAnim = Math.max(0, t.specialAnim - dt);
+        // A Greater Orb caster touching down after its throw: dust at the feet.
+        const land = specialAnimTime(t.def.visual.shape) * (1 - GREATER_ORB_LAND);
+        if (t.greaterOrb && before > land && t.specialAnim <= land) {
+          this.emitFx({ kind: 'cast', ability: 'land', x: t.pos.x, y: t.pos.y, color: t.def.visual.color, radius: 24 });
+        }
+      }
       // Recharge an activated ability (Cyclone Slash) for every tower that has one.
       if (t.abilityCooldown > 0) t.abilityCooldown = Math.max(0, t.abilityCooldown - dt);
       // Passive mana regeneration (from worn armor), on top of mana from kills.
@@ -1469,6 +1696,28 @@ export class GameEngine {
 
       if (t.cooldown > 0) t.cooldown -= dt;
 
+      // Mid-Earthsplitter (the Claymore's ability): the hero is committed to the
+      // slam — the fissure strikes when the blade meets the ground, and normal
+      // swings wait until the slam has played out. Aim stays locked meanwhile.
+      if (t.slam) {
+        t.slam.timer -= dt;
+        if (t.slam.timer <= 0) this.landSlam(t);
+        continue;
+      }
+      // Mid-signature move that commits the whole body (the Claymore's slam, the
+      // Longbow's Piercing Shot pose): no normal attacks until it plays out.
+      if (
+        t.specialAnim > 0 &&
+        (t.def.visual.shape === 'player-claymore' || t.def.visual.shape === 'player-longbow')
+      ) {
+        // The Longbow's draw keeps going behind the pose (the reload above does
+        // too), held just short of release so the shot looses as the pose ends.
+        if (t.def.visual.shape === 'player-longbow' && t.charge > 0) {
+          t.charge = Math.max(1e-3, t.charge - dt);
+        }
+        continue;
+      }
+
       // Effective firing rate, hastened by a Bard's tune *and* this champion's
       // own ability haste (Quickdraw) — the two stack multiplicatively. Every
       // reload/preload cadence below reads this instead of the raw attack speed.
@@ -1504,12 +1753,23 @@ export class GameEngine {
       // reach then. Takes priority over acquiring/firing so the tower commits to
       // its telegraphed cast.
       if (t.charge > 0) {
+        const before = t.charge;
         t.charge = Math.max(0, t.charge - dt);
+        // A Greater Orb caster leaving the ground after its crouch: a dust puff.
+        const takeoff = t.chargeMax * (1 - GREATER_ORB_CROUCH);
+        if (t.greaterOrb && before > takeoff && t.charge <= takeoff) {
+          this.emitFx({ kind: 'cast', ability: 'leap', x: t.pos.x, y: t.pos.y, color: t.def.visual.color, radius: 20 });
+        }
         if (t.charge > 0) continue; // still winding up
         if (chosen) {
           this.fire(t, chosen.enemy);
           // Reload for the remainder of the cadence (the wind-up ate the rest),
           // so charging doesn't slow the tower's overall attack rate.
+          t.cooldown = Math.max(0, 1 / rate - t.chargeMax);
+        } else if (t.greaterOrb && t.aimTarget) {
+          // The Greater Orb is committed once the caster has leapt: with nobody
+          // left in reach it still comes down where the last foe stood.
+          this.throwGreaterOrb(t, null, t.aimTarget);
           t.cooldown = Math.max(0, 1 / rate - t.chargeMax);
         }
         // Target gone at release: cancel the cast and re-acquire next frame.
@@ -1536,13 +1796,29 @@ export class GameEngine {
 
       // Charged attackers begin a wind-up instead of firing instantly; the release
       // (and reload) is handled by the charge block above once it completes. The
-      // cone (Wind Slice) and the circle orb each telegraph over their own time.
-      if (t.aoe === 'cone' || t.aoe === 'circle') {
-        const chargeTime = t.aoe === 'circle' ? ORB_CHARGE_TIME : CONE_CHARGE_TIME;
+      // cone (Wind Slice), the circle orb and the Claymore's heft each telegraph
+      // over their own time, and the Longbow hauls back its slow draw. The
+      // Greater Orb's charge is its whole leap (capped to a share of the reload,
+      // like the draw, so attack-speed buffs still quicken it).
+      const longbow = t.def.visual.shape === 'player-longbow';
+      if (t.aoe === 'cone' || t.aoe === 'circle' || longbow) {
+        const chargeTime = longbow
+          ? Math.min(LONGBOW_DRAW_TIME, 0.6 / rate)
+          : t.aoe === 'circle'
+            ? t.greaterOrb
+              ? Math.min(GREATER_ORB_CHARGE_TIME, 0.5 / rate)
+              : ORB_CHARGE_TIME
+            : t.def.visual.shape === 'player-claymore'
+              ? CLAYMORE_WINDUP_TIME
+              : CONE_CHARGE_TIME;
         t.charge = chargeTime;
         t.chargeMax = chargeTime;
-        // A soft rising cast cue as the orb begins to gather.
-        if (t.aoe === 'circle') this.sfx.push('orbCast');
+        // A new leap cuts any lingering landing pose short.
+        if (t.greaterOrb) t.specialAnim = 0;
+        // A soft rising cast cue as the orb begins to gather (a deep swell for the
+        // Greater Orb); a creak of the longbow's stave as the string comes back.
+        if (t.aoe === 'circle') this.sfx.push(t.greaterOrb ? 'greaterOrbCast' : 'orbCast');
+        if (longbow) this.sfx.push('longbowDraw');
         continue;
       }
 
@@ -1687,12 +1963,16 @@ export class GameEngine {
     }
 
     if (tower.aoe === 'cone') {
-      this.fireCone(tower, target, attackRange);
+      // The Claymore cleaves its whole arc as the swing comes through; the
+      // Wizard's Wind Slice sweeps outward over time.
+      if (tower.def.visual.shape === 'player-claymore') this.fireCleave(tower, target);
+      else this.fireCone(tower, target, attackRange);
       return;
     }
 
     if (tower.aoe === 'circle') {
-      this.fireOrb(tower, target);
+      if (tower.greaterOrb) this.throwGreaterOrb(tower, target, target.pos);
+      else this.fireOrb(tower, target, target.pos);
       return;
     }
 
@@ -1700,6 +1980,14 @@ export class GameEngine {
     // hurls a homing wind bullet — both deal their damage on impact; swordsmen
     // strike instantly with a melee slash.
     const shape = tower.def.visual.shape;
+    if (shape === 'player-blade') {
+      this.fireBlade(tower, target);
+      return;
+    }
+    if (shape === 'player-longbow') {
+      this.fireLongbow(tower, target);
+      return;
+    }
     const crit = this.rollCrit(tower);
     const dmg = tower.damage * (crit ? tower.critMultiplier : 1);
 
@@ -1755,19 +2043,6 @@ export class GameEngine {
       return;
     }
 
-    // The Blade adventurer splits each attack into two cuts of half damage: this
-    // one now, the off-hand cut a beat later (crit rolled per cut).
-    if (shape === 'player-blade') {
-      if (tower.followUp) this.landFollowUp(tower); // never drop a pending cut
-      tower.followUp = { timer: BLADE_SECOND_HIT_DELAY, targetUid: target.uid, damage: tower.damage / 2 };
-      this.sfx.push('swordSwing');
-      const half = (tower.damage / 2) * (crit ? tower.critMultiplier : 1);
-      const landed = this.damageEnemy(target, half, tower);
-      if (landed) this.sfx.push('swordHit');
-      if (crit && landed) this.critFloater(target.pos);
-      return;
-    }
-
     // Swordsman melee slash — lands instantly at the target.
     this.shots.push({
       from: { ...tower.pos },
@@ -1784,19 +2059,215 @@ export class GameEngine {
   }
 
   /**
-   * Land a pending second cut (the Blade adventurer's off-hand strike) on its
-   * target, rolling its own crit. Dropped harmlessly if the target has died.
+   * The Blade adventurer's attack. Normally two cuts of half damage: the lead
+   * blade's now, the off-hand cut `BLADE_SECOND_HIT_DELAY` later (crit rolled per
+   * cut). With the Cross Slash node every `crossSlashEvery`th attack is instead
+   * one X cut for `crossSlashMult`× damage: the hero coils both blades, and the
+   * cut lands `CROSS_SLASH_HIT_DELAY` in, as they cross (see `landFollowUp`).
+   */
+  private fireBlade(tower: Tower, target: Enemy): void {
+    if (tower.followUp) this.landFollowUp(tower); // never drop a pending cut
+    if (tower.crossSlashEvery > 0 && tower.attackCount % tower.crossSlashEvery === 0) {
+      tower.attackAnim = 0; // the Cross Slash plays its own, longer swing
+      tower.specialAnim = CROSS_SLASH_ANIM_TIME;
+      tower.followUp = {
+        timer: CROSS_SLASH_HIT_DELAY,
+        targetUid: target.uid,
+        damage: tower.damage * tower.crossSlashMult,
+        cross: true,
+      };
+      return;
+    }
+    tower.specialAnim = 0; // a normal swing cuts any lingering Cross Slash pose short
+    tower.followUp = { timer: BLADE_SECOND_HIT_DELAY, targetUid: target.uid, damage: tower.damage / 2 };
+    this.sfx.push('swordSwing');
+    const crit = this.rollCrit(tower);
+    const half = (tower.damage / 2) * (crit ? tower.critMultiplier : 1);
+    const landed = this.damageEnemy(target, half, tower);
+    if (landed) this.sfx.push('swordHit');
+    if (crit && landed) this.critFloater(target.pos);
+  }
+
+  /**
+   * Land a pending Blade cut — the off-hand strike, or a Cross Slash — on its
+   * target, rolling its own crit. An off-hand cut is dropped harmlessly if the
+   * target has died; a Cross Slash instead strikes the nearest foe still in
+   * reach, so the big blow isn't wasted.
    */
   private landFollowUp(t: Tower): void {
     const f = t.followUp;
     t.followUp = null;
     if (!f) return;
-    const target = this.enemies.find((e) => e.uid === f.targetUid && !e.dead && !e.dying);
+    let target = this.enemies.find((e) => e.uid === f.targetUid && !e.dead && !e.dying);
+    if (!target && f.cross) {
+      let best = t.range;
+      for (const e of this.enemies) {
+        if (e.dead || e.dying || e.rise > 0 || isSpeaking(e)) continue;
+        const d = Math.hypot(e.pos.x - t.pos.x, e.pos.y - t.pos.y);
+        if (d <= best) {
+          best = d;
+          target = e;
+        }
+      }
+    }
     if (!target) return;
     const crit = this.rollCrit(t);
     const landed = this.damageEnemy(target, f.damage * (crit ? t.critMultiplier : 1), t);
-    if (landed) this.sfx.push('swordHit');
+    if (f.cross) {
+      this.sfx.push('crossSlash');
+      this.emitFx({
+        kind: 'crossSlash',
+        x: target.pos.x,
+        y: target.pos.y,
+        angle: Math.atan2(target.pos.y - t.pos.y, target.pos.x - t.pos.x),
+        color: t.def.visual.color,
+        crit: crit && landed,
+      });
+    } else if (landed) {
+      this.sfx.push('swordHit');
+    }
     if (crit && landed) this.critFloater(target.pos);
+  }
+
+  /**
+   * A Longbow shot, loosed at the end of its slow draw: one big, heavy arrow from
+   * the bow (`LONGBOW_MUZZLE`). While Piercing Shot has arrows nocked
+   * (`pierceShots`), the shot is instead a piercing arrow: aimed where the
+   * target is heading, it flies straight on to the end of the hero's range and
+   * strikes every foe it passes (see `advancePierce`). One crit roll per arrow.
+   */
+  private fireLongbow(tower: Tower, target: Enemy): void {
+    const crit = this.rollCrit(tower);
+    const dmg = tower.damage * (crit ? tower.critMultiplier : 1);
+    const dir = target.pos.x >= tower.pos.x ? 1 : -1;
+    const origin = { x: tower.pos.x + dir * LONGBOW_MUZZLE.x, y: tower.pos.y + LONGBOW_MUZZLE.y };
+    const color = tower.def.visual.color;
+    if (tower.pierceShots > 0) {
+      tower.pierceShots -= 1;
+      // Lead the target by its walk over the arrow's flight so the straight shot
+      // still finds it.
+      const flight = Math.hypot(target.pos.x - origin.x, target.pos.y - origin.y) / PIERCE_ARROW_SPEED;
+      const lead = target.def.speed * target.slowFactor * flight;
+      const aim = { x: target.pos.x + target.heading.x * lead, y: target.pos.y + target.heading.y * lead };
+      let ux = aim.x - tower.pos.x;
+      let uy = aim.y - tower.pos.y;
+      const len = Math.hypot(ux, uy) || 1;
+      ux /= len;
+      uy /= len;
+      // Flies on to the end of the hero's range, measured from the hero.
+      const end = { x: tower.pos.x + ux * tower.range, y: tower.pos.y + uy * tower.range };
+      const travel = Math.hypot(end.x - origin.x, end.y - origin.y) || 1;
+      tower.aimTarget = aim;
+      this.sfx.push('pierceShot');
+      this.projectiles.push({
+        pos: origin,
+        targetUid: target.uid,
+        last: end,
+        speed: PIERCE_ARROW_SPEED,
+        damage: dmg,
+        crit,
+        color,
+        scale: 1.5,
+        style: 'pierce',
+        source: tower,
+        bounces: 0,
+        trail: [],
+        pierce: { dir: { x: (end.x - origin.x) / travel, y: (end.y - origin.y) / travel }, travelLeft: travel, hit: [] },
+      });
+      return;
+    }
+    this.sfx.push('longbowShot');
+    this.projectiles.push({
+      pos: origin,
+      targetUid: target.uid,
+      last: { ...target.pos },
+      speed: LONGBOW_ARROW_SPEED,
+      damage: dmg,
+      crit,
+      color,
+      scale: 1.5,
+      style: 'arrow',
+      source: tower,
+      bounces: 0,
+    });
+  }
+
+  /**
+   * Advance a piercing arrow one step along its straight flight, striking every
+   * living, targetable foe whose body the step passes within
+   * `PIERCE_HALF_WIDTH` of (each once). Returns false once it has flown its
+   * full reach, so the caller drops it.
+   */
+  private advancePierce(p: Projectile, dt: number): boolean {
+    const pr = p.pierce!;
+    const step = Math.min(p.speed * dt, pr.travelLeft);
+    const ax = p.pos.x;
+    const ay = p.pos.y;
+    for (const e of this.enemies) {
+      if (e.dead || e.dying || e.rise > 0 || isSpeaking(e)) continue;
+      if (pr.hit.includes(e.uid)) continue;
+      // Distance from the foe to the segment flown this step.
+      const k = Math.max(0, Math.min(step, (e.pos.x - ax) * pr.dir.x + (e.pos.y - ay) * pr.dir.y));
+      const d = Math.hypot(e.pos.x - (ax + pr.dir.x * k), e.pos.y - (ay + pr.dir.y * k));
+      if (d > PIERCE_HALF_WIDTH + e.def.radius) continue;
+      pr.hit.push(e.uid);
+      if (!this.damageEnemy(e, p.damage, p.source)) continue;
+      this.sfx.push('longbowHit');
+      if (p.crit) this.critFloater(e.pos);
+      this.bursts.push({ pos: { ...e.pos }, color: p.color, ttl: 0.3, maxTtl: 0.3, radius: 6 });
+    }
+    p.pos = { x: ax + pr.dir.x * step, y: ay + pr.dir.y * step };
+    pr.travelLeft -= step;
+    if (p.trail) {
+      p.trail.unshift({ ...p.pos });
+      if (p.trail.length > MAGIC_TRAIL_LENGTH) p.trail.length = MAGIC_TRAIL_LENGTH;
+    }
+    if (pr.travelLeft > 0.01) return true;
+    // Spent at the end of its reach: a last glint where it fades out.
+    this.arrowImpact(p.pos, p.color);
+    return false;
+  }
+
+  /**
+   * A Claymore swing (the Blade adventurer's claymore form): released after its
+   * heft wind-up, the great blade cleaves every living, targetable foe inside
+   * its arc — within reach and half the unit's `coneAngle` either side of the
+   * aim — at once, each for full damage (one crit roll for the swing). A foe
+   * whose body clips the arc's edge is caught too.
+   */
+  private fireCleave(tower: Tower, target: Enemy): void {
+    const aim = Math.atan2(target.pos.y - tower.pos.y, target.pos.x - tower.pos.x);
+    const halfAngle = (coneAngleDeg(tower.def) * Math.PI) / 180 / 2;
+    const crit = this.rollCrit(tower);
+    const dmg = tower.damage * (crit ? tower.critMultiplier : 1);
+    this.sfx.push('claymoreSwing');
+    this.emitFx({
+      kind: 'cleave',
+      x: tower.pos.x,
+      y: tower.pos.y,
+      angle: aim,
+      halfAngle,
+      radius: Math.min(tower.range, CLAYMORE_CLEAVE_FX_RADIUS),
+      color: tower.def.visual.color,
+    });
+    let anyLanded = false;
+    let targetLanded = false;
+    for (const e of this.enemies) {
+      if (e.dead || e.dying || e.rise > 0 || isSpeaking(e)) continue;
+      const dx = e.pos.x - tower.pos.x;
+      const dy = e.pos.y - tower.pos.y;
+      const d = Math.hypot(dx, dy);
+      if (d > tower.range + e.def.radius) continue;
+      let off = Math.abs(Math.atan2(dy, dx) - aim);
+      if (off > Math.PI) off = Math.PI * 2 - off;
+      const slack = d > e.def.radius ? Math.asin(e.def.radius / d) : Math.PI;
+      if (e !== target && off > halfAngle + slack) continue;
+      const landed = this.damageEnemy(e, dmg, tower);
+      if (landed) anyLanded = true;
+      if (e === target) targetLanded = landed;
+    }
+    if (anyLanded) this.sfx.push('claymoreHit');
+    if (crit && targetLanded) this.critFloater(target.pos);
   }
 
   /**
@@ -1807,6 +2278,11 @@ export class GameEngine {
   private updateProjectiles(dt: number): void {
     const survivors: Projectile[] = [];
     for (const p of this.projectiles) {
+      // A piercing arrow flies straight on, striking everything in its path.
+      if (p.pierce) {
+        if (this.advancePierce(p, dt)) survivors.push(p);
+        continue;
+      }
       const target = this.enemies.find((e) => e.uid === p.targetUid && !e.dead);
       if (target) p.last = { ...target.pos }; // track the live target
       const dest = target ? target.pos : p.last;
@@ -1833,6 +2309,7 @@ export class GameEngine {
           if (landed) {
             const sh = p.source.def.visual.shape;
             if (sh === 'archer' || sh === 'player-bow') this.sfx.push('archerHit');
+            else if (sh === 'player-longbow') this.sfx.push('longbowHit');
             else if (sh === 'crossbow') this.sfx.push('crossbowHit');
             else if (sh === 'wizard') this.sfx.push('windHit');
             else if (sh === 'elf') this.sfx.push('elfHit');
@@ -1919,7 +2396,8 @@ export class GameEngine {
    */
   private detonateOrb(pos: Vec2, p: Projectile): void {
     const radius = p.burstRadius ?? DEFAULT_BURST_RADIUS;
-    this.sfx.push('orbBurst');
+    const heavy = p.source.greaterOrb;
+    this.sfx.push(heavy ? 'greaterOrbBurst' : 'orbBurst');
     let anyLanded = false;
     for (const e of this.enemies) {
       if (e.dead || e.dying || e.rise > 0 || isSpeaking(e)) continue;
@@ -1928,7 +2406,7 @@ export class GameEngine {
       if (this.damageEnemy(e, p.damage, p.source)) anyLanded = true;
     }
     if (p.crit && anyLanded) this.critFloater(pos);
-    this.emitFx({ kind: 'blast', x: pos.x, y: pos.y, radius, color: p.color, element: fxElementFor(p.source), crit: p.crit, tint: fxTintFor(p.source) });
+    this.emitFx({ kind: 'blast', x: pos.x, y: pos.y, radius, color: p.color, element: fxElementFor(p.source), crit: p.crit, tint: fxTintFor(p.source), heavy });
     // A big blast ring filling the detonation circle, plus a bright inner flash.
     this.bursts.push({
       pos: { ...pos },
@@ -2135,27 +2613,55 @@ export class GameEngine {
    * dealing that damage to every foe within `burstRadius`. The orb takes the
    * caster's own colour so the charge, flight and blast all read as one spell.
    */
-  private fireOrb(tower: Tower, target: Enemy): void {
+  private fireOrb(tower: Tower, target: Enemy | null, at: Vec2): void {
     const crit = this.rollCrit(tower);
     const dmg = tower.damage * (crit ? tower.critMultiplier : 1);
     // Launch from the caster's thrust-out palms (the sprite's MAGIC_CAST_POINT at
-    // board scale), on the side it faces.
-    const dir = target.pos.x >= tower.pos.x ? 1 : -1;
-    const origin = { x: tower.pos.x + dir * 12.8, y: tower.pos.y - 6.4 };
+    // board scale) — or, for the Greater Orb, from overhead at the top of the
+    // leap — on the side it faces.
+    const great = tower.greaterOrb;
+    const dir = at.x >= tower.pos.x ? 1 : -1;
+    const origin = great
+      ? { x: tower.pos.x + dir * GREATER_ORB_MUZZLE.x, y: tower.pos.y + GREATER_ORB_MUZZLE.y }
+      : { x: tower.pos.x + dir * 12.8, y: tower.pos.y - 6.4 };
     this.projectiles.push({
       pos: origin,
-      targetUid: target.uid,
-      last: { ...target.pos },
-      speed: ORB_SPEED,
+      // No target (a committed Greater Orb whose foe is gone): it flies to `last`.
+      targetUid: target?.uid ?? -1,
+      last: { ...at },
+      speed: great ? GREATER_ORB_SPEED : ORB_SPEED,
       damage: dmg,
       crit,
       color: tower.def.visual.color,
-      scale: 1,
+      scale: great ? GREATER_ORB_SCALE : 1,
       style: 'orb',
       source: tower,
       bounces: 0,
-      burstRadius: tower.def.burstRadius ?? DEFAULT_BURST_RADIUS,
+      burstRadius: tower.burstRadius,
       trail: [],
+    });
+  }
+
+  /**
+   * Greater Orb release (the Magic adventurer's mastery node): at the top of the
+   * leap the hero hurls the swollen orb down — the throw-down and landing play as
+   * the signature move (`specialAnim`) — and the orb flies from overhead toward
+   * `target` (or, with none, to the point `at`).
+   */
+  private throwGreaterOrb(tower: Tower, target: Enemy | null, at: Vec2): void {
+    tower.attackAnim = 0;
+    tower.specialAnim = specialAnimTime(tower.def.visual.shape);
+    if (!target) tower.attackCount += 1; // `fire` counts the targeted throws
+    this.fireOrb(tower, target, at);
+    this.sfx.push('greaterOrbThrow');
+    const dir = at.x >= tower.pos.x ? 1 : -1;
+    this.emitFx({
+      kind: 'cast',
+      ability: 'greaterOrb',
+      x: tower.pos.x + dir * GREATER_ORB_MUZZLE.x,
+      y: tower.pos.y + GREATER_ORB_MUZZLE.y,
+      color: tower.def.visual.color,
+      radius: tower.burstRadius,
     });
   }
 

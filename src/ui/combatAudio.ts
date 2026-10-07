@@ -33,6 +33,7 @@ let dest: AudioNode | null = null;
 const MIN_GAP: Partial<Record<SfxName, number>> = {
   spearHit: 0.07,
   windSliceHit: 0.07,
+  longbowHit: 0.07,
 };
 const DEFAULT_GAP = 0.05;
 const lastPlayed: Partial<Record<SfxName, number>> = {};
@@ -48,6 +49,7 @@ function noiseSweep(
   gain: number,
   q = 1.3,
   type: BiquadFilterType = 'bandpass',
+  delay = 0,
 ): void {
   const frames = Math.floor(ac.sampleRate * dur);
   const buf = ac.createBuffer(1, frames, ac.sampleRate);
@@ -58,7 +60,7 @@ function noiseSweep(
   const bp = ac.createBiquadFilter();
   bp.type = type;
   bp.Q.value = q;
-  const t = ac.currentTime + AUDIO_LEAD;
+  const t = ac.currentTime + AUDIO_LEAD + delay;
   bp.frequency.setValueAtTime(from, t);
   bp.frequency.exponentialRampToValueAtTime(Math.max(40, to), t + dur);
   const g = ac.createGain();
@@ -207,6 +209,27 @@ const VOICES: Record<SfxName, (ac: AudioContext) => void> = {
     noiseSweep(ac, jit(900, 120), 200, 0.24, 0.03, 0.6, 'lowpass');
   },
 
+  // Greater Orb — a deeper, longer swell under the leap as the huge orb gathers
+  // overhead (a soft whump as the feet leave the floor, then a rising hum with a
+  // shimmer); a heavy whoosh as it's hurled down; and a big rolling boom, a
+  // sub thump and crackle when it crashes into the pack.
+  greaterOrbCast: (ac) => {
+    noiseSweep(ac, jit(420, 40), 160, 0.16, 0.016, 0.8, 'lowpass', 0.15);
+    toneGlide(ac, jit(150, 15), 520, 0.95, 0.024, 'sine', 0.2);
+    noiseSweep(ac, jit(300, 40), jit(1300, 150), 0.85, 0.012, 0.5, 'bandpass', 0.25);
+    toneGlide(ac, jit(900, 60), 1400, 0.6, 0.006, 'sine', 0.5);
+  },
+  greaterOrbThrow: (ac) => {
+    noiseSweep(ac, jit(1400, 150), jit(260, 40), 0.24, 0.03, 0.7);
+    toneGlide(ac, jit(420, 30), 140, 0.22, 0.014, 'triangle');
+  },
+  greaterOrbBurst: (ac) => {
+    toneGlide(ac, jit(240, 25), 48, 0.55, 0.045, 'sine');
+    toneGlide(ac, jit(360, 40), 90, 0.32, 0.026, 'triangle');
+    noiseSweep(ac, jit(1100, 120), 140, 0.6, 0.038, 0.5, 'lowpass');
+    noiseSweep(ac, jit(2600, 200), 1100, 0.3, 0.01, 0.9, 'bandpass', 0.05);
+  },
+
   // Cyclone Slash (the Blade's ability) — a big whirling steel roar: two broad
   // noise sweeps whipping up in pitch for the whirlwind, plus a low metallic
   // ring underneath for the heft of the spinning blades. Louder than a normal
@@ -217,12 +240,75 @@ const VOICES: Record<SfxName, (ac: AudioContext) => void> = {
     toneGlide(ac, jit(180, 20), 90, 0.34, 0.04, 'triangle');
   },
 
+  // Cross Slash (the Blade's every-third-attack X cut) — two crossing swishes a
+  // hair apart (one rising, one falling), a solid thud, and a short bright
+  // steel "shing" ringing off the crossed blades.
+  crossSlash: (ac) => {
+    noiseSweep(ac, jit(700, 90), jit(2300, 250), 0.13, 0.03, 0.9);
+    noiseSweep(ac, jit(2100, 220), jit(650, 80), 0.13, 0.026, 0.9, 'bandpass', 0.035);
+    toneGlide(ac, jit(260, 30), 150, 0.1, 0.03, 'triangle', 0.03);
+    toneGlide(ac, jit(1480, 40), 1420, 0.34, 0.011, 'sine', 0.04);
+    toneGlide(ac, jit(2220, 60), 2150, 0.22, 0.006, 'sine', 0.04);
+  },
+
+  // Claymore — a long, low, heavy whoosh as the great blade comes round, and a
+  // deep crunching thud when it bites (one per swing, however many it cleaves).
+  claymoreSwing: (ac) => noiseSweep(ac, jit(560, 70), jit(190, 30), 0.3, 0.034, 0.7),
+  claymoreHit: (ac) => {
+    toneGlide(ac, jit(170, 20), 88, 0.15, 0.036, 'triangle');
+    noiseSweep(ac, jit(900, 100), 280, 0.09, 0.018, 0.6, 'lowpass');
+  },
+
+  // Earthsplitter wind-up — as the claymore is hauled overhead: a low rumble
+  // swelling up from the ground and a rising, straining grind of steel.
+  earthsplitterRise: (ac) => {
+    noiseSweep(ac, jit(160, 20), jit(420, 40), 0.55, 0.022, 0.6, 'lowpass');
+    toneGlide(ac, jit(70, 6), 120, 0.55, 0.028, 'sine');
+    noiseSweep(ac, jit(1400, 150), jit(2600, 200), 0.4, 0.007, 1.4, 'bandpass', 0.12);
+  },
+
+  // Earthsplitter (the Claymore's ability) — the blade meets the ground: a deep
+  // sub boom, a rolling lowpassed rumble, and gravel crumbling as the crack runs.
+  earthsplitter: (ac) => {
+    toneGlide(ac, jit(110, 10), 44, 0.6, 0.05, 'sine');
+    noiseSweep(ac, jit(620, 60), 110, 0.75, 0.042, 0.5, 'lowpass');
+    noiseSweep(ac, jit(2200, 200), 900, 0.4, 0.012, 0.8, 'bandpass', 0.06);
+  },
+
   // Quickdraw (the Bow's ability) — a taut bowstring pull snapping up in pitch
   // with a bright rising shimmer, reading as a sudden surge of speed. A one-off
   // activated cast, so a touch louder than a normal shot.
   quickdraw: (ac) => {
     noiseSweep(ac, jit(700, 100), jit(2200, 250), 0.22, 0.038, 1.2);
     toneGlide(ac, jit(500, 40), 1500, 0.24, 0.03, 'sawtooth');
+  },
+
+  // Longbow — a slow creak of the yew stave as the string comes back, a deep
+  // heavy thwump on the loose, and a solid thunk when the big arrow lands.
+  longbowDraw: (ac) => {
+    noiseSweep(ac, jit(260, 30), jit(620, 60), 0.6, 0.009, 3, 'bandpass');
+    toneGlide(ac, jit(95, 8), 130, 0.55, 0.008, 'triangle');
+  },
+  longbowShot: (ac) => {
+    noiseSweep(ac, jit(1200, 150), jit(380, 60), 0.14, 0.036);
+    toneGlide(ac, jit(150, 15), 85, 0.14, 0.024, 'triangle');
+  },
+  longbowHit: (ac) => {
+    toneGlide(ac, jit(210, 30), 110, 0.09, 0.034, 'triangle');
+    noiseSweep(ac, 2400, 1700, 0.04, 0.016, 1, 'highpass');
+  },
+
+  // Piercing Shot (the Longbow's ability) — the arrow kindles: a bright rising
+  // shimmer over a taut string pull, ringing on as it is held to the sky.
+  pierceCast: (ac) => {
+    noiseSweep(ac, jit(600, 80), jit(2400, 250), 0.34, 0.026, 1);
+    toneGlide(ac, jit(420, 30), 1600, 0.4, 0.026, 'sine');
+    toneGlide(ac, jit(1600, 40), 1560, 0.5, 0.009, 'sine', 0.22);
+  },
+  // A piercing arrow loosed — a hard crack and a long tearing whoosh.
+  pierceShot: (ac) => {
+    noiseSweep(ac, jit(2800, 250), jit(480, 60), 0.3, 0.04, 0.8);
+    toneGlide(ac, jit(900, 60), 280, 0.26, 0.018, 'sawtooth');
   },
 
   // Mana Ray (the Mage's beam) — a bright arcane surge as the beam ignites: a

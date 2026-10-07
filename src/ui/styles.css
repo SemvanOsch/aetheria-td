@@ -110,6 +110,9 @@ body {
   font-size: var(--fs-body);
   color: var(--text);
   background: radial-gradient(1200px 700px at 30% -10%, #1a1f3c 0%, transparent 60%), var(--bg-0);
+  /* Pinned to the viewport: body is 100% tall, so on a page taller than the
+     window (the stat sheets) the gradient would otherwise tile again below. */
+  background-attachment: fixed;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -2122,7 +2125,8 @@ button:disabled .icon {
   height: 100%;
   background: linear-gradient(90deg, #2f7fd0, #6cc6ff);
   box-shadow: 0 0 8px rgba(90, 178, 255, 0.5);
-  transition: width 0.2s ease;
+  /* No width transition: the panel re-renders every frame, and a transition
+     restarted each frame (e.g. by mana regen) never catches up to its target. */
 }
 .mana-hint {
   margin-top: 5px;
@@ -2614,6 +2618,10 @@ button.cd-mastery:hover {
   stroke: var(--gold);
   filter: drop-shadow(0 0 4px rgba(232, 191, 94, 0.6));
 }
+/* Learned, but not the active path of its exclusive group: dark, unlit. */
+.mt-edge.inactive {
+  stroke: rgba(120, 100, 60, 0.45);
+}
 
 /* The champion crowning the tree. */
 .mt-root {
@@ -2673,6 +2681,16 @@ button.cd-mastery:hover {
   line-height: 1.15;
   color: var(--text-dim);
   text-align: center;
+}
+/* A thin dark outline so labels stay readable where they cross a gold link. */
+.mt-node-name,
+.mt-node-cost {
+  text-shadow:
+    -1px 0 0 #0a0c16,
+    1px 0 0 #0a0c16,
+    0 -1px 0 #0a0c16,
+    0 1px 0 #0a0c16,
+    0 0 3px rgba(10, 12, 22, 0.8);
 }
 .mt-node-cost {
   font-size: 11px;
@@ -4712,7 +4730,7 @@ button.cd-mastery:hover {
   flex-direction: column;
   gap: 8px;
 }
-/* Each ability is a card: a square art icon on the left, name + status on the right. */
+/* Each ability is a card: a round art medallion on the left, name + status on the right. */
 .ability-btn {
   display: flex;
   align-items: center;
@@ -4726,25 +4744,30 @@ button.cd-mastery:hover {
   cursor: pointer;
   transition: transform 0.12s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
+/* The ability art is a round medallion with its own coloured rim (transparent
+   corners), so the icon is just a circle — no frame of its own. */
 .ability-icon {
   position: relative;
   flex: 0 0 auto;
-  width: 60px;
-  height: 60px;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 2px solid var(--gold);
-  background: radial-gradient(circle at 50% 38%, #2a2033, #12101f);
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55));
+  transition: filter 0.2s ease;
 }
 .ability-icon img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
+}
+/* Emoji fallback (no art yet / art failed to load): a plain round disc. */
+.ability-icon.no-art {
+  border: 2px solid var(--gold);
+  background: radial-gradient(circle at 50% 38%, #2a2033, #12101f);
 }
 .ability-emoji {
   font-size: 30px;
@@ -4768,25 +4791,16 @@ button.cd-mastery:hover {
 .ability-status.is-ready {
   color: var(--gold);
 }
-/* Ready: a warm gold border/glow and a gentle breathing pulse to invite a click. */
+/* Ready: a gold card border; hovering lifts it. */
 .ability-btn.ready {
   border-color: var(--gold);
-  animation: ability-pulse 1.8s ease-in-out infinite;
 }
 .ability-btn.ready:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45), 0 0 14px rgba(242, 193, 78, 0.5);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
 }
 .ability-btn.ready:active {
   transform: scale(0.98);
-}
-@keyframes ability-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 rgba(242, 193, 78, 0);
-  }
-  50% {
-    box-shadow: 0 0 14px rgba(242, 193, 78, 0.45);
-  }
 }
 /* Cooling down: desaturated, non-interactive, with a radial countdown wedge. */
 .ability-btn.cooling {
@@ -4794,7 +4808,7 @@ button.cd-mastery:hover {
 }
 .ability-btn.cooling .ability-icon {
   border-color: var(--gold-deep);
-  filter: grayscale(0.35) brightness(0.82);
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55)) grayscale(0.35) brightness(0.82);
 }
 /* Off cooldown but not enough mana — a cool blue-tinted "starved" state. */
 .ability-btn.starved {
@@ -4802,13 +4816,17 @@ button.cd-mastery:hover {
 }
 .ability-btn.starved .ability-icon {
   border-color: #3a6a9a;
-  filter: grayscale(0.5) brightness(0.75);
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55)) grayscale(0.5) brightness(0.75);
 }
-/* Mana-cost badge tucked in the icon corner. */
+/* Charged, but no enemy in reach — just without the ready gold until one walks in. */
+.ability-btn.idle {
+  cursor: default;
+}
+/* Mana-cost badge sitting on the medallion's lower-right rim. */
 .ability-mana-cost {
   position: absolute;
-  right: 2px;
-  bottom: 2px;
+  right: -2px;
+  bottom: -1px;
   padding: 1px 4px;
   border-radius: 6px;
   font-size: 10px;
@@ -4823,9 +4841,11 @@ button.cd-mastery:hover {
   color: #ff9a9a;
   border-color: rgba(255, 120, 120, 0.6);
 }
+/* Inset to sit inside the medallion's painted rim. */
 .ability-cooldown-sweep {
   position: absolute;
-  inset: 0;
+  inset: 3px;
+  border-radius: 50%;
   pointer-events: none;
 }
 .ability-cooldown-num {
@@ -8103,4 +8123,171 @@ button.cd-mastery.cd-armory:hover {
   margin-top: 1px;
   font-size: 11.5px;
   color: var(--text-dim);
+}
+
+/* Champion stat detail (#champions/<id>, ChampionStatDetail.tsx) */
+.es-table tbody tr.es-link {
+  cursor: pointer;
+}
+.cd-top {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  margin-bottom: 28px;
+}
+.cd-portrait {
+  flex: none;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+.cd-desc {
+  margin-bottom: 12px;
+  max-width: 70ch;
+}
+.cd-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px 16px;
+}
+.cd-facts dt {
+  color: var(--text-faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.cd-facts dd {
+  font-variant-numeric: tabular-nums;
+}
+/* Detail tables let their headers wrap so every column fits without scrolling. */
+.cd-main .es-table th {
+  white-space: normal;
+  vertical-align: bottom;
+}
+.cd-up {
+  color: var(--gold-hi);
+}
+.cd-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--hairline);
+  overflow: hidden;
+}
+.cd-bar > div {
+  height: 100%;
+  background: var(--gold);
+}
+.cd-bar-base {
+  margin-top: 3px;
+}
+.cd-bar-base > div {
+  background: var(--text-faint);
+}
+.cd-notes {
+  margin-top: 8px;
+  padding-left: 18px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.cd-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+.cd-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.cd-card .cd-facts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 10px;
+}
+.cd-ability-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.cd-emoji {
+  font-size: 36px;
+}
+.cd-picker-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.cd-picker-bar button {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+}
+.cd-picker-bar button:hover {
+  color: var(--gold);
+}
+.cd-nodes {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 6px;
+}
+.cd-nodes li {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  opacity: 0.6;
+}
+.cd-nodes li {
+  cursor: pointer;
+  user-select: none;
+}
+.cd-nodes li:hover:not(.locked) {
+  border-color: var(--gold-hi);
+  opacity: 0.85;
+}
+.cd-nodes li.on {
+  opacity: 1;
+  border-color: var(--gold);
+}
+.cd-nodes li.locked {
+  cursor: default;
+}
+.cd-nodes li:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+.cd-nodes input {
+  pointer-events: none;
+}
+.cd-node-head {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.cd-major {
+  color: var(--gold);
+}
+.cd-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.cd-tags span {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--panel-hi);
+  color: var(--text-dim);
+}
+@media (max-width: 900px) {
+  .cd-top {
+    flex-direction: column;
+  }
 }

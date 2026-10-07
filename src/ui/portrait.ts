@@ -11,6 +11,10 @@
  */
 
 import { paintFigure, BOSS_BOX, DEFAULT_BOX, type FigureStyle } from '../engine/figure';
+import { PROFICIENCY_WEAPON, playerWeaponForShape, type PlayerWeapon } from '../engine/sprites';
+import { getUnit } from '../domain/units';
+import { PLAYER_CHAMPION_IDS } from '../domain/playerChampion';
+import type { Proficiency } from '../domain/proficiency';
 
 type Tick = (t: number) => void;
 
@@ -80,4 +84,14 @@ export function paintPortrait(
   ctx.translate(0, -11);
   paintFigure(ctx, draw, style, cacheKey);
   ctx.restore();
+}
+
+/**
+ * The weapon the adventurer fights with, for every portrait of them (the
+ * journal plate, the Armory doll): their champion's current form (e.g. the
+ * Blade's Claymore, rebuilt from mastery), else the proficiency's default.
+ */
+export function adventurerWeapon(proficiency: Proficiency): PlayerWeapon {
+  const champion = getUnit(PLAYER_CHAMPION_IDS[proficiency]);
+  return champion ? playerWeaponForShape(champion.visual.shape) : PROFICIENCY_WEAPON[proficiency];
 }

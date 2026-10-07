@@ -44,6 +44,18 @@ npm run typecheck
    journal's Champions pages (**Armor**). All four pieces of one set add its
    set bonus. Unworn pieces can be salvaged for gems.
 
+8. After Ironclad, the Blade adventurer's tree splits into two rival fighting
+   styles. You may learn both, but only the one you pick is active:
+   **Cross Slash** (every third attack crosses both swords in an X for 2.5×
+   damage) or **Claymore** (trade the dual swords for a giant two-handed
+   claymore that cleaves every foe in a wide arc, with its own in-stage levels
+   and the **Earthsplitter** ability: a ground-splitting slam that strikes and
+   knocks back everything along a long fissure).
+   The Magic adventurer's tree splits the same way after Ironclad. Its first
+   style is **Greater Orb**: the hero leaps up, gathers a huge orb overhead and
+   hurls it down. Casting is 40% slower, but the orb deals +70% damage with a
+   30% wider blast.
+
 ### Currencies
 
 - **💎 Gems** — the only persistent currency: earned from clearing realms, spent

@@ -19,7 +19,7 @@ import {
   type ArmorPiece,
   type ArmorSlot,
 } from '../../domain/armor';
-import { PROFICIENCY_WEAPON } from '../../engine/sprites';
+import { adventurerWeapon } from '../portrait';
 import { ArmorIcon } from './ArmorIcon';
 import { PlayerSprite } from './PlayerSprite';
 import { Icon } from './Icon';
@@ -58,7 +58,7 @@ export function Armory({ initialTab = 'all', onClose }: Props) {
   const worn = equippedArmor(state);
   const summary = armorSummary(worn);
   const sprite = state.player?.sprite;
-  const weapon = PROFICIENCY_WEAPON[state.player?.proficiency ?? 'sword'];
+  const weapon = adventurerWeapon(state.player?.proficiency ?? 'sword');
 
   // Head → feet, rarest first within a slot, newest first within a rarity.
   const sorted = [...items].sort(

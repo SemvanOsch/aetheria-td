@@ -24,7 +24,10 @@ export type IconName =
   | 'heart'
   | 'star'
   | 'sword'
+  | 'claymore'
   | 'bow'
+  | 'longbow'
+  | 'volley'
   | 'staff'
   | 'shield'
   | 'mana'
@@ -143,11 +146,33 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <path d="M7.2 11.4l5.4 5.4M9.6 14.4l-4.8 4.8M3.8 18.6l1.6 1.6" />
     </>
   ),
+  claymore: (
+    <>
+      <path className={F} d="M20.8 3.2l-.4 3.2-8.8 8.8-2.8-2.8 8.8-8.8z" />
+      <path d="M20.8 3.2l-.4 3.2-8.8 8.8-2.8-2.8 8.8-8.8z" />
+      <path d="M18.4 5.6l-7.6 7.6M6.2 10.4l7.4 7.4M9.9 14.1l-4.6 4.6" />
+      <circle cx="4.3" cy="19.7" r="1.4" />
+    </>
+  ),
   bow: (
     <>
       <path d="M6 3.6c8.4 1 12.4 5 14.4 14.4M6 3.6l14.4 14.4" />
       <path className={F} d="M6 3.6c8.4 1 12.4 5 14.4 14.4L6 3.6z" />
       <path d="M3.4 20.6L15 9M3.4 20.6l.4-3.2M3.4 20.6l3.2-.4M15 9l-.6-2.2M15 9l2.2.6" />
+    </>
+  ),
+  longbow: (
+    <>
+      <path className={F} d="M7 2.6c7.6 2.4 11 5.6 11 9.4s-3.4 7-11 9.4z" />
+      <path d="M7 2.6c7.6 2.4 11 5.6 11 9.4s-3.4 7-11 9.4M7 2.6v18.8" />
+      <path d="M2.6 12h18.8M21.4 12l-2.6-1.8M21.4 12l-2.6 1.8M2.6 12l-1-1.6M2.6 12l-1 1.6" />
+    </>
+  ),
+  volley: (
+    <>
+      <path d="M3 13L13 3M13 3l-3.2.4M13 3l-.4 3.2" />
+      <path d="M7 17L17 7M17 7l-3.2.4M17 7l-.4 3.2" />
+      <path d="M11 21L21 11M21 11l-3.2.4M21 11l-.4 3.2" />
     </>
   ),
   staff: (

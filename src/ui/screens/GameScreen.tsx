@@ -58,8 +58,10 @@ interface AbilityHud {
   /** Seconds of cooldown left (0 = ready). */
   cooldown: number;
   cooldownMax: number;
-  /** Off cooldown AND enough mana to cast. */
+  /** Off cooldown, enough mana, and (for a damaging ability) a foe in reach. */
   ready: boolean;
+  /** Whether a damaging ability has a foe in reach (always true for a self-buff). */
+  inRange: boolean;
   /** Mana the cast costs. */
   manaCost: number;
   /** The hero's current mana pool. */
@@ -258,6 +260,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
         .map((t) => {
           const manaCost = t.ability!.manaCost ?? 0;
           const affordable = t.mana >= manaCost;
+          const inRange = engine.abilityHasTarget(t);
           return {
             uid: t.uid,
             name: t.ability!.name,
@@ -266,7 +269,8 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
             image: t.ability!.image,
             cooldown: t.abilityCooldown,
             cooldownMax: t.abilityCooldownMax,
-            ready: t.abilityCooldown <= 0 && affordable,
+            ready: t.abilityCooldown <= 0 && affordable && inRange,
+            inRange,
             manaCost,
             mana: Math.floor(t.mana),
             affordable,
@@ -534,6 +538,8 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
       showFlash(`${tower.ability?.name} is recharging…`);
     } else if (tower && tower.mana < (tower.ability?.manaCost ?? 0)) {
       showFlash(`Not enough mana for ${tower.ability?.name}.`);
+    } else if (tower && !engine.abilityHasTarget(tower)) {
+      showFlash(`No enemies in range for ${tower.ability?.name}.`);
     }
   };
 
@@ -1105,7 +1111,10 @@ function AbilityButton({
   const deg = Math.max(0, Math.min(1, frac)) * 360;
   // Off cooldown but too little mana: a distinct "starved" state.
   const starved = !cooling && !ability.affordable;
-  const stateClass = ability.ready ? 'ready' : starved ? 'starved' : 'cooling';
+  // Charged and paid for, but nobody in reach to hit: held back, not wasted —
+  // shown only by the missing gold (same text as ready).
+  const idle = !cooling && !starved && !ability.inRange;
+  const stateClass = ability.ready ? 'ready' : starved ? 'starved' : idle ? 'idle' : 'cooling';
   const status = cooling
     ? `Recharging · ${Math.ceil(ability.cooldown)}s`
     : starved
@@ -1119,7 +1128,7 @@ function AbilityButton({
       title={`${ability.name} — ${ability.manaCost} mana\n${ability.description}`}
       aria-label={ability.name}
     >
-      <span className="ability-icon">
+      <span className={`ability-icon${ability.image && imgOk ? '' : ' no-art'}`}>
         {ability.image && imgOk ? (
           <img src={ability.image} alt="" onError={() => setImgOk(false)} />
         ) : (
@@ -1179,6 +1188,15 @@ function activeBuffsFor(t: Tower): ActiveBuff[] {
         t.abilitySpeedBuffTimer,
       )}s left`,
       color: '#ffa83d',
+    });
+  }
+  // The Longbow's Piercing Shot: arrows still nocked, in the archer's colour.
+  if ((t.pierceShots ?? 0) > 0) {
+    buffs.push({
+      icon: 'longbow',
+      name: 'Piercing Shot',
+      detail: `${t.pierceShots} piercing ${t.pierceShots === 1 ? 'arrow' : 'arrows'} nocked`,
+      color: t.def.visual.color,
     });
   }
   if ((t.attackSpeedBuffMult ?? 1) > 1) {

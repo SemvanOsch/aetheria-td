@@ -133,6 +133,49 @@ interface Slash {
   span: number;
 }
 
+/** The Blade's Cross Slash mark: two long cuts flashing over a foe in an X. */
+interface CrossMark {
+  x: number;
+  y: number;
+  /** +1 when the blow travels rightward, -1 leftward: mirrors which cut leads. */
+  side: number;
+  /** Length of each cut. */
+  size: number;
+  t: number;
+  max: number;
+  color: string;
+}
+
+/** A Claymore swing: a broad crescent sweeping across the arc it cleaves. */
+interface CleaveArc {
+  x: number;
+  y: number;
+  angle: number;
+  half: number;
+  radius: number;
+  /** Sweep direction in angle (+1 / -1): always enters from the arc's top side. */
+  dir: number;
+  t: number;
+  max: number;
+  color: string;
+}
+
+/** One point of a fissure's jagged line, with the crack's width there. */
+interface CrackPoint {
+  x: number;
+  y: number;
+  w: number;
+}
+
+/** The Earthsplitter's crack: a jagged line torn through the floor, with side cracks. */
+interface Fissure {
+  pts: CrackPoint[];
+  /** Side cracks, each opening once the main crack has run `at` (0..1) of its length. */
+  branches: { at: number; pts: CrackPoint[] }[];
+  t: number;
+  max: number;
+}
+
 interface LightPulse {
   x: number;
   y: number;
@@ -174,6 +217,11 @@ const MAX_FLASHES = 40;
 const MAX_SLASHES = 40;
 const MAX_PULSES = 24;
 const MAX_CORPSES = 40;
+const MAX_CROSSES = 12;
+const MAX_CLEAVES = 12;
+const MAX_FISSURES = 6;
+/** How long a fissure takes to run its full length. */
+const FISSURE_GROW = 0.2;
 
 /**
  * Particle ramp + light for an attack: the element's fixed ramp, or a ramp
@@ -204,6 +252,16 @@ function familyOf(el: FxElement): MagicFamily {
   }
 }
 
+/** Fill a lens (a cut tapered to a point at both ends) along +x from 0 to `len`, `w` thick. */
+function lens(ctx: CanvasRenderingContext2D, len: number, w: number): void {
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.quadraticCurveTo(len / 2, -w, len, 0);
+  ctx.quadraticCurveTo(len / 2, w, 0, 0);
+  ctx.closePath();
+  ctx.fill();
+}
+
 const reducedMotion = (() => {
   try {
     return typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -219,6 +277,9 @@ export class Vfx {
   rings: Ring[] = [];
   flashes: Flash[] = [];
   slashes: Slash[] = [];
+  crosses: CrossMark[] = [];
+  cleaves: CleaveArc[] = [];
+  fissures: Fissure[] = [];
   pulses: LightPulse[] = [];
   corpses: Corpse[] = [];
   private recoil = new Map<number, Recoil>();
@@ -363,10 +424,19 @@ export class Vfx {
           this.onKill(e.enemy, e.fromX, e.fromY, e.element, e.tint);
           break;
         case 'blast':
-          this.onBlast(e.x, e.y, e.radius, e.color, e.element, e.crit, e.tint);
+          this.onBlast(e.x, e.y, e.radius, e.color, e.element, e.crit, e.tint, e.heavy);
           break;
         case 'cast':
           this.onCast(e.ability, e.x, e.y, e.color, e.radius);
+          break;
+        case 'crossSlash':
+          this.onCrossSlash(e.x, e.y, e.angle, e.color, e.crit);
+          break;
+        case 'cleave':
+          this.onCleave(e.x, e.y, e.angle, e.halfAngle, e.radius, e.color);
+          break;
+        case 'fissure':
+          this.onFissure(e.x, e.y, e.angle, e.length);
           break;
         case 'dodge':
           this.burst('gust', e.x, e.y - 4, 4, 60, { life: 0.3, size: 5, color: '#dff4ff' });
@@ -504,7 +574,16 @@ export class Vfx {
     });
   }
 
-  private onBlast(x: number, y: number, radius: number, color: string, element: FxElement, crit: boolean, tint?: string): void {
+  private onBlast(
+    x: number,
+    y: number,
+    radius: number,
+    color: string,
+    element: FxElement,
+    crit: boolean,
+    tint?: string,
+    heavy = false,
+  ): void {
     const fam = magicOf(element, tint);
     this.flash(x, y, radius * 1.2, 0.28, fam.ramp[1]);
     this.ring(x, y, radius * 0.2, radius * 1.05, 0.42, color, 3);
@@ -514,6 +593,20 @@ export class Vfx {
     this.burst('smoke', x, y + 4, 6, radius * 0.8, { life: 0.9, size: 6, grow: 12, color: shade(color, -0.6) });
     this.pulse(x, y, radius * 3.2, fam.light, 1, 0.45, fam.tint);
     this.exposure = Math.min(0.6, this.exposure + 0.12);
+    if (heavy) {
+      // A Greater Orb crashing down: a white-hot core, a slower outer shock ring
+      // rolling along the floor, sparks thrown upward, dust kicked out from the
+      // rim and a short shake for the weight of it.
+      this.flash(x, y - 4, radius * 0.7, 0.2, '#ffffff');
+      this.ring(x, y + 6, radius * 0.5, radius * 1.45, 0.75, fam.ramp[1], 2.4, 0.5);
+      this.burst('spark', x, y, crit ? 24 : 16, radius * 3, { dir: -Math.PI / 2, spread: 1.3, life: 0.45, size: 1.3, color: '#ffffff', color2: color, drag: 3, grav: 140 });
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        this.burst('dust', x + Math.cos(a) * radius * 0.85, y + 8 + Math.sin(a) * radius * 0.4, 3, 34, { life: 0.7, size: 1.8, color: '#b8a888', drag: 4 });
+      }
+      this.exposure = Math.min(0.7, this.exposure + 0.1);
+      this.shake(0.28);
+    }
   }
 
   private onCast(
@@ -545,6 +638,20 @@ export class Vfx {
         this.exposure = Math.min(0.5, this.exposure + 0.12);
         break;
       }
+      case 'piercingShot': {
+        // The arrow kindles as the bow goes up to the sky: a ring cinching in on
+        // the archer, a ground ring, motes streaming upward along the raised
+        // bow and a light pulse — all in the archer's own colour.
+        const ramp = tintRamp(color);
+        this.ring(x, y - 8, 34, 4, 0.24, ramp[1], 2);
+        this.flash(x, y - 10, 40, 0.24, ramp[1]);
+        this.ring(x, y + 10, 6, radius, 0.6, color, 2.4, 0.45);
+        this.burst('mote', x, y - 6, 18, 50, { life: 0.9, size: 1.7, color: ramp[1], vy: -70, drag: 1.2 });
+        this.burst('spark', x, y - 14, 12, 120, { dir: -Math.PI / 2, spread: 0.9, life: 0.4, size: 1.1, color: '#ffffff', color2: color, drag: 3 });
+        this.pulse(x, y, 140, 'arcane', 0.9, 0.6, color);
+        this.exposure = Math.min(0.5, this.exposure + 0.14);
+        break;
+      }
       case 'manaRay': {
         // Gathering then release: an inward-snapping ring, a ground sigil ring
         // and a spray of shards, then a strong light pulse — all in the
@@ -571,6 +678,31 @@ export class Vfx {
       case 'throw':
         this.burst('dust', x, y + 8, 8, 50, { life: 0.5, size: 1.6, color: '#b8a888', drag: 4 });
         break;
+      case 'leap':
+        // The Greater Orb caster springing off the floor: a puff of dust and a
+        // barely-there ring in its colour where its feet were (kept faint: it
+        // fires every attack).
+        this.burst('dust', x, y + 10, 10, 46, { life: 0.5, size: 1.6, color: '#b8a888', drag: 4, vy: -6 });
+        this.ring(x, y + 10, 4, radius * 0.8, 0.35, withAlpha(color, 0.3), 1, 0.45);
+        break;
+      case 'land':
+        // Touching back down: a broader dust skirt and a quick ground ring.
+        this.burst('dust', x, y + 10, 14, 60, { life: 0.6, size: 1.8, color: '#b8a888', drag: 4.5, vy: -4 });
+        this.ring(x, y + 10, 6, radius * 0.85, 0.3, withAlpha('#d8c8a8', 0.3), 1.1, 0.45);
+        break;
+      case 'greaterOrb': {
+        // The swollen orb leaving the raised hands: a flash and a ring snapping
+        // outward overhead, sparks shed downward along its throw, and a light
+        // pulse — all in the caster's colour.
+        const ramp = tintRamp(color);
+        this.flash(x, y, 34, 0.22, ramp[1]);
+        this.ring(x, y, 6, 30, 0.3, ramp[1], 2.2);
+        this.burst('spark', x, y, 12, 140, { dir: Math.PI / 2, spread: 1.1, life: 0.35, size: 1.2, color: '#ffffff', color2: color, drag: 3 });
+        this.burst('mote', x, y, 10, 40, { life: 0.7, size: 1.6, color: ramp[1], drag: 1.5 });
+        this.pulse(x, y, 130, 'arcane', 0.8, 0.45, color);
+        this.exposure = Math.min(0.5, this.exposure + 0.1);
+        break;
+      }
       case 'levelUp':
         this.ring(x, y + 8, 6, 40, 0.8, '#ffd76a', 2.6, 0.5);
         this.ring(x, y + 8, 4, 28, 0.6, '#fff1c4', 1.4, 0.5);
@@ -579,6 +711,127 @@ export class Vfx {
         this.exposure = Math.min(0.5, this.exposure + 0.15);
         break;
     }
+  }
+
+  /**
+   * The Blade's Cross Slash lands: a screen-aligned X of two cuts flashes over
+   * the foe (drawn in `drawGlow`; the lead cut mirrors with the blow, like the
+   * hero's swing), sparks fly both ways along each cut, and a white flash, ring
+   * and light pulse sell the weight of the blow — kept small enough that the X
+   * still reads through them.
+   */
+  private onCrossSlash(x: number, y: number, angle: number, color: string, crit: boolean): void {
+    const cy = y - 5;
+    const side = Math.cos(angle) >= 0 ? 1 : -1;
+    if (this.crosses.length >= MAX_CROSSES) this.crosses.shift();
+    this.crosses.push({ x, y: cy, side, size: crit ? 46 : 40, t: 0, max: 0.5, color });
+    this.flash(x, cy, crit ? 34 : 26, 0.16, '#fff6dc');
+    for (const a of [Math.PI / 4, -Math.PI / 4]) {
+      for (const along of [a, a + Math.PI]) {
+        this.burst('spark', x, cy, 5, 210, {
+          dir: along,
+          spread: 0.45,
+          life: 0.26,
+          size: 1.2,
+          color: '#ffffff',
+          color2: color,
+          drag: 5,
+          grav: 120,
+        });
+      }
+    }
+    this.ring(x, cy, 4, 32, 0.3, '#fff1c4', 2.2);
+    this.pulse(x, cy, 130, 'holy', 0.85, 0.35);
+    this.exposure = Math.min(0.5, this.exposure + 0.1);
+  }
+
+  /**
+   * A Claymore swing: a broad crescent sweeps across the arc it cleaves (drawn
+   * in `drawGlow`), always entering from the arc's upper side like the overhead
+   * swing, with dust kicked up from the floor beneath it.
+   */
+  private onCleave(x: number, y: number, angle: number, half: number, radius: number, color: string): void {
+    if (this.cleaves.length >= MAX_CLEAVES) this.cleaves.shift();
+    const dir = Math.cos(angle) >= 0 ? 1 : -1;
+    this.cleaves.push({ x, y: y - 3, angle, half, radius, dir, t: 0, max: 0.34, color });
+    for (let i = 0; i < 4; i++) {
+      const a = angle + (i / 3 - 0.5) * 1.6 * half;
+      const r = radius * 0.72;
+      this.burst('dust', x + Math.cos(a) * r, y + Math.sin(a) * r + 8, 3, 40, {
+        life: 0.55,
+        size: 1.7,
+        color: '#b8a888',
+        drag: 4,
+        vy: -10,
+      });
+    }
+    this.pulse(x + Math.cos(angle) * radius * 0.55, y + Math.sin(angle) * radius * 0.55, radius * 1.7, 'candle', 0.5, 0.3);
+  }
+
+  /**
+   * The Earthsplitter: a jagged crack torn through the floor from where the blade
+   * struck, out along `angle` for `length` px (the dark crack is a ground decal,
+   * `drawDecals`; its molten glow is in `drawGlow`), with side cracks, rock and
+   * dust thrown up along it, a shock ring at the root, warm light pulses and a
+   * short jolt of screen shake.
+   */
+  private onFissure(x: number, y: number, angle: number, length: number): void {
+    const ux = Math.cos(angle);
+    const uy = Math.sin(angle);
+    const px = -uy;
+    const py = ux;
+    const pts: CrackPoint[] = [];
+    const n = Math.max(3, Math.round(length / 7));
+    for (let i = 0; i <= n; i++) {
+      const f = i / n;
+      const j = i === 0 ? 0 : (this.rand() - 0.5) * 6 * (1 - 0.4 * f);
+      pts.push({ x: x + ux * length * f + px * j, y: y + uy * length * f + py * j, w: 5.6 * (1 - f) + 1.4 });
+    }
+    const branches: Fissure['branches'] = [];
+    for (let i = 2; i < n - 1; i += 2 + Math.floor(this.rand() * 2)) {
+      const root = pts[i];
+      const side = this.rand() < 0.5 ? -1 : 1;
+      const a = angle + side * (0.5 + this.rand() * 0.6);
+      const len = 6 + this.rand() * 8;
+      const bp: CrackPoint[] = [{ ...root, w: root.w * 0.6 }];
+      for (let k = 1; k <= 2; k++) {
+        const f = k / 2;
+        const j = (this.rand() - 0.5) * 3;
+        bp.push({
+          x: root.x + Math.cos(a) * len * f - Math.sin(a) * j,
+          y: root.y + Math.sin(a) * len * f + Math.cos(a) * j,
+          w: root.w * 0.6 * (1 - f) + 0.5,
+        });
+      }
+      branches.push({ at: i / n, pts: bp });
+    }
+    if (this.fissures.length >= MAX_FISSURES) this.fissures.shift();
+    this.fissures.push({ pts, branches, t: 0, max: 1.8 });
+
+    // Rock and dust burst up along the crack, the root kicking hardest.
+    for (let i = 0; i <= 5; i++) {
+      const f = i / 5;
+      const bx = x + ux * length * f;
+      const by = y + uy * length * f;
+      this.burst('debris', bx, by, i === 0 ? 7 : 3, 70, {
+        life: 0.7,
+        size: 1.7,
+        color: '#6a5a48',
+        grav: 380,
+        drag: 1.2,
+        vy: -70,
+        spin: 10,
+      });
+      this.burst('smoke', bx, by, 2, 20, { life: 1, size: 5, grow: 10, color: '#5a4a3a', drag: 2 });
+      this.burst('dust', bx, by, 4, 50, { life: 0.6, size: 1.6, color: '#b8a888', drag: 4, vy: -14 });
+    }
+    this.ring(x, y, 4, 44, 0.45, '#ffd7a0', 2.8, 0.5);
+    this.flash(x, y - 4, 50, 0.24, '#fff1c4');
+    for (const f of [0, 0.5, 1]) {
+      this.pulse(x + ux * length * f, y + uy * length * f, 90, 'fire', 0.7, 0.6);
+    }
+    this.exposure = Math.min(0.6, this.exposure + 0.15);
+    this.shake(0.22);
   }
 
   // -------------------------------------------------------------------------
@@ -767,6 +1020,12 @@ export class Vfx {
     this.flashes = this.flashes.filter((f) => f.t < f.max);
     for (const s of this.slashes) s.t += dt;
     this.slashes = this.slashes.filter((s) => s.t < s.max);
+    for (const c of this.crosses) c.t += dt;
+    this.crosses = this.crosses.filter((c) => c.t < c.max);
+    for (const c of this.cleaves) c.t += dt;
+    this.cleaves = this.cleaves.filter((c) => c.t < c.max);
+    for (const f of this.fissures) f.t += dt;
+    this.fissures = this.fissures.filter((f) => f.t < f.max);
     for (const l of this.pulses) l.t += dt;
     this.pulses = this.pulses.filter((l) => l.t < l.max);
     for (const c of this.corpses) c.t += dt;
@@ -794,6 +1053,60 @@ export class Vfx {
   // -------------------------------------------------------------------------
   // Drawing
   // -------------------------------------------------------------------------
+
+  /**
+   * Marks on the floor itself, drawn straight after the ground (under every
+   * figure): the Earthsplitter's cracks, running out over `FISSURE_GROW`, each
+   * a dark tapered channel with a pale broken lip, fading late in its life.
+   */
+  drawDecals(ctx: CanvasRenderingContext2D): void {
+    if (this.fissures.length === 0) return;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const f of this.fissures) {
+      const k = f.t / f.max;
+      const grow = ease.outCubic(Math.min(1, f.t / FISSURE_GROW));
+      const alpha = k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4;
+      // Broken earth: a soft scorch either side, then the lit lip and the dark channel.
+      this.strokeCrack(ctx, f.pts, grow, `rgba(40,28,18,${0.28 * alpha})`, 2.8, 0);
+      this.strokeCrack(ctx, f.pts, grow, `rgba(214,190,150,${0.45 * alpha})`, 0.6, -0.6);
+      this.strokeCrack(ctx, f.pts, grow, `rgba(20,12,8,${0.85 * alpha})`, 1, 0);
+      for (const b of f.branches) {
+        if (grow <= b.at) continue;
+        const bg = Math.min(1, (grow - b.at) / 0.25);
+        this.strokeCrack(ctx, b.pts, bg, `rgba(20,12,8,${0.75 * alpha})`, 1, 0);
+      }
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Stroke the first `grow` (0..1) of a crack polyline as tapered segments,
+   * each `scale`× its point's width and nudged `lift` widths up the screen.
+   */
+  private strokeCrack(
+    ctx: CanvasRenderingContext2D,
+    pts: readonly CrackPoint[],
+    grow: number,
+    style: string,
+    scale: number,
+    lift: number,
+  ): void {
+    const reach = grow * (pts.length - 1);
+    ctx.strokeStyle = style;
+    for (let i = 1; i < pts.length; i++) {
+      const part = Math.min(1, reach - (i - 1));
+      if (part <= 0) break;
+      const a = pts[i - 1];
+      const b = pts[i];
+      ctx.lineWidth = a.w * scale;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y + a.w * lift);
+      ctx.lineTo(a.x + (b.x - a.x) * part, a.y + (b.y - a.y) * part + b.w * lift);
+      ctx.stroke();
+    }
+  }
 
   /** Normal-blend matter, drawn in the world (before lighting). */
   drawWorld(ctx: CanvasRenderingContext2D): void {
@@ -890,6 +1203,80 @@ export class Vfx {
       ctx.beginPath();
       ctx.arc(s.x - Math.cos(s.angle) * s.radius * 0.6, s.y - Math.sin(s.angle) * s.radius * 0.6, s.radius, a0 + (a1 - a0) * 0.35, a1);
       ctx.stroke();
+    }
+    // Claymore cleaves: a broad crescent band whose leading edge sweeps across
+    // the arc, densest at the edge and trailing off, with a bright rim.
+    for (const c of this.cleaves) {
+      const k = c.t / c.max;
+      const sweep = ease.outCubic(Math.min(1, k * 1.8));
+      const a0 = c.angle - c.half * c.dir;
+      const lead = a0 + 2 * c.half * c.dir * sweep;
+      const span = 2 * c.half * 0.75;
+      const r1 = c.radius * 0.98;
+      const r0 = c.radius * 0.5;
+      const ccw = c.dir < 0;
+      const clampA = (a: number) => ((a - a0) * c.dir < 0 ? a0 : a);
+      const N = 12;
+      for (let i = 0; i < N; i++) {
+        const f1 = (i + 1) / N; // 0 at the tail → 1 at the leading edge
+        const s0 = clampA(lead - c.dir * span * (1 - i / N));
+        const s1 = clampA(lead - c.dir * span * (1 - f1));
+        if (s0 === s1) continue;
+        const inner = r0 + (r1 - r0) * 0.55 * (1 - f1);
+        ctx.globalAlpha = (1 - k) * 0.45 * f1;
+        ctx.fillStyle = c.color;
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, r1, s0, s1, ccw);
+        ctx.arc(c.x, c.y, inner, s1, s0, !ccw);
+        ctx.closePath();
+        ctx.fill();
+      }
+      const tailA = clampA(lead - c.dir * span * 0.6);
+      if (tailA !== lead) {
+        ctx.globalAlpha = (1 - k) * 0.95;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2.4 * (1 - k * 0.6);
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, r1, tailA, lead, ccw);
+        ctx.stroke();
+      }
+    }
+    // Cross Slash marks: two tapered diagonal cuts that wipe in one a beat after
+    // the other — the lead's chop down ("\" facing right), then the off blade's
+    // rip up ("/") — a colour edge under a white core, then thin and fade.
+    for (const c of this.crosses) {
+      const k = c.t / c.max;
+      const fade = 1 - Math.max(0, (k - 0.35) / 0.65);
+      for (let i = 0; i < 2; i++) {
+        const w = Math.min(1, Math.max(0, (k - i * 0.1) / 0.18));
+        if (w <= 0) continue;
+        // Lead: from the top on the swing's back side, down across; off: from the
+        // bottom on the back side, up across.
+        const a = c.side > 0 ? (i === 0 ? Math.PI / 4 : -Math.PI / 4) : i === 0 ? (3 * Math.PI) / 4 : (-3 * Math.PI) / 4;
+        const len = c.size * ease.outCubic(w);
+        const thick = 3.8 - 2 * k;
+        ctx.save();
+        ctx.translate(c.x - (Math.cos(a) * c.size) / 2, c.y - (Math.sin(a) * c.size) / 2);
+        ctx.rotate(a);
+        ctx.globalAlpha = fade * 0.9;
+        ctx.fillStyle = c.color;
+        lens(ctx, len, thick * 1.9);
+        ctx.globalAlpha = fade;
+        ctx.fillStyle = '#ffffff';
+        lens(ctx, len, thick);
+        ctx.restore();
+      }
+    }
+    // Fissure glow: molten light inside a fresh crack, cooling fast.
+    for (const f of this.fissures) {
+      const heat = 1 - f.t / 0.6;
+      if (heat <= 0) continue;
+      const grow = ease.outCubic(Math.min(1, f.t / FISSURE_GROW));
+      ctx.lineJoin = 'round';
+      ctx.globalAlpha = heat * 0.8;
+      this.strokeCrack(ctx, f.pts, grow, '#ff6a2a', 0.6, 0);
+      ctx.globalAlpha = heat;
+      this.strokeCrack(ctx, f.pts, grow, '#ffc46a', 0.22, 0);
     }
     ctx.globalAlpha = 1;
     // Particles.

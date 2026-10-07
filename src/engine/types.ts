@@ -93,13 +93,63 @@ export interface Enemy {
  * cosmetic. The Blade adventurer's wind-up → double cut needs longer to read; the
  * Bow adventurer's covers a loose, re-nock and follow-through (mid-volley the
  * next arrow restarts it before the follow-through, see `drawPlayerShortbow`); the
- * Magic adventurer's covers its two-handed throw and the recovery to rest.
+ * Magic adventurer's covers its two-handed throw and the recovery to rest; the
+ * Claymore's heavy release carries a long follow-through (its heft wind-up is the
+ * charge before it, see `CLAYMORE_WINDUP_TIME`), and so does the Longbow's heavy
+ * loose (its slow draw is likewise a charge, `LONGBOW_DRAW_TIME`).
  */
 export function attackAnimTime(shape: string): number {
   if (shape === 'player-blade') return 0.3;
+  if (shape === 'player-claymore') return 0.42;
   if (shape === 'player-bow') return 0.24;
+  if (shape === 'player-longbow') return 0.5;
   if (shape === 'player-magic') return 0.35;
   return 0.18;
+}
+
+// Signature moves (`Tower.specialAnim`): each plays its own longer pose, and the
+// engine lands the blow `*_HIT_DELAY` into it — matched to the sprite's cut
+// window (`drawDualShortSwords` / `drawClaymore`), so retime both together.
+/** The Blade's Cross Slash: coil, one crossing X cut, hold, recover. */
+export const CROSS_SLASH_ANIM_TIME = 0.5;
+export const CROSS_SLASH_HIT_DELAY = 0.19;
+/**
+ * The Claymore's Earthsplitter: hoist overhead, a held wind-up drawing back (the
+ * telegraph: a tremble, the blade kindling, the crack's path glowing on the
+ * floor), then the slam into the ground and the recovery.
+ */
+export const EARTHSPLITTER_ANIM_TIME = 1.05;
+export const EARTHSPLITTER_HIT_DELAY = 0.6;
+
+/**
+ * The Longbow's Piercing Shot cast: the hero raises the bow and aims a kindling
+ * arrow at the sky, holds it while it flares in their colour, then lowers it.
+ */
+export const PIERCING_CAST_ANIM_TIME = 0.6;
+
+/**
+ * The Magic adventurer's Greater Orb (its `greaterOrb` mastery node). The charge
+ * is the leap: a crouch for the first `GREATER_ORB_CROUCH` of it, the jump up to
+ * the apex by `GREATER_ORB_APEX`, then a hang in the air while the orb swells
+ * above the head. On release the throw-down plays as the signature move
+ * (`specialAnim`, over `GREATER_ORB_THROW_TIME`): the hurl, the fall, touchdown
+ * at `GREATER_ORB_LAND` of it, then the recovery. `GREATER_ORB_JUMP` is the leap's
+ * height in board pixels. The renderer's body motion, the sprite's arms and legs
+ * and the engine's dust cues all read these, so retime them together.
+ */
+export const GREATER_ORB_CHARGE_TIME = 1.1;
+export const GREATER_ORB_CROUCH = 0.16;
+export const GREATER_ORB_APEX = 0.38;
+export const GREATER_ORB_THROW_TIME = 0.62;
+export const GREATER_ORB_LAND = 0.55;
+export const GREATER_ORB_JUMP = 10;
+
+/** Seconds a champion's signature-move animation (`Tower.specialAnim`) runs. */
+export function specialAnimTime(shape: string): number {
+  if (shape === 'player-claymore') return EARTHSPLITTER_ANIM_TIME;
+  if (shape === 'player-longbow') return PIERCING_CAST_ANIM_TIME;
+  if (shape === 'player-magic') return GREATER_ORB_THROW_TIME;
+  return CROSS_SLASH_ANIM_TIME;
 }
 
 /** Whether an enemy is still delivering its spawn lines (frozen & untargetable). */
@@ -209,6 +259,16 @@ export interface Tower {
    * down to 0 across quick `BURST_SHOT_DELAY` follow-ups, then a full reload runs.
    */
   burstLeft: number;
+  /**
+   * Blast radius (px) of this tower's circle attack (the Magic adventurer's orb),
+   * mastery widening applied (`masteryBurstRadius`); fixed for its lifetime.
+   */
+  burstRadius: number;
+  /**
+   * Whether this tower casts the Greater Orb (the Magic adventurer's mastery
+   * node): a longer, leaping charge and a bigger orb hurled down from overhead.
+   */
+  greaterOrb: boolean;
   /** Total gold spent on this tower (deploy + upgrades) for sell refunds. */
   invested: number;
   /**
@@ -306,9 +366,40 @@ export interface Tower {
   /**
    * A pending second strike (the Blade adventurer's off-hand cut): lands on
    * `targetUid` for `damage` (crit rolled when it lands) once `timer` runs out.
-   * null when nothing is pending.
+   * `cross` marks a Cross Slash, which strikes the nearest foe in reach if its
+   * target has fallen meanwhile. null when nothing is pending.
    */
-  followUp: { timer: number; targetUid: number; damage: number } | null;
+  followUp: { timer: number; targetUid: number; damage: number; cross?: boolean } | null;
+  /** Every Nth attack is a Cross Slash (0 = never; the Blade's mastery node). */
+  crossSlashEvery: number;
+  /** Damage multiplier of a Cross Slash. */
+  crossSlashMult: number;
+  /**
+   * Piercing arrows still nocked from the Longbow's Piercing Shot (0 = none):
+   * each of the next attacks spends one to loose a piercing arrow instead.
+   */
+  pierceShots: number;
+  /**
+   * Signature-move animation timer (seconds, counting down to 0): a Cross Slash,
+   * an Earthsplitter slam or a Greater Orb throw-down. While > 0 the renderer plays that move's own pose
+   * instead of the normal swing (see `specialAnimTime`).
+   */
+  specialAnim: number;
+  /**
+   * A pending Earthsplitter (the Claymore's ability), locked to its aim and reach
+   * at cast; the fissure strikes when `timer` runs out, as the slammed blade meets
+   * the ground. The hero makes no normal attacks while one is pending or its
+   * slam is still playing. null when none is pending.
+   */
+  slam: {
+    timer: number;
+    angle: number;
+    reach: number;
+    halfWidth: number;
+    damage: number;
+    crit: boolean;
+    knockback: number;
+  } | null;
   /**
    * Player-activated ability this tower has unlocked (the Blade's Cyclone Slash),
    * or null. Set from the unit's upgrade tiers (see `effectiveAbility`) on deploy
@@ -493,10 +584,17 @@ export interface Projectile {
    * shot, whose damage lands on its target alone.
    */
   burstRadius?: number;
+  /**
+   * A piercing arrow (the Longbow's Piercing Shot): it doesn't home, but flies
+   * straight along `dir` for `travelLeft` more pixels (to the end of the archer's
+   * range), striking every foe it passes once (`hit` holds their uids). Undefined
+   * for an ordinary shot.
+   */
+  pierce?: { dir: Vec2; travelLeft: number; hit: number[] };
 }
 
 /** How a projectile is drawn in flight. */
-export type ProjectileStyle = 'arrow' | 'wind' | 'magic' | 'orb';
+export type ProjectileStyle = 'arrow' | 'wind' | 'magic' | 'orb' | 'pierce';
 
 /**
  * Elemental family of an attack, for VFX only (sparks vs. gusts vs. arcane
@@ -550,15 +648,64 @@ export type FxEvent =
       element: FxElement;
       crit: boolean;
       tint?: string;
+      /** A Greater Orb crashing down: a heavier blast with shake and dust. */
+      heavy?: boolean;
     }
   | {
       kind: 'cast';
-      /** Which ability / flourish: drives the bespoke flash + light. */
-      ability: 'cyclone' | 'quickdraw' | 'manaRay' | 'bard' | 'harvest' | 'throw' | 'levelUp';
+      /**
+       * Which ability / flourish: drives the bespoke flash + light. `leap` /
+       * `land` are the Greater Orb caster's take-off and touchdown (dust at the
+       * feet); `greaterOrb` is its orb leaving the raised hands.
+       */
+      ability:
+        | 'cyclone'
+        | 'quickdraw'
+        | 'piercingShot'
+        | 'manaRay'
+        | 'bard'
+        | 'harvest'
+        | 'throw'
+        | 'levelUp'
+        | 'greaterOrb'
+        | 'leap'
+        | 'land';
       x: number;
       y: number;
       color: string;
       radius: number;
+    }
+  | {
+      /** The Blade's Cross Slash landing: an X of two crossing cuts at the foe. */
+      kind: 'crossSlash';
+      x: number;
+      y: number;
+      /** Direction of the blow (attacker → foe), radians. */
+      angle: number;
+      color: string;
+      crit: boolean;
+    }
+  | {
+      /** A Claymore swing: a heavy crescent sweeping the arc it cleaves. */
+      kind: 'cleave';
+      /** The swinger's position (the arc's centre). */
+      x: number;
+      y: number;
+      /** Aim of the arc's middle, radians. */
+      angle: number;
+      /** Half the arc's opening, radians. */
+      halfAngle: number;
+      radius: number;
+      color: string;
+    }
+  | {
+      /** The Claymore's Earthsplitter: a crack torn through the ground. */
+      kind: 'fissure';
+      /** Where the blade struck the ground (the crack's root). */
+      x: number;
+      y: number;
+      angle: number;
+      length: number;
     }
   | { kind: 'dodge'; x: number; y: number }
   | { kind: 'breach'; x: number; y: number; boss: boolean }

@@ -38,6 +38,11 @@ const PAD_Y = 52;
 /** A glyph for a node, picked from the first effect it carries. */
 function nodeIcon(up: MasteryUpgradeDef): IconName {
   if (up.unlocksArmor) return 'shield';
+  if (up.weaponForm === 'claymore') return 'claymore';
+  if (up.weaponForm === 'longbow') return 'longbow';
+  if (up.crossSlashEvery) return 'swords';
+  if (up.burstShots) return 'volley';
+  if (up.greaterOrb) return 'orb';
   if (up.critChanceBonus || up.critMultiplier) return 'target';
   if (up.generateMult) return 'wheat';
   if (up.startingGoldBonus || up.upgradeDiscount) return 'coin';
@@ -120,18 +125,26 @@ export function MasteryTree({
   const boardH = PAD_Y * 2 + maxDepth * ROW + 20;
   const rootPos = { x: boardW / 2, y: PAD_Y };
 
+  // Whether a node sits on a learned-but-switched-off exclusive path (it, or a
+  // node above it, is an inactive member of its group).
+  const onInactivePath = (n: MasteryUpgradeDef | undefined): boolean =>
+    !!n && (stateOf(n) === 'inactive' || onInactivePath(n.requires ? byId.get(n.requires) : undefined));
+
   const edges = tree.map((n) => {
     const to = pos.get(n.id)!;
     const from = n.requires && pos.has(n.requires) ? pos.get(n.requires)! : rootPos;
     const st = stateOf(n);
-    const lit = st === 'learned' || st === 'inactive';
-    const ready = st === 'open' || st === 'short';
+    const learned = st === 'learned' || st === 'inactive';
+    // A learned path that isn't the active one is darkened rather than gilded.
+    const cls = learned
+      ? onInactivePath(n) ? ' inactive' : ' lit'
+      : st === 'open' || st === 'short' ? ' ready' : '';
     const midY = (from.y + to.y) / 2;
     const d =
       from.x === to.x
         ? `M${from.x} ${from.y}L${to.x} ${to.y}`
         : `M${from.x} ${from.y}C${from.x} ${midY} ${to.x} ${midY} ${to.x} ${to.y}`;
-    return <path key={n.id} d={d} className={`mt-edge${lit ? ' lit' : ready ? ' ready' : ''}`} />;
+    return <path key={n.id} d={d} className={`mt-edge${cls}`} />;
   });
 
   const learnedActive = tree.filter((n) => active.includes(n.id));
@@ -149,7 +162,7 @@ export function MasteryTree({
     } else if (st === 'inactive') {
       action = (
         <button className="btn primary mt-action" onClick={() => onSetActive(selected.id)}>
-          <Icon name="forward" /> Make this the active path
+          <Icon name="forward" /> Activate path
         </button>
       );
     } else if (st === 'locked') {
@@ -270,15 +283,10 @@ export function MasteryTree({
                         )}
                       </span>
                       <span className="mt-node-name">{up.name}</span>
-                      <span className="mt-node-cost">
-                        {st === 'learned'
-                          ? up.exclusiveGroup
-                            ? 'Active'
-                            : 'Learned'
-                          : st === 'inactive'
-                            ? 'Inactive'
-                            : `${up.cost} EXP`}
-                      </span>
+                      {/* Learned nodes speak for themselves (gold fill / dimmed path). */}
+                      {st !== 'learned' && st !== 'inactive' && (
+                        <span className="mt-node-cost">{up.cost} EXP</span>
+                      )}
                     </button>
                   );
                 })}
