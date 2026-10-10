@@ -55,8 +55,13 @@ export interface Enemy {
    * put (doesn't advance the path) and can't be targeted — it's rising off its
    * throne — and the renderer blends its sprite from seated to walking and lowers
    * it onto the path. 0 for every normal enemy.
+   *
+   * A foe spawning on an `emerge` lane (the Sewers' cistern) uses the same
+   * hold: it surfaces out of the water over `EMERGE_TIME` (see `riseFrom`).
    */
   rise: number;
+  /** What a `rise` lifts the foe out of: the king's throne, or a pool of water. */
+  riseFrom: 'throne' | 'water';
   /**
    * Spawn-speech state. `speechIndex` starts at -1 ("walking in, not yet spoken")
    * so the enemy first advances onto the board; once it has walked in it flips to
@@ -871,7 +876,11 @@ export type FxEvent =
       cy: number;
       radius: number;
     }
-  | { kind: 'bossSpawn'; x: number; y: number; color: string };
+  | { kind: 'bossSpawn'; x: number; y: number; color: string }
+  /** A foe breaking the surface of a pool it climbs out of (`x`,`y` its feet). */
+  | { kind: 'emerge'; x: number; y: number; radius: number }
+  /** A mass of sludge striking or bursting (the Sludge Father's cutscene); `shake` jolts the board. */
+  | { kind: 'sludgeSplash'; x: number; y: number; radius: number; shake?: number };
 
 export type Outcome = 'playing' | 'won' | 'lost';
 

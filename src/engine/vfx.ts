@@ -493,6 +493,25 @@ export class Vfx {
           this.ring(e.cx, e.cy + 6, 8, e.radius, 0.55, '#ffd27a', 2.2, 0.55);
           this.pulse(e.x, e.y, e.radius * 1.4, 'lantern', 0.8, 0.9);
           break;
+        case 'emerge':
+          // Something breaks the surface of the pool: sludgy water thrown up and
+          // falling back, a murky bloom and rings rolling out over the water.
+          this.burst('dust', e.x, e.y + 11, 14, 50, { life: 0.65, size: 1.7, color: '#6e8a36', grav: 240, vy: -70, drag: 1 });
+          this.burst('smoke', e.x, e.y + 10, 4, 14, { life: 0.9, size: 4, grow: 8, color: '#2e3a22', drag: 3 });
+          this.ring(e.x, e.y + 12, e.radius * 0.4, e.radius * 1.8, 0.9, '#7f9a4a', 1.6, 0.32);
+          this.ring(e.x, e.y + 12, e.radius * 0.3, e.radius * 1.1, 0.6, '#a9bf6a', 1.2, 0.32);
+          break;
+        case 'sludgeSplash': {
+          // A mass of sludge striking or bursting: dark gobbets and bright
+          // fresh ooze thrown up and raining back, a murky bloom, a ring.
+          const n = Math.round(10 + e.radius * 0.7);
+          this.burst('dust', e.x, e.y, n, 40 + e.radius * 2, { life: 0.85, size: 1.8 + e.radius * 0.03, color: '#435a22', grav: 280, vy: -60 - e.radius * 2, drag: 0.8 });
+          this.burst('dust', e.x, e.y, Math.round(n / 2), 30 + e.radius, { life: 0.7, size: 1.5, color: '#a6dc3c', grav: 280, vy: -50 - e.radius * 1.5, drag: 0.8 });
+          this.burst('smoke', e.x, e.y, 5, 18, { life: 1.1, size: 5 + e.radius * 0.1, grow: 10 + e.radius * 0.3, color: '#26331a', drag: 3 });
+          this.ring(e.x, e.y, e.radius * 0.3, e.radius * 1.6, 0.8, '#7f9a4a', 2, 0.35);
+          if (e.shake) this.shake(e.shake);
+          break;
+        }
         case 'bossSpawn':
           this.ring(e.x, e.y + 8, 10, 120, 0.9, '#ff3a3a', 3, 0.5);
           this.ring(e.x, e.y + 8, 6, 80, 0.7, '#ffd77a', 2, 0.5);

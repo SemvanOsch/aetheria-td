@@ -21,11 +21,10 @@ import type { GameEngine } from '../GameEngine';
 import type { Tower } from '../types';
 import { BOARD_WIDTH, TILE, type Vec2 } from '../../domain/grid';
 import { drawWagonRig, propAnchor, WAGON_WHEEL_R } from '../props';
-import { paintFigure } from '../figure';
-import { drawUnitSprite, hasSprite } from '../sprites';
-import { FIGURE_SCALE, cfgKey, championFigureStyle, type BoardScene, type SceneActor } from '../renderer';
+import type { BoardScene, SceneActor } from '../renderer';
 import { ease } from '../palette';
 import type { Light } from '../lighting';
+import { alongRoute, drawRunner, routeAlongRoad, routeLengths } from './runners';
 
 /** Sound/beat cues for the UI to voice. */
 export type GetawayCue = 'horn' | 'hornNear' | 'hop' | 'board' | 'shout' | 'whip' | 'depart';
@@ -252,9 +251,9 @@ export class GetawayBoardScene {
   private planRiders(): void {
     const lanes = this.engine.lanes.map((l) => l.waypoints);
     const plans = this.engine.towers.map((tower) => {
-      const route = routeToWagon(tower.pos, lanes);
-      const cum = [0];
-      for (let i = 1; i < route.length; i++) cum.push(cum[i - 1] + dist(route[i - 1], route[i]));
+      // Onto the road and along it to the wagon's tail, stopping short to leap.
+      const route = routeAlongRoad(tower.pos, lanes, STOP_BACK);
+      const cum = routeLengths(route);
       return { tower, route, cum, length: cum[cum.length - 1] };
     });
     const longest = plans.reduce((m, p) => Math.max(m, p.length), 0);
@@ -320,7 +319,7 @@ export class GetawayBoardScene {
     } else if (t < r.jumpAt) {
       // Bounding along the road.
       const s = Math.min(r.length, (t - r.start) * r.speed);
-      const { p, dir } = along(r, s);
+      const { p, dir } = alongRoute(r.route, r.cum, s);
       r.pos.x = p.x;
       r.pos.y = p.y;
       const phase = (t - r.start) * HOP_RATE;
@@ -370,47 +369,7 @@ export class GetawayBoardScene {
   }
 
   private drawRider(ctx: CanvasRenderingContext2D, r: Rider): void {
-    const def = r.tower.def;
-    const shape = def.visual.shape;
-    ctx.save();
-    ctx.globalAlpha *= r.alpha;
-    ctx.translate(r.pos.x, r.pos.y);
-    // Contact shadow stays on the floor, shrinking as the figure leaves it.
-    const k = 1 - Math.min(1, r.lift / 40) * 0.55;
-    const g = ctx.createRadialGradient(0, 10.5, 0, 0, 10.5, 15 * k);
-    g.addColorStop(0, `rgba(8,5,14,${0.55 * k})`);
-    g.addColorStop(1, 'rgba(8,5,14,0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.ellipse(0, 10.5, 15 * k, 6 * k, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.translate(0, 11 - r.lift);
-    ctx.rotate(r.lean);
-    const s = FIGURE_SCALE * r.scale;
-    ctx.scale(s * (1 + r.squash * 0.6), s * (1 - r.squash));
-    ctx.translate(0, -11);
-    if (hasSprite(shape)) {
-      const style = championFigureStyle(this.engine, def);
-      // Airborne figures cast no sheared sun shadow (the floor shadow stands in).
-      if (r.lift > 1) style.cast = undefined;
-      const cfg = def.visual.playerConfig;
-      paintFigure(
-        ctx,
-        (gg) => drawUnitSprite(gg, shape, def.visual.color, r.faceLeft, 0, false, false, cfg, 0),
-        style,
-        `cut|${shape}|${def.visual.color}|${r.faceLeft ? 1 : 0}|${r.lift > 1 ? 1 : 0}|${cfgKey(cfg)}`,
-      );
-    } else {
-      ctx.fillStyle = def.visual.color;
-      ctx.beginPath();
-      ctx.arc(0, 0, 15, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.font = '17px serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(def.visual.icon, 0, 1);
-    }
-    ctx.restore();
+    drawRunner(ctx, this.engine, r.tower.def, r);
   }
 
   private drawWagon(ctx: CanvasRenderingContext2D): void {
@@ -437,61 +396,4 @@ export class GetawayBoardScene {
     if (this.dust.length > 220) return;
     this.dust.push({ x, y, vx, vy: -6 - Math.random() * 10, age: 0, life: 0.55 + Math.random() * 0.4, r });
   }
-}
-
-// ---------------------------------------------------------------------------
-
-function dist(a: Vec2, b: Vec2): number {
-  return Math.hypot(b.x - a.x, b.y - a.y);
-}
-
-/**
- * A champion's way to the wagon: straight onto the nearest stretch of road,
- * then along it to the end (the wagon's tail), stopping just short to leap.
- */
-function routeToWagon(from: Vec2, lanes: Vec2[][]): Vec2[] {
-  let best: { d: number; q: Vec2; lane: Vec2[]; seg: number } | null = null;
-  for (const lane of lanes) {
-    for (let i = 0; i < lane.length - 1; i++) {
-      const a = lane[i];
-      const b = lane[i + 1];
-      const len2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2 || 1;
-      const u = Math.max(0, Math.min(1, ((from.x - a.x) * (b.x - a.x) + (from.y - a.y) * (b.y - a.y)) / len2));
-      const q = { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u };
-      const d = dist(from, q);
-      if (!best || d < best.d) best = { d, q, lane, seg: i };
-    }
-  }
-  if (!best) return [{ ...from }];
-  const route = [{ ...from }, best.q, ...best.lane.slice(best.seg + 1).map((p) => ({ ...p }))];
-  // Pull the last point back along the final stretch to the take-off spot.
-  let back = STOP_BACK;
-  while (route.length > 2 && back > 0) {
-    const end = route[route.length - 1];
-    const prev = route[route.length - 2];
-    const len = dist(prev, end);
-    if (len > back) {
-      const k = (len - back) / len;
-      route[route.length - 1] = { x: prev.x + (end.x - prev.x) * k, y: prev.y + (end.y - prev.y) * k };
-      back = 0;
-    } else {
-      route.pop();
-      back -= len;
-    }
-  }
-  return route;
-}
-
-/** The point `s` px along a rider's route, and the direction of travel there. */
-function along(r: Rider, s: number): { p: Vec2; dir: Vec2 } {
-  for (let i = 1; i < r.route.length; i++) {
-    if (s <= r.cum[i] || i === r.route.length - 1) {
-      const a = r.route[i - 1];
-      const b = r.route[i];
-      const len = r.cum[i] - r.cum[i - 1] || 1;
-      const k = Math.max(0, Math.min(1, (s - r.cum[i - 1]) / len));
-      return { p: { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k }, dir: { x: (b.x - a.x) / len, y: (b.y - a.y) / len } };
-    }
-  }
-  return { p: { ...r.route[0] }, dir: { x: 1, y: 0 } };
 }

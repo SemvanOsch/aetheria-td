@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BOARD_HEIGHT, BOARD_WIDTH } from '../../domain/grid';
 import { getSection, type SectionId } from '../../domain/levels';
@@ -9,6 +9,7 @@ import { JourneyScene, type JourneyCue } from '../../engine/cutscene/journey';
 import { playCutsceneSound, RideAudio, type CutsceneSound } from '../cutsceneAudio';
 import { setMusicIntensity, setMusicTrack } from '../music';
 import { Icon } from './Icon';
+import { useBoardZoom } from './useBoardZoom';
 
 /**
  * The Capital's ending (The Getaway, `LevelDef.ending === 'getaway'`), played
@@ -108,22 +109,8 @@ export function GetawayCutscene({
     window.setTimeout(() => closedRef.current(), LEAVE_MS);
   };
 
-  // Open by zooming the board out from where it sits on the battle screen to
-  // fill the stage (the backdrop fading to black around it), so the battle
-  // board seems to become the cutscene. Skipped under reduced motion.
-  useLayoutEffect(() => {
-    const frame = frameRef.current;
-    if (!frame || !from || from.width <= 0) return;
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-    const to = frame.getBoundingClientRect();
-    if (to.width <= 0) return;
-    frame.style.transformOrigin = '0 0';
-    frame.style.transform = `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width})`;
-    void frame.offsetWidth; // commit the start pose before transitioning
-    frame.style.transition = `transform ${ZOOM_TIME}s cubic-bezier(0.65, 0, 0.35, 1)`;
-    frame.style.transform = '';
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Open by zooming the board out from where it sits on the battle screen.
+  useBoardZoom(frameRef, from, ZOOM_TIME);
 
   useEffect(() => {
     const canvas = canvasRef.current!;

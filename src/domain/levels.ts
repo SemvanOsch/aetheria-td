@@ -76,10 +76,16 @@ export interface LaneDef {
    * its cells become non-buildable. Omit for a normal lane present from wave 1.
    */
   revealAtWave?: number;
+  /**
+   * The lane starts in water (the Sewers' cistern): every foe spawned on it
+   * surfaces out of the pool at the spawn point, held and untargetable for
+   * `EMERGE_TIME`, before it steps out. Cosmetic beat; omit for a normal lane.
+   */
+  emerge?: boolean;
 }
 
 /** Ending cutscenes a stage can close on (`LevelDef.ending`). */
-export type StageEnding = 'getaway';
+export type StageEnding = 'getaway' | 'sludgeFather';
 
 export interface LevelDef {
   id: number;
@@ -118,9 +124,17 @@ export interface LevelDef {
   endless?: EndlessRules;
   /**
    * A cutscene the stage ends on when won, played before the result card
-   * (`ui/components/GetawayCutscene.tsx` for `getaway`). Cosmetic only.
+   * (`ui/components/GetawayCutscene.tsx` for `getaway`,
+   * `SludgeFatherCutscene.tsx` for `sludgeFather`). Cosmetic only.
    */
   ending?: StageEnding;
+  /**
+   * The stage is won the moment its boss reaches this path cell's centre: the
+   * boss halts there (`GameEngine.haltedBoss`) and the stage's `ending` takes
+   * over, whatever else is still on the board. For a boss the player is never
+   * meant to fell (The Sewers: Captain Draven, crushed at the cistern).
+   */
+  bossHaltAt?: Cell;
   /**
    * The stage lies in mist (`domain/mist.ts`): champions lose part of their
    * range unless they stand close to a lantern the player has lit.
@@ -135,7 +149,7 @@ const STARTING_GOLD = 200;
 
 // Shorthand enemy ids per section.
 const CAS = { g: 'cas_grunt', g2: 'cas_grunt2', r: 'cas_runner', b: 'cas_brute', m: 'cas_mage' };
-const CAP = { g: 'cap_grunt', r: 'cap_runner' };
+const CAP = { g: 'cap_grunt', g2: 'cap_grunt2', r: 'cap_runner', b: 'cap_brute' };
 // Re-enable when the Forest/Inn chapters are authored:
 // const FOR = { g: 'for_grunt', r: 'for_runner', b: 'for_brute' };
 // const INN = { g: 'inn_grunt', r: 'inn_runner', b: 'inn_brute' };
@@ -146,6 +160,8 @@ interface LaneSpec {
   waves: WaveDef[];
   /** See `LaneDef.revealAtWave` — hide this lane until the given wave begins. */
   revealAtWave?: number;
+  /** See `LaneDef.emerge` — foes surface out of water at this lane's start. */
+  emerge?: boolean;
 }
 
 interface LevelSpec {
@@ -174,6 +190,8 @@ interface LevelSpec {
   mood?: MoodId;
   /** Cutscene played when the stage is won (see `LevelDef.ending`). */
   ending?: StageEnding;
+  /** Won when the boss reaches this cell (see `LevelDef.bossHaltAt`). */
+  bossHaltAt?: Cell;
   /** The stage lies in mist (see `LevelDef.mist`). */
   mist?: boolean;
 }
@@ -552,6 +570,11 @@ const CAPITAL_SPECS: LevelSpec[] = [
     subtitle: 'Wade through the tunnels with the army at your heels.',
     baseHealth: 10, gem: 150,
     mood: 'sewerDepths',
+    // Captain Draven can't be felled: when he reaches the cistern something
+    // vast drags itself out of it and crushes him, and the party slips away
+    // through the far tunnel while it can (`SludgeFatherCutscene`).
+    bossHaltAt: { col: 8, row: 3 },
+    ending: 'sludgeFather',
     theme: {
       groundEven: '#5a5a52',
       groundOdd: '#52524b',
@@ -593,26 +616,30 @@ const CAPITAL_SPECS: LevelSpec[] = [
     lanes: [
       {
         // The channel winds from one tunnel to the other.
-        path: [{ col: 3, row: -1 }, { col: 3, row: 7 }, { col: 7, row: 7 }, { col: 7, row: 3 }, { col: 10, row: 3 }, { col: 10, row: 8 }, { col: 14, row: 8 }, { col: 14, row: -1 }],
-        // Placeholder waves so the stage runs (three, so the cistern lane's
-        // reveal can be seen); its real waves and boss come later.
+        path: [{ col: 3, row: -1 }, { col: 3, row: 7 }, { col: 7, row: 7 }, { col: 7, row: 3 }, { col: 10, row: 3 }, { col: 10, row: 8 }, { col: 14, row: 8 }, { col: 14, row: 0 }],
         waves: [
-          { groups: [{ enemyId: CAS.g, count: 6 }] },
-          { groups: [{ enemyId: CAS.g, count: 6 }] },
-          { groups: [{ enemyId: CAS.g, count: 6 }] },
+          // { groups: [{ enemyId: CAP.g, count: 6, spacing: 3.5 }] },
+          // { groups: [{ enemyId: CAS.g2, count: 9, spacing: 2.5 }, { enemyId: CAS.m, count: 9, spacing: 2.5, delay: 1.5 }] },
+          // { groups: [{ enemyId: CAS.r, count: 10, spacing: 0.3 }, { enemyId: CAP.g, count: 3, delay: 3.5 }] },
+          // { groups: [] },
+          // { groups: [{ enemyId: CAP.g, count: 7 }, { enemyId: CAS.m, count: 8, delay: 7 }] },
+          // { groups: [] },
+          { groups: [{ enemyId: bossIdForLevel(9), count: 1 }] },
         ],
       },
       {
-        // The cistern lane — hidden until wave 3, when a channel opens out of
-        // the sump's bottom-right cell and joins the main one just below it.
-        // Foes spawned here climb out of the water and run the rest of the
-        // main channel. No foes on it yet.
-        revealAtWave: 2,
-        path: [{ col: 8, row: 2 }, { col: 8, row: 3 }, { col: 10, row: 3 }, { col: 10, row: 8 }, { col: 14, row: 8 }, { col: 14, row: -1 }],
+        // The cistern lane
+        revealAtWave: 1,
+        // Its foes surface out of the cistern's water before climbing out.
+        emerge: true,
+        path: [{ col: 8, row: 2 }, { col: 8, row: 3 }, { col: 10, row: 3 }, { col: 10, row: 8 }, { col: 14, row: 8 }, { col: 14, row: 0 }],
         waves: [
-          { groups: [] },
-          { groups: [] },
-          { groups: [] },
+          // { groups: [] },
+          // { groups: [] },
+          // { groups: [{ enemyId: CAP.g2, count: 3, spacing: 5, delay: 5 }] },
+          // { groups: [{ enemyId: CAP.g2, count: 10, spacing: 1 }] },
+          // { groups: [] },
+          // { groups: [{ enemyId: CAP.b, count: 5, spacing: 4 }] },
         ],
       },
     ],
@@ -693,7 +720,7 @@ const INN_SPECS: LevelSpec[] = [
 /** Normalise a spec's single-lane shorthand or explicit lanes into LaneDefs. */
 function specLanes(s: LevelSpec): LaneDef[] {
   if (s.lanes && s.lanes.length > 0) {
-    return s.lanes.map((l) => ({ pathTurns: l.path, waves: l.waves, revealAtWave: l.revealAtWave }));
+    return s.lanes.map((l) => ({ pathTurns: l.path, waves: l.waves, revealAtWave: l.revealAtWave, emerge: l.emerge }));
   }
   if (s.path && s.waves) {
     return [{ pathTurns: s.path, waves: s.waves }];
@@ -701,8 +728,11 @@ function specLanes(s: LevelSpec): LaneDef[] {
   throw new Error(`Level ${s.id} must define either { path, waves } or { lanes }`);
 }
 
+/** Stages temporarily pulled from the campaign (still authored above). */
+const DISABLED_LEVEL_IDS = new Set<number>([10]); // Capital 5, The Getaway
+
 function buildLevels(specs: LevelSpec[], section: SectionId, color: string): LevelDef[] {
-  return specs.map((s, i) => ({
+  return specs.filter((s) => !DISABLED_LEVEL_IDS.has(s.id)).map((s, i) => ({
     id: s.id,
     section,
     order: i + 1,
@@ -718,6 +748,7 @@ function buildLevels(specs: LevelSpec[], section: SectionId, color: string): Lev
     decor: s.decor,
     mood: s.mood,
     ending: s.ending,
+    bossHaltAt: s.bossHaltAt,
     mist: s.mist,
   }));
 }

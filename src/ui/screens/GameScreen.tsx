@@ -33,6 +33,8 @@ import { playCombatSound } from '../combatAudio';
 import { audioBus, holdAudioAwake } from '../audioBus';
 import { battleTrackFor, setMusicIntensity, setMusicTrack } from '../music';
 import { GetawayCutscene } from '../components/GetawayCutscene';
+import { SludgeFatherCutscene } from '../components/SludgeFatherCutscene';
+import { SludgeFatherScene } from '../../engine/cutscene/sludgeFather';
 import { playUiSound } from '../uiAudio';
 import { UnitSprite } from '../components/UnitSprite';
 import { Icon, type IconName } from '../components/Icon';
@@ -101,6 +103,8 @@ const NO_DROPS: ArmorRoll[] = [];
 const LOOT_TOAST_MS = 4200;
 /** The beat a won stage holds on the board before its ending cutscene opens. */
 const ENDING_BEAT_MS = 1100;
+/** ...and for an ending that picks up mid-action (the Sewers: Draven halting at the cistern). */
+const HALT_ENDING_BEAT_MS = 150;
 
 /** The "light this lantern?" popup: which lantern, its price, and where (as % of the board). */
 interface LanternPrompt {
@@ -459,10 +463,11 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
         } else if (engine.outcome === 'won') {
           firstClearRef.current = !game.state.completedLevels.includes(level.id);
           game.completeLevel(level.id, level.gemReward);
-          // A stage with an ending plays it before the result card, after a beat.
+          // A stage with an ending plays it before the result card, after a beat
+          // (barely one when the ending picks up mid-action, as Draven halts).
           if (level.ending) {
             endingRef.current = 'pending';
-            endingAt = now + ENDING_BEAT_MS;
+            endingAt = now + (level.ending === 'sludgeFather' ? HALT_ENDING_BEAT_MS : ENDING_BEAT_MS);
             setEnding('pending');
           }
         }
@@ -487,8 +492,16 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   // The ending has run: hand back to the result card, leaving the board as the
   // party left it — champions and wagon gone down the road.
   const finishEnding = () => {
-    const wagon = (level.decor ?? []).findIndex((p) => p.kind === 'escapeWagon');
-    uiRef.current.scene = { hideTowers: true, hiddenDecor: new Set(wagon >= 0 ? [wagon] : []) };
+    if (level.ending === 'sludgeFather' && engineRef.current) {
+      // The party gone through the tunnel, Draven crushed, and the Sludge
+      // Father left breathing in the cistern behind them.
+      const aftermath = new SludgeFatherScene(engineRef.current);
+      aftermath.settle();
+      uiRef.current.scene = aftermath.boardScene;
+    } else {
+      const wagon = (level.decor ?? []).findIndex((p) => p.kind === 'escapeWagon');
+      uiRef.current.scene = { hideTowers: true, hiddenDecor: new Set(wagon >= 0 ? [wagon] : []) };
+    }
     endingRef.current = 'done';
     setEnding('done');
   };
@@ -900,7 +913,15 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                   onRetry={onRetry}
                 />
               )}
-              {cutsceneOpen && engineRef.current && (
+              {cutsceneOpen && engineRef.current && level.ending === 'sludgeFather' && (
+                <SludgeFatherCutscene
+                  engine={engineRef.current}
+                  from={endingFromRef.current}
+                  onDone={finishEnding}
+                  onClosed={() => setCutsceneOpen(false)}
+                />
+              )}
+              {cutsceneOpen && engineRef.current && level.ending === 'getaway' && (
                 <GetawayCutscene
                   engine={engineRef.current}
                   section={level.section}

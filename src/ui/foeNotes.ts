@@ -43,7 +43,9 @@ export function foeLedgerRows(def: EnemyDef, kills: number): { label: string; va
     // Mana a hero recovers for the killing blow.
     ...(def.mana ? [{ label: 'Mana granted', value: `${def.mana}` }] : []),
     ...(def.shieldHits ? [{ label: 'Shield', value: `blocks ${def.shieldHits} hits` }] : []),
-    ...(def.dodgeChance ? [{ label: 'Evasion', value: `${Math.round(def.dodgeChance * 100)}% dodge` }] : []),
+    ...(def.unkillable ? [{ label: 'Unkillable', value: 'never falls below 1 HP' }] : []),
+    ...(def.regen ?[{ label: 'Regeneration', value: `${+(def.regen * 100).toFixed(1)}% HP/s` }] : []),
+    ...(def.dodgeChance ?[{ label: 'Evasion', value: `${Math.round(def.dodgeChance * 100)}% dodge` }] : []),
     ...((def.physicalResist ?? 0) > 0
       ? [{ label: 'Physical resist', value: `−${Math.round((def.physicalResist ?? 0) * 100)}%` }]
       : []),

@@ -483,6 +483,16 @@ const VOICES: Record<SfxName, (ac: AudioContext) => void> = {
     noiseSweep(ac, 5200, 4400, 0.6, 0.004, 2, 'bandpass', 0.24);
   },
 
+  // A sludge foe surfacing from the cistern — a low, thick slosh as it breaks
+  // the water, then a couple of fat bubbles glooping up behind it.
+  emergeSplash: (ac) => {
+    noiseSweep(ac, jit(900, 80), 220, 0.45, 0.024, 0.8, 'lowpass');
+    noiseSweep(ac, jit(2200, 150), 700, 0.22, 0.008, 1.2, 'bandpass', 0.05);
+    toneGlide(ac, jit(140, 10), 70, 0.35, 0.02, 'sine');
+    toneGlide(ac, jit(260, 20), 520, 0.09, 0.012, 'sine', 0.32);
+    toneGlide(ac, jit(220, 20), 480, 0.08, 0.009, 'sine', 0.52);
+  },
+
   bardPlay: (ac) => {
     const root = BARD_ROOTS[Math.floor(Math.random() * BARD_ROOTS.length)];
     const phrase = BARD_PHRASES[Math.floor(Math.random() * BARD_PHRASES.length)];

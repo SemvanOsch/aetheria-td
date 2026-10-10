@@ -301,6 +301,14 @@ export const LANE_REVEAL_TIME = 1.3;
 // figure and the risen boss occupy the same spot with no jump.
 export const RISE_TIME = 0.9;
 export const RISE_LIFT = 40;
+// A foe spawning on an `emerge` lane (the Sewers' cistern) surfaces out of the
+// water at its spawn point over EMERGE_TIME, held and untargetable like the
+// king's rise, before it steps out.
+export const EMERGE_TIME = 1.1;
+// ...and it surfaces this far *behind* the lane's start (back along its first
+// stretch), so it comes up in open water rather than at the pool's rim, then
+// wades forward onto the path.
+export const EMERGE_BACK = 18;
 // How long a Cyclone Slash whirlwind (the Blade's activated ability) plays out —
 // the damage lands instantly on cast; this only governs the cosmetic spin/fade.
 // Shared with the renderer so the expanding blade-arcs are timed to this window.
@@ -362,7 +370,8 @@ export type SfxName =
   | 'rallyCall'
   | 'rallyShield'
   | 'lanternLight'
-  | 'houndWhistle';
+  | 'houndWhistle'
+  | 'emergeSplash';
 
 // The Elf's magic arrows leap on impact: each bounce seeks the nearest living
 // enemy within BOUNCE_RANGE of the impact point that the chain hasn't hit yet.
@@ -481,6 +490,12 @@ export class GameEngine {
    * his throne on the Throne Room's final wave). */
   bossHasSpawned = false;
   /**
+   * The boss that reached its stage's `bossHaltAt` cell and so ended the stage
+   * (Captain Draven at the cistern): it stands there, and the ending cutscene
+   * takes it from here. Null until then (and on every other stage).
+   */
+  haltedBoss: Enemy | null = null;
+  /**
    * Cosmetic sound cues emitted this frame (semantic names only — the engine
    * knows nothing about audio, like `Shot`/`Burst` markers). The UI bridge
    * drains and plays them each frame, then clears the queue. Throttling/mixing
@@ -539,6 +554,8 @@ export class GameEngine {
   private readonly laneRevealAnim: number[];
   /** Cell-key set for each lane, merged into `pathCells` when it's revealed. */
   private readonly laneCells: Set<string>[];
+  /** Per lane, the distance at which its boss halts and wins the stage (`bossHaltAt`). */
+  private readonly bossHaltDist: (number | null)[];
 
   constructor(
     level: LevelDef,
@@ -579,6 +596,11 @@ export class GameEngine {
     // Precompute geometry for each lane.
     this.lanes = level.lanes.map((lane) => this.buildLane(laneWaypoints(lane)));
 
+    // Where along each lane its boss halts and ends the stage (`bossHaltAt`),
+    // for lanes that pass through that cell.
+    const halt = level.bossHaltAt ? cellCenter(level.bossHaltAt.col, level.bossHaltAt.row) : null;
+    this.bossHaltDist = this.lanes.map((_, i) => (halt ? this.laneDistanceTo(i, halt) : null));
+
     // The exit (last waypoint) of each lane is a base; dedupe so converging
     // lanes that share an exit yield a single castle.
     this.baseExits = [];
@@ -606,6 +628,30 @@ export class GameEngine {
     return { waypoints, segments, totalPathLength: acc };
   }
 
+  /**
+   * How far along lane `index` the point `p` lies, if the lane passes within a
+   * pixel of it (the first time it does); null otherwise.
+   */
+  laneDistanceTo(index: number, p: Vec2): number | null {
+    for (const s of this.lanes[index]?.segments ?? []) {
+      const d = (p.x - s.start.x) * s.dir.x + (p.y - s.start.y) * s.dir.y;
+      if (d < -1 || d > s.length + 1) continue;
+      const off = Math.hypot(s.start.x + s.dir.x * d - p.x, s.start.y + s.dir.y * d - p.y);
+      if (off <= 1) return s.startDist + Math.max(0, Math.min(s.length, d));
+    }
+    return null;
+  }
+
+  /** The point `dist` px along lane `index` (a cutscene walking foes along it). */
+  pointOnLane(index: number, dist: number): Vec2 {
+    return this.positionAtDistance(this.lanes[index], dist);
+  }
+
+  /** The direction of travel `dist` px along lane `index`. */
+  headingOnLane(index: number, dist: number): Vec2 {
+    return this.headingAtDistance(this.lanes[index], dist);
+  }
+
   /** Number of waves in the stage — `Infinity` for an endless run. */
   get totalWaves(): number {
     return this.level.endless ? Infinity : levelTotalWaves(this.level);
@@ -621,7 +667,12 @@ export class GameEngine {
   // ---------------------------------------------------------------- geometry
   private positionAtDistance(lane: Lane, dist: number): Vec2 {
     if (lane.segments.length === 0) return { ...lane.waypoints[0] };
-    if (dist <= 0) return { ...lane.segments[0].start };
+    // Before the lane's start (a foe surfacing a little back in a pool, see
+    // EMERGE_BACK): carry on back along the first segment.
+    if (dist <= 0) {
+      const first = lane.segments[0];
+      return { x: first.start.x + first.dir.x * dist, y: first.start.y + first.dir.y * dist };
+    }
     for (const seg of lane.segments) {
       if (dist <= seg.startDist + seg.length) {
         const d = dist - seg.startDist;
@@ -1727,7 +1778,13 @@ export class GameEngine {
     ) {
       const { enemyId, laneIndex, healthMult } = this.spawnQueue[this.spawnCursor++];
       const def = this.spawnDef(enemyId, healthMult);
-      this.enemies.push(this.createEnemy(def, laneIndex, 0));
+      const fromWater = !!this.level.lanes[laneIndex].emerge;
+      const spawned = this.createEnemy(def, laneIndex, fromWater ? -EMERGE_BACK : 0);
+      this.enemies.push(spawned);
+      if (spawned.riseFrom === 'water') {
+        this.emitFx({ kind: 'emerge', x: spawned.pos.x, y: spawned.pos.y, radius: def.radius });
+        this.sfx.push('emergeSplash');
+      }
       if (def.boss) {
         const at = this.positionAtDistance(this.lanes[laneIndex], 0);
         this.emitFx({ kind: 'bossSpawn', x: at.x, y: at.y, color: def.visual.color });
@@ -1739,6 +1796,10 @@ export class GameEngine {
 
   /** A fresh enemy of `def` on lane `laneIndex`, `dist` px along it. */
   private createEnemy(def: EnemyDef, laneIndex: number, dist: number): Enemy {
+    // Spawned right at the start of an `emerge` lane, a foe surfaces out of the
+    // water first; a boss on a reveal lane rises off its throne.
+    const fromWater = dist <= 0 && !!this.level.lanes[laneIndex].emerge;
+    const fromThrone = !fromWater && def.boss && this.laneRevealAt[laneIndex] !== undefined;
     return {
       uid: this.uidCounter++,
       def,
@@ -1754,8 +1815,8 @@ export class GameEngine {
       hitFlash: 0,
       knockbackRemaining: 0,
       knockbackCooldown: 0,
-      // A boss on a reveal lane rises off its throne before walking.
-      rise: def.boss && this.laneRevealAt[laneIndex] !== undefined ? 1 : 0,
+      rise: fromWater || fromThrone ? 1 : 0,
+      riseFrom: fromWater ? 'water' : 'throne',
       // An enemy with intro lines walks in a short way (-1) before speaking. In
       // endless runs it starts past its last line, so it never stops to speak.
       speechIndex: !def.spawnLines ? 0 : this.level.endless ? def.spawnLines.length : -1,
@@ -1785,6 +1846,11 @@ export class GameEngine {
       }
       if (e.hitFlash > 0) e.hitFlash = Math.max(0, e.hitFlash - dt);
       if (e.dodge > 0) e.dodge = Math.max(0, e.dodge - dt);
+      // Regenerating foes (the Sludge Brute) heal a little every frame, so the
+      // health bar refills smoothly rather than jumping once a second.
+      if (e.def.regen && e.health < e.def.health) {
+        e.health = Math.min(e.def.health, e.health + e.def.health * e.def.regen * dt);
+      }
       if (e.slowTimer > 0) {
         e.slowTimer -= dt;
         if (e.slowTimer <= 0) e.slowFactor = 1;
@@ -1794,9 +1860,10 @@ export class GameEngine {
       const lane = this.lanes[e.laneIndex];
       // A boss rising off its throne stays put (and untargetable) until fully up.
       if (e.rise > 0) {
-        e.rise = Math.max(0, e.rise - dt / RISE_TIME);
-        e.pos = this.positionAtDistance(lane, 0);
-        e.heading = this.headingAtDistance(lane, 0);
+        e.rise = Math.max(0, e.rise - dt / (e.riseFrom === 'water' ? EMERGE_TIME : RISE_TIME));
+        // Held where it spawned: the lane start, or a little back in the pool.
+        e.pos = this.positionAtDistance(lane, e.dist);
+        e.heading = this.headingAtDistance(lane, e.dist);
         continue;
       }
       // An enemy with intro lines walks in until it's on screen, then stops to
@@ -1831,8 +1898,20 @@ export class GameEngine {
       // after forward motion so a well-timed shove can still deny a base hit.
       if (e.knockbackRemaining > 0) {
         const step = Math.min(e.knockbackRemaining, KNOCKBACK_SLIDE_SPEED * dt);
-        e.dist = Math.max(0, e.dist - step);
+        // Never shoved back past the lane start (or, still wading out of a
+        // pool behind it, never pulled forward by the clamp).
+        e.dist = Math.max(Math.min(0, e.dist), e.dist - step);
         e.knockbackRemaining -= step;
+      }
+      // A boss the stage ends for (`bossHaltAt`: Captain Draven at the cistern)
+      // stops dead on reaching that spot, and the stage is won.
+      const haltAt = e.def.boss ? this.bossHaltDist[e.laneIndex] : null;
+      if (haltAt != null && e.dist >= haltAt) {
+        e.dist = haltAt;
+        e.pos = this.positionAtDistance(lane, e.dist);
+        e.heading = this.headingAtDistance(lane, e.dist);
+        this.haltBoss(e);
+        continue;
       }
       if (e.dist >= lane.totalPathLength) {
         // Reached the base (this lane's exit).
@@ -3216,7 +3295,9 @@ export class GameEngine {
       amount *
       resistMultiplier(enemy.def, source?.def.damageType) *
       (1 - enemy.wardReduction);
-    enemy.health -= dealt;
+    // A foe that can't die (Captain Draven) takes every hit, but never drops
+    // below 1 HP.
+    enemy.health = enemy.def.unkillable ? Math.max(1, enemy.health - dealt) : enemy.health - dealt;
     enemy.hitFlash = 0.12;
     const from = source?.pos ?? enemy.pos;
     const element = source ? fxElementFor(source) : 'steel';
@@ -3523,6 +3604,18 @@ export class GameEngine {
     if (this.outcome !== 'playing') return;
     this.outcome = 'won';
     this.phase = 'ended';
+  }
+
+  /**
+   * A boss reached its stage's halt point (`bossHaltAt`): the stage is won on
+   * the spot and the ending cutscene deals with him. He counts as slain for the
+   * bestiary (his fate is sealed), though nobody is credited with the kill.
+   */
+  private haltBoss(e: Enemy): void {
+    if (this.outcome !== 'playing') return;
+    this.haltedBoss = e;
+    this.enemyKills[e.def.id] = (this.enemyKills[e.def.id] ?? 0) + 1;
+    this.win();
   }
 
   /** Concede the battle — how the player ends an endless run on their own terms. */

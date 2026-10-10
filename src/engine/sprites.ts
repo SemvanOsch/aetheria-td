@@ -2496,6 +2496,1189 @@ export function drawManAtArms(
   ctx.restore();
 }
 
+/** Fresh sludge running down a sludge foe's body, and its wet glints. */
+const SLUDGE_OOZE = '#a6dc3c';
+const SLUDGE_GLINT = '#e2f8a0';
+
+/**
+ * Shared ooze drawing for the sludge foes (the Sludgeborn and the Sludge
+ * Behemoth). Everything animates off the walk `phase`, never the clock: a drip
+ * swells over one stride and snaps back as its bead lets go (a sawtooth), and a
+ * loose drop falls over the same stride, so walk frames stay cacheable.
+ */
+function sludgeKit(ctx: CanvasRenderingContext2D, phase: number, slime: string) {
+  const TAU = Math.PI * 2;
+  const frac = (v: number) => v - Math.floor(v);
+  /** A drip's length: swells over the stride, then snaps back as the bead lets go. */
+  const grow = (len: number, off: number) => len * (0.45 + 0.55 * frac(phase / TAU + off));
+  /** A hanging drip: a tapering run of sludge ending in a fat bead. */
+  const drip = (x: number, y: number, len: number, w: number, fill = slime) => {
+    seg(ctx, x, y, x, y + len, w, w * 0.5, fill);
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.arc(x, y + len, w * 0.85, 0, TAU);
+    ctx.fill();
+  };
+  /** A drop that has let go, falling (accelerating) over the stride. */
+  const drop = (x: number, y: number, off: number, size = 1) => {
+    const t = frac(phase / TAU + off);
+    ctx.fillStyle = SLUDGE_OOZE;
+    ctx.beginPath();
+    ctx.ellipse(x, y + t * t * 6, 0.6 * size, 0.85 * size, 0, 0, TAU);
+    ctx.fill();
+  };
+  /** Wet glints, as [x, y, r] triples. */
+  const glints = (pts: number[][]) => {
+    ctx.fillStyle = SLUDGE_GLINT;
+    for (const [gx, gy, r] of pts) {
+      ctx.beginPath();
+      ctx.ellipse(gx, gy, r, r * 0.55, -0.4, 0, TAU);
+      ctx.fill();
+    }
+  };
+  /** Bulges that break up the silhouette, painted under the body fill. */
+  const lumps = (pts: number[][], fill: string) => {
+    ctx.fillStyle = fill;
+    for (const [lx, ly, r] of pts) {
+      ctx.beginPath();
+      ctx.arc(lx, ly, r, 0, TAU);
+      ctx.fill();
+    }
+  };
+  return { grow, drip, drop, glints, lumps };
+}
+
+/**
+ * Procedural Sludgeborn (`cap_grunt2`): a hulking heap of sewer sludge that
+ * heaves itself out of the Sewers' cistern. No neck: the head is the top of one
+ * hunched mass, sunk between heavy shoulders, with a gaping fanged maw, glowing
+ * toxic-yellow eyes under a scowling brow ridge and raw red gashes splitting the
+ * chest. Long sludge arms hang to the knees and end in drooping fingers that run
+ * off into drips; it leaves a puddle under its
+ * feet. Every drip swells and lets go once per stride (a sawtooth in `phase`), so
+ * the ooze animates while the walk frames stay cacheable. Slow, swaying gait.
+ * Same three authored views ('side' mirrored on `faceLeft`, 'front', 'back').
+ */
+export function drawSludgeBrute(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  view: 'side' | 'front' | 'back',
+  faceLeft: boolean,
+  phase: number,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (view === 'side' && faceLeft) ctx.scale(-1, 1);
+
+  const TAU = Math.PI * 2;
+  const slime = color;
+  const slimeLit = shade(color, 0.2);
+  const slimeDark = shade(color, -0.28);
+  const slimeDeep = shade(color, -0.5);
+  const ooze = SLUDGE_OOZE;
+  const maw = '#1d0f12';
+  const throat = '#4a1a24';
+  const tooth = '#e6dcb4';
+  const eye = '#f2ff9a';
+  const eyeCore = '#ffffff';
+  const gash = '#9c2338';
+  const gashLit = '#ff6f7e';
+  // Stumpy sludge columns ending in splayed blob feet.
+  const legs: LegLook = { cloth: slimeDark, boot: slimeDeep, w: 5.4, bootUp: 0.3, toe: 3 };
+
+  const bob = Math.abs(Math.sin(phase));
+  const swing = Math.sin(phase);
+  const { grow, drip, drop, glints, lumps } = sludgeKit(ctx, phase, slime);
+  /**
+   * A long sludge arm from the shoulder to a big hand hanging by the knee, the
+   * forearm thickening toward the fist, three drooping fingers running into drips.
+   */
+  const sludgeArm = (sx: number, sy: number, hx: number, hy: number, fill: string, bend: number, off: number) => {
+    const ex = (sx + hx) / 2 + bend;
+    const ey = (sy + hy) / 2;
+    seg(ctx, sx, sy, ex, ey, 2.9, 2.3, fill);
+    seg(ctx, ex, ey, hx, hy, 2.3, 2.7, fill);
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.ellipse(hx, hy + 0.6, 2.8, 2.3, 0, 0, TAU);
+    ctx.fill();
+    for (let i = 0; i < 3; i++) drip(hx + (i - 1) * 1.5, hy + 2, grow(1.4 + (i % 2) * 1.3, off + i * 0.31), 0.75, fill);
+    drip(ex + (hx - ex) * 0.4, ey + (hy - ey) * 0.4 + 1.6, grow(1.8, off + 0.55), 0.7, fill);
+  };
+
+  // The puddle it drags along: trailing behind in profile, pooled underneath otherwise.
+  ctx.fillStyle = slimeDeep;
+  ctx.beginPath();
+  if (view === 'side') {
+    ctx.ellipse(-3, 12.1, 9, 1.4, 0, 0, TAU);
+    ctx.ellipse(-12, 12.2, 1.6, 0.6, 0, 0, TAU);
+  } else {
+    ctx.ellipse(0, 12.1, 8.4, 1.6, 0, 0, TAU);
+    ctx.ellipse(9.6, 12.3, 1.4, 0.55, 0, 0, TAU);
+  }
+  ctx.fill();
+
+  if (view === 'side') {
+    // --- Profile (lumbering along the row, hunched forward) ---
+    walkLegsSide(ctx, phase, { hipY: 3, footY: 12, stride: 2.6, look: legs, lift: 1 });
+
+    ctx.save();
+    ctx.translate(0, -bob * 0.7);
+
+    // Far arm, a shade darker, swinging against the near one.
+    sludgeArm(0, -7, 2.2 - swing * 3, 5.4, slimeDeep, -1.4, 0.15);
+
+    // One mass: hips, a hunched back rising into the hump, the head jutting
+    // forward under a heavy brow, the open jaw hanging below it.
+    lumps([[-7.4, -3.6, 1.6], [-6.6, -9.4, 1.8], [-3.2, -13, 1.5]], slime);
+    const body = () => {
+      ctx.beginPath();
+      ctx.moveTo(-4.8, 5.4);
+      ctx.quadraticCurveTo(-8.2, 0, -7.2, -6.6);
+      ctx.quadraticCurveTo(-6.4, -13, -1, -13.6);
+      ctx.quadraticCurveTo(4.6, -14.2, 7.2, -11.8);
+      ctx.quadraticCurveTo(9.4, -10.4, 9.2, -8.6);
+      ctx.lineTo(9, -4.4);
+      ctx.quadraticCurveTo(8.2, -2.4, 6.2, -1.6);
+      ctx.quadraticCurveTo(7, 2, 5.2, 5.4);
+      ctx.quadraticCurveTo(0, 7, -4.8, 5.4);
+      ctx.closePath();
+    };
+    body();
+    ctx.fillStyle = slime;
+    ctx.fill();
+    ctx.save();
+    body();
+    ctx.clip();
+    ctx.fillStyle = slimeLit; // belly catching the light
+    ctx.beginPath();
+    ctx.ellipse(5.6, -1, 3.2, 6, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = slimeDark; // the back in shadow
+    ctx.beginPath();
+    ctx.ellipse(-7.6, -1, 2.8, 8, 0, 0, TAU);
+    ctx.fill();
+    seg(ctx, -5.4, -10.6, -6.4, -3, 0.7, 0.35, ooze); // fresh runs down the hump
+    seg(ctx, 2, -13.6, 1.4, -9.4, 0.55, 0.3, ooze);
+    ctx.restore();
+
+    // The maw, gaping in profile: lips past the jaw line, teeth top and bottom.
+    ctx.fillStyle = maw;
+    ctx.beginPath();
+    ctx.moveTo(9.6, -8.8);
+    ctx.quadraticCurveTo(6.4, -8.6, 4.8, -7.2);
+    ctx.quadraticCurveTo(6.6, -5, 9.4, -4.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = throat;
+    ctx.beginPath();
+    ctx.ellipse(6.2, -6.9, 1.2, 0.9, 0.3, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = tooth;
+    ctx.beginPath();
+    for (const [tx, ty, l] of [[8.8, -8.7, 1.5], [7.5, -8.4, 1], [6.3, -8], [5.4, -7.6, 0.6]]) {
+      const len = l ?? 0.8;
+      ctx.moveTo(tx - 0.45, ty);
+      ctx.lineTo(tx + 0.45, ty);
+      ctx.lineTo(tx, ty + len);
+      ctx.closePath();
+    }
+    for (const [tx, ty, l] of [[8.6, -4.4, 1.3], [7.3, -4.9, 0.9], [6.1, -5.6, 0.6]]) {
+      ctx.moveTo(tx - 0.45, ty);
+      ctx.lineTo(tx + 0.45, ty);
+      ctx.lineTo(tx, ty - l);
+      ctx.closePath();
+    }
+    ctx.fill();
+    ctx.strokeStyle = ooze; // a string of slaver across the jaws
+    ctx.lineWidth = 0.4;
+    ctx.beginPath();
+    ctx.moveTo(8.2, -8.2);
+    ctx.quadraticCurveTo(7.6, -6.4, 8, -4.8);
+    ctx.stroke();
+    drip(8.4, -4.2, grow(2.6, 0.1), 0.55, ooze);
+
+    // A heavy brow ridge scowling over one glowing eye.
+    ctx.fillStyle = slimeDark;
+    ctx.beginPath();
+    ctx.moveTo(4.2, -12.6);
+    ctx.quadraticCurveTo(7.4, -12.2, 9.6, -10);
+    ctx.lineTo(9, -9.2);
+    ctx.quadraticCurveTo(7, -10.8, 4.4, -11.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = eye;
+    ctx.beginPath();
+    ctx.ellipse(7, -9.9, 1.3, 0.7, 0.35, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = eyeCore;
+    ctx.beginPath();
+    ctx.arc(7.4, -9.8, 0.35, 0, TAU);
+    ctx.fill();
+
+    // Drips off the belly and back.
+    drip(-3.4, 5.6, grow(2.2, 0.4), 0.9);
+    drip(1.2, 6.2, grow(3, 0.75), 0.9);
+    drip(4.4, 5.4, grow(1.8, 0.2), 0.8);
+    drip(-7.6, -2.4, grow(2.6, 0.6), 0.8);
+
+    // Near arm, swinging forward as the far one goes back.
+    const nhx = 3.4 + swing * 3;
+    sludgeArm(0.6, -6.8, nhx, 5.8, slime, -1.6, 0.65);
+    drop(nhx, 9.6, 0.4);
+    glints([[-4, -11.6, 1.1], [3.6, -12.8, 0.9], [1, -6.4, 0.8], [6.4, 0.6, 0.6], [nhx - 0.8, 5, 0.6]]);
+
+    ctx.restore();
+    ctx.restore();
+    return;
+  }
+
+  // --- Front / back (lumbering toward or away from the viewer) ---
+  const back = view === 'back';
+  walkLegsFront(ctx, phase, { hipY: 3, footY: 12, sep: 3.8, look: legs, back, lift: 1.6, splay: 0.8 });
+
+  ctx.save();
+  ctx.translate(0, -bob * 0.6);
+  // A heavy side-to-side sway, rocking about the hips.
+  ctx.translate(0, 4);
+  ctx.rotate(swing * 0.045);
+  ctx.translate(0, -4);
+
+  // Shoulder bulges, under the body fill so they merge.
+  lumps([[-8.6, -8.4, 1.7], [8.8, -8, 1.5], [-3.4, -15, 1.4], [2.6, -15.2, 1.1]], back ? slimeDark : slime);
+
+  const body = () => {
+    ctx.beginPath();
+    ctx.moveTo(-5.8, 5.4);
+    ctx.quadraticCurveTo(-7.6, 0, -9.4, -5.4);
+    ctx.quadraticCurveTo(-10, -9.8, -6.2, -10.4);
+    ctx.quadraticCurveTo(-5.2, -15.6, 0, -15.8);
+    ctx.quadraticCurveTo(5.2, -15.6, 6.2, -10.4);
+    ctx.quadraticCurveTo(10, -9.8, 9.4, -5.4);
+    ctx.quadraticCurveTo(7.6, 0, 5.8, 5.4);
+    ctx.quadraticCurveTo(0, 7.4, -5.8, 5.4);
+    ctx.closePath();
+  };
+  body();
+  ctx.fillStyle = back ? shade(color, -0.1) : slime;
+  ctx.fill();
+  ctx.save();
+  body();
+  ctx.clip();
+  ctx.fillStyle = slimeDark; // flanks in shadow
+  ctx.beginPath();
+  ctx.ellipse(-10.4, -2, 3.4, 9, 0, 0, TAU);
+  ctx.ellipse(10.4, -2, 3.4, 9, 0, 0, TAU);
+  ctx.fill();
+  if (!back) {
+    ctx.fillStyle = slimeLit; // the gut and chest catching the light
+    ctx.beginPath();
+    ctx.ellipse(-1, -1, 4, 6, 0, 0, TAU);
+    ctx.fill();
+  }
+  seg(ctx, -7, -8.4, -6.2, -2, 0.7, 0.4, ooze); // fresh runs over the shoulders
+  seg(ctx, 6.8, -8.6, 6, -3.4, 0.6, 0.35, ooze);
+  seg(ctx, -2.6, -14.6, -3.2, -11, 0.5, 0.3, ooze);
+  ctx.restore();
+
+  if (back) {
+    // From behind: the dome of the head sunk into the shoulders (a crease at the
+    // nape) and a ridge of lumps down the spine.
+    ctx.strokeStyle = slimeDeep;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-4.6, -9.8);
+    ctx.quadraticCurveTo(0, -8.2, 4.6, -9.8);
+    ctx.stroke();
+    for (const [lx, ly, r] of [[0, -13.4, 1.3], [0.3, -6.6, 1.2], [-0.2, -3.4, 1.1], [0.2, -0.2, 1]]) {
+      ctx.fillStyle = slimeDark;
+      ctx.beginPath();
+      ctx.arc(lx, ly, r, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = slime;
+      ctx.beginPath();
+      ctx.arc(lx - r * 0.25, ly - r * 0.3, r * 0.55, 0, TAU);
+      ctx.fill();
+    }
+  } else {
+    // Raw red gashes splitting the chest.
+    for (const [x0, y0, x1, y1] of [[-3.8, -2.8, -1.8, 0.2], [1.8, -2.8, 3.8, 0.2], [-0.9, 1.4, 0.7, 3.4]]) {
+      seg(ctx, x0, y0, x1, y1, 0.85, 0.6, gash);
+      seg(ctx, x0 + (x1 - x0) * 0.2, y0 + (y1 - y0) * 0.2, x1 - (x1 - x0) * 0.2, y1 - (y1 - y0) * 0.2, 0.35, 0.25, gashLit);
+    }
+    // The maw gaping at us: throat, a ring of yellowed fangs, strings of slaver.
+    const mcy = -7;
+    const mrx = 3.6;
+    const mry = 2.8;
+    ctx.fillStyle = maw;
+    ctx.beginPath();
+    ctx.ellipse(0, mcy, mrx, mry, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = throat;
+    ctx.beginPath();
+    ctx.ellipse(0, mcy + 0.6, 2.1, 1.5, 0, 0, TAU);
+    ctx.fill();
+    const edge = (x: number) => mry * Math.sqrt(Math.max(0, 1 - (x / mrx) ** 2));
+    ctx.fillStyle = tooth;
+    ctx.beginPath();
+    for (const [tx, l] of [[-2.7, 0.8], [-1.8, 1.6], [-0.6, 0.9], [0.6, 0.9], [1.8, 1.6], [2.7, 0.8]]) {
+      const ty = mcy - edge(tx) + 0.15;
+      ctx.moveTo(tx - 0.45, ty);
+      ctx.lineTo(tx + 0.45, ty);
+      ctx.lineTo(tx, ty + l);
+      ctx.closePath();
+    }
+    for (const [tx, l] of [[-2.2, 1.2], [-0.8, 0.7], [0.8, 0.7], [2.2, 1.2]]) {
+      const ty = mcy + edge(tx) - 0.15;
+      ctx.moveTo(tx - 0.45, ty);
+      ctx.lineTo(tx + 0.45, ty);
+      ctx.lineTo(tx, ty - l);
+      ctx.closePath();
+    }
+    ctx.fill();
+    ctx.strokeStyle = ooze;
+    ctx.lineWidth = 0.4;
+    ctx.beginPath();
+    ctx.moveTo(-1.2, mcy - 2.4);
+    ctx.quadraticCurveTo(-1.6, mcy, -1, mcy + 2.5);
+    ctx.moveTo(2.4, mcy - 1.8);
+    ctx.quadraticCurveTo(2.8, mcy + 0.2, 2.2, mcy + 2);
+    ctx.stroke();
+    drip(0.8, mcy + mry - 0.2, grow(2, 0.3), 0.55, ooze);
+    // A heavy brow ridge in a V over two glowing eyes slanted into a glare.
+    ctx.fillStyle = slimeDark;
+    ctx.beginPath();
+    ctx.moveTo(-4.8, -13.4);
+    ctx.lineTo(0, -11.2);
+    ctx.lineTo(4.8, -13.4);
+    ctx.lineTo(4.6, -12.2);
+    ctx.lineTo(0, -10.2);
+    ctx.lineTo(-4.6, -12.2);
+    ctx.closePath();
+    ctx.fill();
+    for (const s of [-1, 1]) {
+      ctx.fillStyle = eye;
+      ctx.beginPath();
+      ctx.ellipse(s * 2.4, -11.1, 1.3, 0.7, s * 0.35, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = eyeCore;
+      ctx.beginPath();
+      ctx.arc(s * 2.2, -11, 0.35, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  // Drips off the gut.
+  drip(-4.4, 5.8, grow(2.4, 0.45), 0.9);
+  drip(-1.4, 6.6, grow(1.6, 0.8), 0.8);
+  drip(1.6, 6.5, grow(2.8, 0.15), 0.9);
+  drip(4.4, 5.8, grow(1.8, 0.6), 0.8);
+
+  // Arms hanging to the knees, swinging in step; a drop falling from each hand.
+  const armFill = back ? shade(color, -0.1) : slime;
+  const lhy = 5 + swing * 0.9;
+  const rhy = 5 - swing * 0.9;
+  sludgeArm(-8, -7.2, -11, lhy, armFill, -1.4, 0.2);
+  sludgeArm(8, -7.2, 11, rhy, armFill, 1.4, 0.7);
+  drop(-11.4, lhy + 5, 0.35);
+  drop(11.2, rhy + 5, 0.85);
+  glints(
+    back
+      ? [[-5.8, -11.4, 1], [4.4, -12.6, 0.9], [6.8, -6.4, 0.7], [-11.6, lhy - 0.6, 0.6]]
+      : [[-5.6, -9.6, 1.1], [3.2, -14.2, 1], [6.6, -7.8, 0.8], [-2.8, 2.6, 0.7], [-11.6, lhy - 0.6, 0.6], [10.4, rhy - 0.6, 0.6]],
+  );
+
+  ctx.restore();
+  ctx.restore();
+}
+
+/**
+ * Procedural Sludge Behemoth (`cap_brute`): the Sludgeborn grown into a towering
+ * slab of muscle, drawn bigger within the normal token (feet on the same line, so
+ * no foot-lift). A V-shaped torso with heavy pecs and lats, a small head sunk
+ * low between huge trapezius mounds with burning red eyes and a wailing mouth,
+ * and a cluster of glowing red wounds splitting the chest. Hardened, cracked
+ * crust plates armour its shoulders and forearms (it is the tank), and massive
+ * arms hang to fists at the knee, fingers running into drips. Thick bowed legs,
+ * a wide stance, a slow rolling gait and a bigger puddle. Its ooze animates off
+ * the walk phase through `sludgeKit`, like the Sludgeborn's. Same three
+ * authored views ('side' mirrored on `faceLeft`, 'front', 'back').
+ */
+export function drawSludgeBehemoth(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  view: 'side' | 'front' | 'back',
+  faceLeft: boolean,
+  phase: number,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (view === 'side' && faceLeft) ctx.scale(-1, 1);
+
+  const TAU = Math.PI * 2;
+  const slime = color;
+  const slimeLit = shade(color, 0.2);
+  const slimeDark = shade(color, -0.28);
+  const slimeDeep = shade(color, -0.5);
+  const crust = shade(color, -0.4); // dried, hardened sludge
+  const crustCrack = shade(color, 0.12);
+  const ooze = SLUDGE_OOZE;
+  const maw = '#1d0f12';
+  const tooth = '#e6dcb4';
+  const eye = '#ff5a48';
+  const eyeCore = '#ffd9c8';
+  const gash = '#9c2338';
+  const gashLit = '#ff6f7e';
+  const legs: LegLook = { cloth: slimeDark, boot: slimeDeep, w: 7, bootUp: 0.3, toe: 3.6 };
+
+  const bob = Math.abs(Math.sin(phase));
+  const swing = Math.sin(phase);
+  const { grow, drip, drop, glints, lumps } = sludgeKit(ctx, phase, slime);
+
+  /** A hardened crust plate: an irregular slab with a few cracks across it. */
+  const crustPlate = (pts: number[][], cracks: number[][]) => {
+    ctx.fillStyle = crust;
+    ctx.beginPath();
+    pts.forEach(([px, py], i) => (i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)));
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = crustCrack;
+    ctx.lineWidth = 0.4;
+    ctx.beginPath();
+    for (const [x0, y0, x1, y1] of cracks) {
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+    }
+    ctx.stroke();
+  };
+  /** A raw red wound in the sludge, glowing at its core. */
+  const wound = (x0: number, y0: number, x1: number, y1: number, w = 1.1) => {
+    seg(ctx, x0, y0, x1, y1, w, w * 0.65, gash);
+    seg(ctx, x0 + (x1 - x0) * 0.2, y0 + (y1 - y0) * 0.2, x1 - (x1 - x0) * 0.2, y1 - (y1 - y0) * 0.2, w * 0.45, w * 0.3, gashLit);
+  };
+  /**
+   * A massive arm from the shoulder to a fist by the knee: a thick upper arm,
+   * a forearm swelling into the fist, knuckle bumps, fingers running into drips.
+   */
+  const hulkArm = (sx: number, sy: number, hx: number, hy: number, fill: string, bend: number, off: number) => {
+    const ex = (sx + hx) / 2 + bend;
+    const ey = (sy + hy) / 2;
+    seg(ctx, sx, sy, ex, ey, 3.8, 3, fill);
+    seg(ctx, ex, ey, hx, hy, 3, 3.5, fill);
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.ellipse(hx, hy + 0.8, 3.7, 3.2, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = shade(fill, 0.14); // knuckles
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.arc(hx + (i - 1) * 1.9, hy + 2.6, 0.9, 0, TAU);
+      ctx.fill();
+    }
+    for (let i = 0; i < 3; i++) drip(hx + (i - 1) * 1.9, hy + 3.2, grow(1.3 + (i % 2) * 1.4, off + i * 0.29), 0.85, fill);
+    drip(ex + (hx - ex) * 0.45, ey + (hy - ey) * 0.45 + 2.2, grow(2, off + 0.5), 0.85, fill);
+  };
+
+  // A bigger puddle than the Sludgeborn's.
+  ctx.fillStyle = slimeDeep;
+  ctx.beginPath();
+  if (view === 'side') {
+    ctx.ellipse(-4, 12.1, 12, 1.7, 0, 0, TAU);
+    ctx.ellipse(-16.4, 12.2, 2, 0.7, 0, 0, TAU);
+  } else {
+    ctx.ellipse(0, 12.1, 11, 1.9, 0, 0, TAU);
+    ctx.ellipse(-12.6, 12.3, 1.8, 0.6, 0, 0, TAU);
+  }
+  ctx.fill();
+
+  if (view === 'side') {
+    // --- Profile (rolling along the row, hunched over its own bulk) ---
+    walkLegsSide(ctx, phase, { hipY: 3, footY: 12, stride: 2.4, look: legs, lift: 0.9 });
+
+    ctx.save();
+    ctx.translate(0, -bob * 0.8);
+
+    // Far arm, a shade darker, swinging against the near one.
+    hulkArm(0.4, -12.6, 2.6 - swing * 2.6, 5.4, slimeDeep, -1.8, 0.15);
+
+    lumps([[-9.4, -6, 2], [-8.4, -13, 2.2], [-4.6, -17.6, 1.8]], slime);
+    const body = () => {
+      ctx.beginPath();
+      ctx.moveTo(-5.8, 4.6);
+      ctx.quadraticCurveTo(-9.8, -2, -9.6, -10);
+      ctx.quadraticCurveTo(-8.8, -17.8, -2, -18.8);
+      ctx.quadraticCurveTo(3, -19.2, 5.4, -16.6);
+      ctx.lineTo(7.6, -12.4);
+      ctx.quadraticCurveTo(10.4, -9.2, 8.4, -5.6);
+      ctx.quadraticCurveTo(7.2, -2.2, 7.8, 0.4);
+      ctx.quadraticCurveTo(7.8, 3.6, 5.6, 4.6);
+      ctx.quadraticCurveTo(0, 6.6, -5.8, 4.6);
+      ctx.closePath();
+    };
+    body();
+    ctx.fillStyle = slime;
+    ctx.fill();
+    ctx.save();
+    body();
+    ctx.clip();
+    ctx.fillStyle = slimeLit; // pec and gut catching the light
+    ctx.beginPath();
+    ctx.ellipse(6.6, -9.2, 3, 3.6, 0, 0, TAU);
+    ctx.ellipse(6.4, -0.8, 2.4, 3.6, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = slimeDark; // the broad back in shadow
+    ctx.beginPath();
+    ctx.ellipse(-9.6, -4, 3.6, 10, 0, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = slimeDark; // under the pec
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(4.2, -6);
+    ctx.quadraticCurveTo(6.6, -4.8, 8.6, -5.8);
+    ctx.stroke();
+    seg(ctx, -6.4, -14.6, -8, -5, 0.8, 0.4, ooze);
+    seg(ctx, 1.6, -18.4, 0.8, -13.4, 0.6, 0.3, ooze);
+    ctx.restore();
+    // Crust plate armouring the shoulder hump.
+    crustPlate(
+      [[-7.6, -16.4], [-3.4, -18.6], [1.6, -17.4], [2.4, -13.6], [-1.6, -11.8], [-6.4, -12.6]],
+      [[-3.4, -18.6, -2.2, -14.6], [-2.2, -14.6, 1, -15.2], [-2.2, -14.6, -5, -13.4]],
+    );
+    wound(7.4, -11.6, 8.4, -8.6);
+    wound(6.2, -7.6, 7.2, -4.8, 0.9);
+
+    // The small head, thrust forward and low: brow, a red eye, a wailing mouth.
+    ctx.fillStyle = slime;
+    ctx.beginPath();
+    ctx.arc(6.6, -17.2, 3.4, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = slimeLit;
+    ctx.beginPath();
+    ctx.ellipse(7.4, -18.6, 1.6, 1, -0.3, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = slimeDark;
+    ctx.beginPath();
+    ctx.moveTo(5.4, -20);
+    ctx.quadraticCurveTo(8.4, -20, 10.2, -18);
+    ctx.lineTo(9.6, -17.4);
+    ctx.quadraticCurveTo(7.8, -18.8, 5.6, -19);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = eye;
+    ctx.beginPath();
+    ctx.ellipse(8.4, -17.8, 0.95, 0.6, 0.3, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = maw;
+    ctx.beginPath();
+    ctx.ellipse(9.2, -15.4, 1, 1.4, 0.2, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = tooth;
+    ctx.beginPath();
+    ctx.moveTo(8.7, -16.6);
+    ctx.lineTo(9.7, -16.5);
+    ctx.lineTo(9.2, -15.7);
+    ctx.closePath();
+    ctx.fill();
+    drip(9.2, -14.2, grow(2.4, 0.1), 0.55, ooze);
+
+    // Drips off the gut and back.
+    drip(-4, 5, grow(2.6, 0.4), 1.1);
+    drip(1, 5.8, grow(3.2, 0.75), 1.1);
+    drip(5, 4.6, grow(2, 0.2), 0.9);
+    drip(-9.6, -3, grow(2.8, 0.6), 1);
+
+    // Near arm, with a crust plate across the forearm.
+    const nhx = 4 + swing * 2.6;
+    const nex = (0.8 + nhx) / 2 - 2;
+    hulkArm(0.8, -12.2, nhx, 6, slime, -2, 0.65);
+    crustPlate(
+      [[nex - 1.6, -4.8], [nex + 1.4, -5.2], [nex + 2.4, -2], [nex + 0.4, -0.6], [nex - 1.4, -2]],
+      [[nex - 0.2, -5, nex + 0.6, -2.4], [nex + 0.6, -2.4, nex + 2, -2]],
+    );
+    drop(nhx, 10.4, 0.4, 1.2);
+    glints([[-5, -15, 1.2], [4, -14.6, 1], [8, -9.6, 0.8], [6.8, 0, 0.7], [nhx - 1, 5.2, 0.7]]);
+
+    ctx.restore();
+    ctx.restore();
+    return;
+  }
+
+  // --- Front / back (rolling toward or away from the viewer) ---
+  const back = view === 'back';
+  walkLegsFront(ctx, phase, { hipY: 3, footY: 12, sep: 5, look: legs, back, lift: 1.2, splay: 1.4 });
+
+  ctx.save();
+  ctx.translate(0, -bob * 0.7);
+  // A heavy side-to-side roll about the hips.
+  ctx.translate(0, 4);
+  ctx.rotate(swing * 0.05);
+  ctx.translate(0, -4);
+
+  const fill = back ? shade(color, -0.1) : slime;
+  lumps([[-11.4, -12.6, 2.2], [11.6, -12.2, 2], [-7.4, -17.4, 1.6], [7.2, -17.6, 1.5]], fill);
+  // V-shaped torso: hips flaring into wide lats, mounded traps either side of
+  // the sunken head.
+  const body = () => {
+    ctx.beginPath();
+    ctx.moveTo(-6, 4.6);
+    ctx.quadraticCurveTo(-7.4, -1, -10.6, -8);
+    ctx.quadraticCurveTo(-13.6, -14, -9, -17.2);
+    ctx.quadraticCurveTo(-5.6, -19.8, -3, -17.6);
+    ctx.lineTo(3, -17.6);
+    ctx.quadraticCurveTo(5.6, -19.8, 9, -17.2);
+    ctx.quadraticCurveTo(13.6, -14, 10.6, -8);
+    ctx.quadraticCurveTo(7.4, -1, 6, 4.6);
+    ctx.quadraticCurveTo(0, 6.8, -6, 4.6);
+    ctx.closePath();
+  };
+  body();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.save();
+  body();
+  ctx.clip();
+  ctx.fillStyle = slimeDark; // flanks in shadow
+  ctx.beginPath();
+  ctx.ellipse(-12.4, -4, 3.8, 11, 0, 0, TAU);
+  ctx.ellipse(12.4, -4, 3.8, 11, 0, 0, TAU);
+  ctx.fill();
+  if (back) {
+    ctx.fillStyle = slime; // shoulder blades
+    ctx.beginPath();
+    ctx.ellipse(-4.4, -11.6, 3.4, 3, 0.2, 0, TAU);
+    ctx.ellipse(4.4, -11.6, 3.4, 3, -0.2, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = slimeDeep; // the spine's groove
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(0, -16.6);
+    ctx.quadraticCurveTo(0.4, -6, 0, 4);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = slimeLit; // heavy pecs and the gut
+    ctx.beginPath();
+    ctx.ellipse(-3.8, -11.2, 3.6, 2.8, 0.15, 0, TAU);
+    ctx.ellipse(3.8, -11.2, 3.6, 2.8, -0.15, 0, TAU);
+    ctx.ellipse(0, -1.6, 3.4, 4.2, 0, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = slimeDark; // under the pecs, and the gut's folds
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(-7, -9);
+    ctx.quadraticCurveTo(-3.6, -7.4, 0, -8.8);
+    ctx.quadraticCurveTo(3.6, -7.4, 7, -9);
+    ctx.moveTo(-3, -3.4);
+    ctx.quadraticCurveTo(0, -2.6, 3, -3.4);
+    ctx.moveTo(-2.8, 0.4);
+    ctx.quadraticCurveTo(0, 1.2, 2.8, 0.4);
+    ctx.stroke();
+  }
+  seg(ctx, -8.8, -14.4, -8, -6, 0.8, 0.4, ooze); // fresh runs over the shoulders
+  seg(ctx, 8.6, -14.6, 7.8, -7.4, 0.7, 0.35, ooze);
+  ctx.restore();
+
+  // Crust plates armouring both shoulders.
+  for (const s of [-1, 1]) {
+    crustPlate(
+      [[s * 7.6, -18.4], [s * 11.6, -16.4], [s * 13, -12.6], [s * 11, -10.6], [s * 8, -12], [s * 6.6, -15.6]],
+      [[s * 9.6, -17.6, s * 9.8, -13.6], [s * 9.8, -13.6, s * 12.4, -12.8], [s * 9.8, -13.6, s * 7.4, -14.4]],
+    );
+  }
+
+  // The small head sunk between the traps.
+  const hy = -19.4;
+  ctx.fillStyle = back ? slimeDark : slime;
+  ctx.beginPath();
+  ctx.arc(0, hy, 3.6, 0, TAU);
+  ctx.fill();
+  if (back) {
+    // From behind: the back of the skull with a crease where it sinks into the
+    // traps, and a run of sludge down the nape.
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.ellipse(-0.8, hy - 1.2, 2, 1.4, 0, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = slimeDeep;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(-3.2, hy + 2);
+    ctx.quadraticCurveTo(0, hy + 3.2, 3.2, hy + 2);
+    ctx.stroke();
+    seg(ctx, 0.6, hy + 0.6, 0.4, hy + 4.6, 0.5, 0.3, ooze);
+  } else {
+    // A cluster of raw red wounds splitting the chest.
+    wound(-1.8, -13.6, -0.8, -9.6);
+    wound(1.8, -13.6, 0.8, -9.6);
+    wound(0, -7.8, 0, -4.8, 0.9);
+    // Face: a scowling brow, two burning red eyes, a wailing mouth.
+    ctx.fillStyle = slimeDark;
+    ctx.beginPath();
+    ctx.moveTo(-3.2, hy - 1.6);
+    ctx.lineTo(0, hy - 0.2);
+    ctx.lineTo(3.2, hy - 1.6);
+    ctx.lineTo(3, hy - 0.6);
+    ctx.lineTo(0, hy + 0.7);
+    ctx.lineTo(-3, hy - 0.6);
+    ctx.closePath();
+    ctx.fill();
+    for (const s of [-1, 1]) {
+      ctx.fillStyle = eye;
+      ctx.beginPath();
+      ctx.ellipse(s * 1.5, hy + 0.2, 0.95, 0.55, s * 0.35, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = eyeCore;
+      ctx.beginPath();
+      ctx.arc(s * 1.35, hy + 0.25, 0.25, 0, TAU);
+      ctx.fill();
+    }
+    ctx.fillStyle = maw;
+    ctx.beginPath();
+    ctx.ellipse(0, hy + 2.3, 1.2, 1.4, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = tooth;
+    ctx.beginPath();
+    for (const tx of [-0.6, 0.6]) {
+      ctx.moveTo(tx - 0.35, hy + 1.1);
+      ctx.lineTo(tx + 0.35, hy + 1.1);
+      ctx.lineTo(tx, hy + 1.9);
+      ctx.closePath();
+    }
+    ctx.fill();
+    drip(0.3, hy + 3.4, grow(1.8, 0.3), 0.5, ooze);
+  }
+
+  // Drips off the gut.
+  drip(-5, 5, grow(2.6, 0.45), 1.1);
+  drip(-1.8, 6.2, grow(1.8, 0.8), 0.95);
+  drip(1.8, 6.1, grow(3.2, 0.15), 1.1);
+  drip(5, 5, grow(2, 0.6), 0.95);
+
+  // Massive arms hanging to fists by the knees, swinging in step, each forearm
+  // plated in crust; a drop falling from each fist.
+  const lhy = 5.6 + swing * 0.9;
+  const rhy = 5.6 - swing * 0.9;
+  hulkArm(-10.6, -13, -13, lhy, fill, -1.8, 0.2);
+  hulkArm(10.6, -13, 13, rhy, fill, 1.8, 0.7);
+  for (const s of [-1, 1]) {
+    crustPlate(
+      [[s * 12.6, -5.6], [s * 15.6, -4.4], [s * 15.4, -0.8], [s * 13, 0], [s * 11.6, -2.6]],
+      [[s * 13.8, -5, s * 13.4, -1.8], [s * 13.4, -1.8, s * 15.2, -2]],
+    );
+  }
+  drop(-13.4, lhy + 6, 0.35, 1.2);
+  drop(13.2, rhy + 6, 0.85, 1.2);
+  glints(
+    back
+      ? [[-6, -13.4, 1.1], [5, -14.6, 1], [8.4, -6.4, 0.8], [-1, hy - 1.8, 0.7], [-13.6, lhy - 0.4, 0.7]]
+      : [[-5.2, -12.4, 1.1], [3, -12.8, 0.9], [-1, -2.8, 0.8], [-0.8, hy - 2, 0.7], [-13.6, lhy - 0.4, 0.7], [12.4, rhy - 0.4, 0.7]],
+  );
+
+  ctx.restore();
+  ctx.restore();
+}
+
+// --- The Sludge Father --------------------------------------------------------
+// The thing in the Sewers' cistern, met at the end of The Sewers (the
+// `sludgeFather` ending) and a boss to come. Far too big for a board token: it is
+// drawn in two parts so the cutscene can depth-sort them — the body (the sludge
+// overflowing the cistern, the hump of its back, its shoulders and the head) and
+// each arm (a dripping tube ending in a huge splayed hand) — in local space with
+// the origin at the centre of the cistern's water.
+
+const SF_SLIME = '#435a22';
+const SF_LIT = '#62802e';
+const SF_DARK = '#2a3818';
+const SF_DEEP = '#161e0d';
+const SF_EYE = '#e8ff8a';
+const SF_EYE_CORE = '#fffbe0';
+const SF_WOUND = '#9c2338';
+const SF_WOUND_LIT = '#ff6f7e';
+const SF_MAW = '#14090c';
+const SF_THROAT = '#4a1a24';
+const SF_TOOTH = '#d9cfa4';
+
+/** The Sludge Father's body pose (see `drawSludgeFatherBody`). */
+export interface SludgeFatherPose {
+  /** 0..1: how far it has hauled itself up out of the cistern. */
+  rise: number;
+  /** 0..1: the roar — head thrown up, jaws gaping, eyes flaring. */
+  roar: number;
+  /** Seconds: drives breathing, drips and the glow's pulse. */
+  time: number;
+  /** -1..1: which way the head is turned (screen left/right). */
+  look: number;
+}
+
+/** Where the Sludge Father's head sits for a pose (local space), and its radius. */
+export function sludgeFatherHead(p: SludgeFatherPose): { x: number; y: number; r: number } {
+  const e = ease.inOutSine(Math.max(0, Math.min(1, p.rise)));
+  const hs = Math.max(0, Math.min(1, (e - 0.3) / 0.7));
+  const breathe = Math.sin(p.time * 1.6) * 1.4 * e;
+  return {
+    x: -14 - 12 * hs + p.look * 4,
+    y: 46 - 16 * hs - p.roar * 10 + breathe,
+    r: 30 * ease.outCubic(hs),
+  };
+}
+
+/**
+ * The Sludge Father's shoulder (local space) for a rise: where an arm's root
+ * travels to as the body comes up behind it (`side` -1 its left, +1 its right).
+ */
+export function sludgeFatherShoulder(rise: number, side: -1 | 1): { x: number; y: number } {
+  const e = ease.inOutSine(Math.max(0, Math.min(1, rise)));
+  return side < 0 ? { x: -30 - 50 * e, y: 32 - 38 * e } : { x: 30 + 42 * e, y: 32 - 40 * e };
+}
+
+/**
+ * The Sludge Father's body: the sludge spilling over the cistern's kerb in a
+ * lumpy mound, the hump of its back rising out of it studded with small glowing
+ * pustule-eyes and a raw red wound, the shoulders, and the head sunk low and
+ * forward, crowned with dripping lumps, two great glowing eyes under a scowling
+ * brow and a maw that gapes when it roars. At `rise` 0 only a swell in the
+ * water shows; it grows out of the pool from there.
+ */
+export function drawSludgeFatherBody(ctx: CanvasRenderingContext2D, p: SludgeFatherPose): void {
+  const TAU = Math.PI * 2;
+  const e = ease.inOutSine(Math.max(0, Math.min(1, p.rise)));
+  const lerp = (a: number, b: number) => a + (b - a) * e;
+  const { drip, glints, lumps, grow } = sludgeKit(ctx, p.time * 5, SF_SLIME);
+  const breathe = Math.sin(p.time * 1.6) * (0.6 + 0.4 * e);
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  // The overflow: a lumpy mound of sludge spilling over the kerb.
+  const mx = 0;
+  const my = lerp(16, 40);
+  const mrx = lerp(44, 150);
+  const mry = lerp(13, 34);
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * TAU + 0.2;
+    const r = (0.11 + 0.05 * Math.sin(i * 2.3)) * mrx;
+    ctx.fillStyle = i % 3 === 0 ? SF_DARK : SF_SLIME;
+    ctx.beginPath();
+    ctx.ellipse(mx + Math.cos(a) * mrx * 0.9, my + Math.sin(a) * mry * 0.85, r, r * 0.55, 0, 0, TAU);
+    ctx.fill();
+  }
+  ctx.fillStyle = SF_DARK;
+  ctx.beginPath();
+  ctx.ellipse(mx, my, mrx, mry, 0, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = SF_SLIME;
+  ctx.beginPath();
+  ctx.ellipse(mx - mrx * 0.05, my + mry * 0.25, mrx * 0.86, mry * 0.6, 0, 0, TAU);
+  ctx.fill();
+
+  if (e > 0.02) {
+    // The hump of its back, lumpy along the top.
+    const hx = lerp(0, -6);
+    const hy = lerp(26, -22) - breathe * 1.5;
+    const hrx = lerp(40, 108);
+    const hry = lerp(12, 62);
+    const humpTop: number[][] = [];
+    for (let k = 0; k <= 8; k++) {
+      const a = Math.PI + (k / 8) * Math.PI;
+      humpTop.push([hx + Math.cos(a) * hrx * 0.94, hy + Math.sin(a) * hry * 0.94, (10 + 4 * Math.sin(k * 1.7)) * (0.4 + 0.6 * e)]);
+    }
+    lumps(humpTop, SF_SLIME);
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(hx, hy, hrx, hry, 0, 0, TAU);
+    ctx.fillStyle = SF_SLIME;
+    ctx.fill();
+    ctx.clip();
+    ctx.fillStyle = SF_LIT; // its crown catching the light
+    ctx.beginPath();
+    ctx.ellipse(hx - hrx * 0.25, hy - hry * 0.45, hrx * 0.55, hry * 0.35, -0.2, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = SF_DARK; // and the underside in shadow
+    ctx.beginPath();
+    ctx.ellipse(hx, hy + hry * 0.85, hrx * 1.05, hry * 0.5, 0, 0, TAU);
+    ctx.fill();
+    // Fresh sludge running down it.
+    for (const [x0, y0, x1, y1] of [[-60, -40, -66, 4], [30, -60, 26, -18], [70, -30, 76, 10], [-20, -70, -26, -36]]) {
+      seg(ctx, hx + x0 * (hrx / 108), hy + (y0 + 22) * (hry / 62), hx + x1 * (hrx / 108), hy + (y1 + 22) * (hry / 62), 1.6, 0.8, SLUDGE_OOZE);
+    }
+    ctx.restore();
+
+    // Shoulders heaving up either side.
+    for (const side of [-1, 1] as const) {
+      const s = sludgeFatherShoulder(p.rise, side);
+      const r = lerp(14, side < 0 ? 42 : 40);
+      ctx.fillStyle = SF_SLIME;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y - breathe, r, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = SF_LIT;
+      ctx.beginPath();
+      ctx.ellipse(s.x - r * 0.25, s.y - r * 0.4 - breathe, r * 0.5, r * 0.3, -0.3, 0, TAU);
+      ctx.fill();
+    }
+
+    // A raw red wound torn across the left shoulder, glowing.
+    if (e > 0.35) {
+      const ls = sludgeFatherShoulder(p.rise, -1);
+      const k = (e - 0.35) / 0.65;
+      seg(ctx, ls.x - 18 * k, ls.y - 18 * k, ls.x + 8 * k, ls.y + 4 * k, 3.4 * k, 2 * k, SF_WOUND);
+      seg(ctx, ls.x - 12 * k, ls.y - 12 * k, ls.x + 3 * k, ls.y + 0.5 * k, 1.4 * k, 0.8 * k, SF_WOUND_LIT);
+    }
+
+    // Small pustule-eyes studding the hump, opening one by one.
+    const pus: number[][] = [[-50, -44], [-28, -58], [8, -62], [36, -48], [-68, -20], [58, -26], [-8, -38]];
+    pus.forEach(([px, py], i) => {
+      const open = Math.max(0, Math.min(1, (e - 0.45 - i * 0.05) / 0.2));
+      if (open <= 0) return;
+      const x = hx + px * (hrx / 108);
+      const y = hy + (py + 22) * (hry / 62);
+      const pulse = 0.75 + 0.25 * Math.sin(p.time * 3 + i * 1.7);
+      ctx.fillStyle = SF_DEEP;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 3.6, 2.4, 0, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = SF_EYE;
+      ctx.globalAlpha = open * pulse;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 2.4 * open, 1.5 * open, 0, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  // The head, sunk low and thrust forward between the arms.
+  const h = sludgeFatherHead(p);
+  if (h.r > 1) {
+    const r = h.r;
+    const s = r / 30;
+    // Crown of dripping lumps along the top of the skull.
+    lumps(
+      [[-20, -18, 8], [-10, -26, 9], [2, -29, 10], [14, -25, 9], [22, -16, 8]].map(([x, y, rr]) => [h.x + x * s, h.y + y * s, rr * s]),
+      SF_SLIME,
+    );
+    ctx.fillStyle = SF_SLIME;
+    ctx.beginPath();
+    ctx.ellipse(h.x, h.y, r * 1.08, r, 0, 0, TAU);
+    ctx.fill();
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(h.x, h.y, r * 1.08, r, 0, 0, TAU);
+    ctx.clip();
+    ctx.fillStyle = SF_LIT;
+    ctx.beginPath();
+    ctx.ellipse(h.x - r * 0.3, h.y - r * 0.55, r * 0.6, r * 0.35, -0.2, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = SF_DARK;
+    ctx.beginPath();
+    ctx.ellipse(h.x, h.y + r * 0.95, r * 1.2, r * 0.45, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // The maw: a dark slit at rest, gaping wide with the roar.
+    const jaw = p.roar;
+    const mwx = h.x + p.look * 2 * s;
+    const mwy = h.y + (12 + jaw * 3) * s;
+    const mrx2 = (13 + jaw * 4) * s;
+    const mry2 = (2.6 + jaw * 10) * s;
+    ctx.fillStyle = SF_MAW;
+    ctx.beginPath();
+    ctx.ellipse(mwx, mwy, mrx2, mry2, 0, 0, TAU);
+    ctx.fill();
+    if (jaw > 0.1) {
+      ctx.fillStyle = SF_THROAT;
+      ctx.beginPath();
+      ctx.ellipse(mwx, mwy + mry2 * 0.2, mrx2 * 0.55, mry2 * 0.55, 0, 0, TAU);
+      ctx.fill();
+    }
+    const edge = (x: number) => mry2 * Math.sqrt(Math.max(0, 1 - ((x - mwx) / mrx2) ** 2));
+    ctx.fillStyle = SF_TOOTH;
+    ctx.beginPath();
+    for (let i = 0; i < 7; i++) {
+      const tx = mwx + (i - 3) * mrx2 * 0.27;
+      const l = (i % 2 === 0 ? 3.2 : 2) * s * (0.6 + jaw * 0.6);
+      const ty = mwy - edge(tx) + 0.3;
+      ctx.moveTo(tx - 1.1 * s, ty);
+      ctx.lineTo(tx + 1.1 * s, ty);
+      ctx.lineTo(tx, ty + l);
+      ctx.closePath();
+      if (i > 0 && i < 6) {
+        const by = mwy + edge(tx) - 0.3;
+        ctx.moveTo(tx - 1 * s, by);
+        ctx.lineTo(tx + 1 * s, by);
+        ctx.lineTo(tx, by - l * 0.8);
+        ctx.closePath();
+      }
+    }
+    ctx.fill();
+    // Slaver strung across the jaws, and drool running off the chin.
+    ctx.strokeStyle = SLUDGE_OOZE;
+    ctx.lineWidth = 0.8 * s;
+    ctx.beginPath();
+    ctx.moveTo(mwx - mrx2 * 0.5, mwy - mry2 * 0.8);
+    ctx.quadraticCurveTo(mwx - mrx2 * 0.6, mwy, mwx - mrx2 * 0.45, mwy + mry2 * 0.85);
+    ctx.moveTo(mwx + mrx2 * 0.35, mwy - mry2 * 0.85);
+    ctx.quadraticCurveTo(mwx + mrx2 * 0.45, mwy, mwx + mrx2 * 0.3, mwy + mry2 * 0.9);
+    ctx.stroke();
+    drip(mwx - 4 * s, mwy + mry2 - 0.5, grow(9 * s, 0.1), 1.6 * s, SLUDGE_OOZE);
+    drip(mwx + 6 * s, mwy + mry2 - 0.5, grow(6 * s, 0.55), 1.3 * s, SLUDGE_OOZE);
+
+    // Heavy brow ridge in a V, and two great eyes glaring out under it.
+    const ex = h.x + p.look * 3 * s;
+    const ey = h.y - 5 * s;
+    ctx.fillStyle = SF_DARK;
+    ctx.beginPath();
+    ctx.moveTo(ex - 22 * s, ey - 9 * s);
+    ctx.lineTo(ex, ey - 2 * s);
+    ctx.lineTo(ex + 22 * s, ey - 9 * s);
+    ctx.lineTo(ex + 21 * s, ey - 4.5 * s);
+    ctx.lineTo(ex, ey + 2 * s);
+    ctx.lineTo(ex - 21 * s, ey - 4.5 * s);
+    ctx.closePath();
+    ctx.fill();
+    const open = Math.max(0, Math.min(1, (e - 0.55) / 0.25));
+    if (open > 0) {
+      const flare = 1 + jaw * 0.35;
+      for (const side of [-1, 1]) {
+        ctx.fillStyle = SF_DEEP;
+        ctx.beginPath();
+        ctx.ellipse(ex + side * 11 * s, ey + 1 * s, 7 * s, 4.4 * s, side * 0.32, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = SF_EYE;
+        ctx.beginPath();
+        ctx.ellipse(ex + side * 11 * s, ey + 1 * s, 5.6 * s * flare, 3 * s * open * flare, side * 0.32, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = SF_EYE_CORE;
+        ctx.beginPath();
+        ctx.arc(ex + side * 10 * s + p.look * 1.5 * s, ey + 1 * s, 1.4 * s * open, 0, TAU);
+        ctx.fill();
+      }
+    }
+    glints([[h.x - r * 0.4, h.y - r * 0.6, 3 * s], [h.x + r * 0.5, h.y - r * 0.3, 2 * s]]);
+  }
+
+  if (e > 0.02) glints([[-40 * e, -60 * e, 4], [40 * e, -36 * e, 3], [-86 * e, -10 * e, 3]]);
+  ctx.restore();
+}
+
+/** One of the Sludge Father's arms (see `drawSludgeArm`), in its local space. */
+export interface SludgeArmPose {
+  /** Where the arm comes out of the pool or the body. */
+  root: { x: number; y: number };
+  /** The palm. */
+  hand: { x: number; y: number };
+  /** Sideways bow of the arm (px, along its left-hand perpendicular). */
+  bulge: number;
+  /** 0..1: how wide the fingers splay. */
+  spread: number;
+  /** Planted flat on the floor (fingers splayed forward, squashed in depth). */
+  planted: boolean;
+  /** Seconds, for the drips. */
+  time: number;
+  /** Overall thickness scale. */
+  size: number;
+}
+
+/** The point and its tangent `t` of the way along an arm's bow. */
+function sludgeArmAt(a: SludgeArmPose, t: number): { x: number; y: number; dx: number; dy: number } {
+  const mx = (a.root.x + a.hand.x) / 2;
+  const my = (a.root.y + a.hand.y) / 2;
+  const len = Math.hypot(a.hand.x - a.root.x, a.hand.y - a.root.y) || 1;
+  const cx = mx + (-(a.hand.y - a.root.y) / len) * a.bulge;
+  const cy = my + ((a.hand.x - a.root.x) / len) * a.bulge;
+  const u = 1 - t;
+  return {
+    x: u * u * a.root.x + 2 * u * t * cx + t * t * a.hand.x,
+    y: u * u * a.root.y + 2 * u * t * cy + t * t * a.hand.y,
+    dx: 2 * u * (cx - a.root.x) + 2 * t * (a.hand.x - cx),
+    dy: 2 * u * (cy - a.root.y) + 2 * t * (a.hand.y - cy),
+  };
+}
+
+/**
+ * An arm of the Sludge Father: a thick, dripping tube of sludge bowing from its
+ * root to a huge hand — a lumpy palm with four splayed fingers and a thumb that
+ * run into drips while it is raised, and splay flat over the floor once planted.
+ */
+export function drawSludgeArm(ctx: CanvasRenderingContext2D, a: SludgeArmPose): void {
+  const TAU = Math.PI * 2;
+  const { drip, glints, grow } = sludgeKit(ctx, a.time * 5, SF_SLIME);
+  const k = a.size;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  // The tube, thinning from the root to the wrist.
+  const N = 14;
+  let prev = sludgeArmAt(a, 0);
+  for (let i = 1; i <= N; i++) {
+    const t = i / N;
+    const q = sludgeArmAt(a, t);
+    const r0 = (17 - 6 * ((i - 1) / N)) * k;
+    const r1 = (17 - 6 * t) * k;
+    seg(ctx, prev.x, prev.y, q.x, q.y, r0, r1, i % 4 === 0 ? SF_DARK : SF_SLIME);
+    prev = q;
+  }
+  // Lit ridge and fresh runs along it.
+  for (let i = 2; i < N - 1; i += 3) {
+    const q = sludgeArmAt(a, i / N);
+    ctx.fillStyle = SF_LIT;
+    ctx.beginPath();
+    ctx.ellipse(q.x - 4 * k, q.y - 5 * k, 6 * k, 3.4 * k, Math.atan2(q.dy, q.dx), 0, TAU);
+    ctx.fill();
+  }
+  // Drips hanging off the underside while the arm is up.
+  if (!a.planted) {
+    [0.3, 0.55, 0.78].forEach((t, i) => {
+      const q = sludgeArmAt(a, t);
+      drip(q.x + 4 * k, q.y + 10 * k, grow(9 * k, 0.2 + i * 0.3), 2 * k);
+    });
+  }
+
+  // The hand: a lumpy palm, four fingers and a thumb.
+  const end = sludgeArmAt(a, 1);
+  const dir = Math.atan2(end.dy, end.dx);
+  const depth = a.planted ? 0.55 : 1;
+  const fingers: [number, number, number][] = [
+    [-0.72, 15, 4.4],
+    [-0.24, 18, 4.8],
+    [0.24, 17, 4.6],
+    [0.7, 14, 4.2],
+  ];
+  const fanned = (off: number) => dir + off * (0.6 + 0.6 * a.spread);
+  for (const [off, len, w] of fingers) {
+    const ang = fanned(off);
+    const fx = a.hand.x + Math.cos(ang) * (10 + len) * k;
+    const fy = a.hand.y + Math.sin(ang) * (10 + len) * k * depth;
+    seg(ctx, a.hand.x + Math.cos(ang) * 8 * k, a.hand.y + Math.sin(ang) * 8 * k * depth, fx, fy, w * k, w * 0.7 * k, SF_SLIME);
+    if (!a.planted) drip(fx, fy + w * 0.4 * k, grow(7 * k, off + 0.5), 1.6 * k);
+  }
+  const thumb = dir - 1.45 * (0.7 + 0.3 * a.spread);
+  seg(
+    ctx,
+    a.hand.x + Math.cos(thumb) * 6 * k,
+    a.hand.y + Math.sin(thumb) * 6 * k * depth,
+    a.hand.x + Math.cos(thumb) * 20 * k,
+    a.hand.y + Math.sin(thumb) * 20 * k * depth,
+    5 * k,
+    3.6 * k,
+    SF_SLIME,
+  );
+  ctx.fillStyle = SF_SLIME;
+  ctx.beginPath();
+  ctx.ellipse(a.hand.x, a.hand.y, 14 * k, 14 * k * (a.planted ? 0.7 : 1), dir, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = SF_LIT; // knuckles catching the light
+  for (const [off] of fingers) {
+    const ang = fanned(off);
+    ctx.beginPath();
+    ctx.arc(a.hand.x + Math.cos(ang) * 10 * k - 1.5 * k, a.hand.y + Math.sin(ang) * 10 * k * depth - 1.5 * k, 2.6 * k, 0, TAU);
+    ctx.fill();
+  }
+  glints([[a.hand.x - 5 * k, a.hand.y - 6 * k, 3 * k], [prev.x, prev.y - 8 * k, 2.4 * k]]);
+  ctx.restore();
+}
+
 /**
  * Procedural Sergeant-at-Arms silhouette (`boss7`, the Market Square boss): the
  * Men-at-Arms' officer, drawn 1.35× as a heavier, gilded version of them. Gold-
@@ -3057,6 +4240,433 @@ export function drawSergeantAtArms(
 
   // Tower shield face-on toward us, braced a little higher to rally.
   if (!back) shieldFace(shieldX, shieldY, 4.4);
+
+  ctx.restore();
+  ctx.restore();
+}
+
+/**
+ * Procedural Captain Draven (`boss9`, the Sewers boss), drawn 1.3×: a knight of
+ * the royal army charging with the banner of Aetheria held high. Pale plate
+ * (the boss colour) under a knee-length navy surcoat with the gold star, a navy
+ * cape, a closed great helm ringed by a small gilt crown with a long white
+ * plume, a longsword sheathed at his hip, and the navy swallowtail banner with
+ * the gold star flying from a spear-tipped pole raised overhead. A fast,
+ * forward-leaning run (long stride, high knees); the banner streams back over
+ * his head in profile and out to the side in front and back views, flapping in
+ * step with the stride.
+ *
+ * `halt` (0..1) eases him out of the run into a braced stand (the cutscene's
+ * stop at the cistern), where `wave` (0..1, looping) keeps the banner moving.
+ * Same three authored views ('side' mirrored on `faceLeft`, 'front', 'back').
+ */
+export function drawDraven(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  view: 'side' | 'front' | 'back',
+  faceLeft: boolean,
+  phase: number,
+  halt = 0,
+  wave = 0,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (view === 'side' && faceLeft) ctx.scale(-1, 1);
+  ctx.scale(1.3, 1.3);
+
+  const h = Math.max(0, Math.min(1, halt));
+  const run = 1 - h;
+  const plate = color;
+  const plateLit = shade(color, 0.22);
+  const plateDark = shade(color, -0.3);
+  const plateDeep = shade(color, -0.48);
+  const cloth = '#25397a'; // the royal army's navy
+  const clothLit = shade(cloth, 0.18);
+  const clothDark = shade(cloth, -0.3);
+  const gold = '#e7b64a';
+  const goldLit = '#f8dc8a';
+  const plume = '#e9edf5';
+  const plumeDark = '#b7c0d0';
+  const wood = '#5a4634';
+  const leather = '#4a3020';
+  const slit = '#16121c';
+  const legs: LegLook = { cloth: plateDark, boot: plateDeep, w: 4, bootUp: 0.85, knee: plateLit, toe: 2.8 };
+
+  const ph = phase * run;
+  const bob = Math.abs(Math.sin(ph)) * run;
+  const swing = Math.sin(ph);
+  // Banner flutter: locked to the stride on the run, a looping wave at a halt.
+  const flap = h > 0 ? wave : (((phase / (Math.PI * 2)) % 1) + 1) % 1;
+  const flapAmp = 1 + run * 0.6;
+
+  /** A swallowtail flag flying off a pole at x0, `dir` -1 back (−x) or +1 out (+x). */
+  const flyingFlag = (x0: number, top: number, len: number, fh: number, dir: number) => {
+    const n = 8;
+    const edge = (t: number) => Math.sin((flap + t * 0.9) * Math.PI * 2) * flapAmp * t;
+    const X = (t: number) => x0 + dir * len * t;
+    ctx.fillStyle = cloth;
+    ctx.beginPath();
+    ctx.moveTo(x0, top);
+    for (let i = 1; i <= n; i++) ctx.lineTo(X(i / n), top + edge(i / n));
+    ctx.lineTo(X(0.78), top + fh * 0.55 + edge(0.78)); // the swallowtail notch
+    ctx.lineTo(X(1), top + fh + edge(1));
+    for (let i = n; i >= 0; i--) ctx.lineTo(X(i / n), top + fh + edge(i / n));
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = clothLit; // the hoist catching the light
+    ctx.fillRect(Math.min(x0, X(0.14)), top + 0.4, len * 0.14, fh - 0.6);
+    ctx.fillStyle = clothDark; // a fold riding the wave
+    ctx.beginPath();
+    ctx.ellipse(X(0.62), top + fh * 0.5 + edge(0.62), len * 0.07, fh * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = gold; // gold edging along the top and the hoist
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(x0, top + fh);
+    ctx.lineTo(x0, top);
+    for (let i = 1; i <= n; i++) ctx.lineTo(X(i / n), top + edge(i / n));
+    ctx.stroke();
+    fillStar8(ctx, X(0.34), top + fh * 0.5 + edge(0.34), fh * 0.32, gold);
+  };
+
+  /** The standard's pole from (bx,by) to (tx,ty), with a gold spear finial. */
+  const pole = (bx: number, by: number, tx: number, ty: number) => {
+    ctx.strokeStyle = wood;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(tx, ty);
+    ctx.stroke();
+    const a = Math.atan2(ty - by, tx - bx);
+    ctx.save();
+    ctx.translate(tx, ty);
+    ctx.rotate(a + Math.PI / 2);
+    ctx.fillStyle = gold;
+    ctx.beginPath();
+    ctx.arc(0, 0, 1.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = goldLit;
+    ctx.beginPath();
+    ctx.moveTo(0, -5.2);
+    ctx.lineTo(1.4, -1.3);
+    ctx.lineTo(-1.4, -1.3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  };
+
+  /** A small gilt crown ringing the helm at `y`, from x0 to x1, with points. */
+  const crown = (x0: number, x1: number, y: number, points: number[]) => {
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x0, y);
+    ctx.lineTo(x1, y);
+    ctx.stroke();
+    ctx.fillStyle = gold;
+    for (const px of points) {
+      ctx.beginPath();
+      ctx.moveTo(px - 0.8, y - 0.3);
+      ctx.lineTo(px, y - 2.2);
+      ctx.lineTo(px + 0.8, y - 0.3);
+      ctx.closePath();
+      ctx.fill();
+    }
+  };
+
+  if (view === 'side') {
+    // --- Profile (charging along the row, leaning into the run) ---
+    walkLegsSide(ctx, ph, { hipY: 4, footY: 12, stride: 2.4 + run * 1.8, look: legs, lift: 0.4 + run * 2 });
+
+    ctx.save();
+    ctx.translate(0, -bob * 1.3);
+    ctx.translate(0, 4);
+    ctx.rotate(run * 0.11); // the lean into the charge
+    ctx.translate(0, -4);
+
+    // Cape streaming back behind him.
+    capeSide(ctx, -0.8, -8.6, 15 - run * 2, 4.6 + run * 2, cloth, 0.3 + run * 0.7, gold);
+
+    // Far arm pumping with the stride.
+    arm(ctx, -0.6, -6.6, -2.4 - swing * 3.2, 0.4, { sleeve: plateDark, hand: plateDeep, w: 3, cuff: plateDeep }, -1.2);
+
+    // Plate showing at the back, then the navy surcoat to the knee.
+    torsoSide(ctx, {
+      color: cloth, lit: clothLit, dark: clothDark,
+      top: -9.6, waistY: 0.6, hemY: 8.2, chest: 6.2, back: 5.8, waist: 4.7, hemF: 6.2 + run * 0.6, hemB: 6.8 + run * 0.8,
+    });
+    ctx.strokeStyle = gold; // gilt hem
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(-6.8 - run * 0.8, 8.2);
+    ctx.quadraticCurveTo(0, 9.6, 6.2 + run * 0.6, 8);
+    ctx.stroke();
+    fillStar8(ctx, 3.4, -3.6, 2.4, gold);
+    belt(ctx, -5, 5.4, 0.9, leather, gold, 0.6, 1.5, 3.6);
+    // Longsword at the hip: the scabbard slanting back, the hilt forward.
+    seg(ctx, -0.6, 1.6, -9, 8.8, 0.9, 0.75, leather);
+    ctx.fillStyle = gold;
+    ctx.beginPath();
+    ctx.arc(-9, 8.8, 0.9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = gold; // cross-guard and grip
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(0.4, -0.4);
+    ctx.lineTo(-1.2, 3);
+    ctx.stroke();
+    ctx.strokeStyle = leather;
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(0, 1.2);
+    ctx.lineTo(2.2, -0.6);
+    ctx.stroke();
+    ctx.fillStyle = gold; // pommel
+    ctx.beginPath();
+    ctx.arc(2.4, -0.8, 0.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Gorget and the gilded pauldron.
+    ctx.fillStyle = plate;
+    ctx.beginPath();
+    ctx.ellipse(0.6, -9, 3.9, 1.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    pauldron(ctx, 0.6, -5.4, 3.8, plateDark, -0.1);
+    pauldron(ctx, 0.4, -7.4, 4.6, plate, -0.15);
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.ellipse(0.4, -7.4, 4.6, 3.2, -0.15, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.stroke();
+
+    // The long white plume streaming back off the crown.
+    ctx.fillStyle = plume;
+    ctx.beginPath();
+    ctx.moveTo(1.2, -18.6);
+    ctx.quadraticCurveTo(-3, -23 + run * 1.2, -11 - run * 2, -19.4 + run * 1.6);
+    ctx.quadraticCurveTo(-7, -17.6, -2.6, -17.6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = plumeDark;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -19.2);
+    ctx.quadraticCurveTo(-4, -20.6, -9, -18.8 + run * 0.8);
+    ctx.stroke();
+    // The great helm: a flat-topped barrel with a gold cross on its face.
+    ctx.fillStyle = plate;
+    ctx.beginPath();
+    ctx.moveTo(-4, -10.2);
+    ctx.lineTo(-4.4, -18.2);
+    ctx.quadraticCurveTo(0.4, -19, 5, -18.2);
+    ctx.lineTo(5.4, -10.4);
+    ctx.quadraticCurveTo(0.6, -9.4, -4, -10.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = plateLit;
+    ctx.fillRect(1.4, -17.6, 2.2, 6.8);
+    ctx.fillStyle = plateDark;
+    ctx.fillRect(-4, -17.4, 1.6, 7);
+    ctx.strokeStyle = slit; // the eye slit
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(1, -14.6);
+    ctx.lineTo(5.4, -14.6);
+    ctx.stroke();
+    ctx.strokeStyle = gold; // the cross down the face
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(4.9, -17.8);
+    ctx.lineTo(5.2, -10.8);
+    ctx.stroke();
+    ctx.fillStyle = slit; // breaths
+    for (const by of [-12.4, -11.4]) {
+      ctx.beginPath();
+      ctx.arc(3.6, by, 0.3, 0, Math.PI * 2);
+      ctx.arc(2.6, by, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    crown(-4.4, 5, -18.4, [-2.6, 0.4, 3.4]);
+
+    // The banner, raised high in the forward hand: the pole slants forward
+    // and the flag streams back over his head.
+    const hx = 4.8 + h * 0.4;
+    const hy = -16.6 + h * 1.2;
+    const dx = 0.12 * run + 0.02;
+    const len = Math.hypot(dx, 1);
+    const ux = dx / len;
+    const uy = -1 / len;
+    const top = { x: hx + ux * 21, y: hy + uy * 21 };
+    pole(hx - ux * 14, hy - uy * 14, top.x, top.y);
+    flyingFlag(top.x - 0.3, top.y + 1.8, 15 + run * 2, 9, -1);
+    arm(ctx, 1, -7, hx, hy, { sleeve: plate, hand: plateDeep, w: 3.2, cuff: gold }, 1.4);
+
+    ctx.restore();
+    ctx.restore();
+    return;
+  }
+
+  // --- Front / back (charging toward or away from the viewer) ---
+  const back = view === 'back';
+  walkLegsFront(ctx, ph, { hipY: 4, footY: 12, sep: 3.1, look: legs, back, lift: 0.6 + run * 2.4 });
+
+  ctx.save();
+  ctx.translate(0, -bob * 1.2);
+
+  // The banner rides high on his left: our right from the front, our left from
+  // behind, its flag flying out to that side.
+  const sideX = back ? -1 : 1;
+  const hx = sideX * 8.6;
+  const hy = -17 + h * 1;
+  const topY = hy - 22;
+  const banner = () => {
+    pole(hx, hy + 14, hx, topY);
+    flyingFlag(hx, topY + 1.8, 14, 9, sideX);
+  };
+
+  // Cape: behind the body from the front (its edges show), covering it from behind.
+  ctx.fillStyle = back ? cloth : clothDark;
+  ctx.beginPath();
+  ctx.moveTo(-6.4, -8.6);
+  ctx.quadraticCurveTo(-8.6 - run * 0.8, 1, -7.6 - run, 10.6);
+  ctx.quadraticCurveTo(0, 12, 7.6 + run, 10.6);
+  ctx.quadraticCurveTo(8.6 + run * 0.8, 1, 6.4, -8.6);
+  ctx.closePath();
+  ctx.fill();
+
+  if (!back) {
+    // Surcoat over plate, the gold star on his chest.
+    torsoFront(ctx, {
+      color: cloth, lit: clothLit, dark: clothDark,
+      top: -9.6, waistY: 0.6, hemY: 8.4, shoulder: 7.2, waist: 5, hem: 6.6,
+    });
+    fillStar8(ctx, 0, -3.8, 2.6, gold);
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(-6.6, 8.4);
+    ctx.quadraticCurveTo(0, 9.9, 6.6, 8.4);
+    ctx.stroke();
+    belt(ctx, -5, 5, 1.2, leather, gold, 0.8, 1.5);
+    // The sword's hilt at his left hip, under the banner arm.
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(sideX * 3.4, 0.6);
+    ctx.lineTo(sideX * 6, 0.2);
+    ctx.stroke();
+    seg(ctx, sideX * 4.8, 1.6, sideX * 6.4, 9.6, 0.8, 0.7, leather);
+  } else {
+    // From behind the cape covers him: the big gold star across its back.
+    fillStar8(ctx, 0, -1, 3.6, gold);
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(-7.6 - run, 10.6);
+    ctx.quadraticCurveTo(0, 12, 7.6 + run, 10.6);
+    ctx.stroke();
+  }
+
+  // Pauldrons, then the gorget.
+  for (const s of [-1, 1]) {
+    pauldron(ctx, s * 6.6, -5.2, 3.4, plateDark, s * 0.25);
+    pauldron(ctx, s * 6.4, -7, 4, back ? plateDark : plate, s * 0.25);
+  }
+  ctx.fillStyle = back ? plateDark : plate;
+  ctx.beginPath();
+  ctx.ellipse(0, -9, 3.9, 1.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // The free arm pumping with the stride.
+  arm(ctx, -sideX * 6.4, -6.6, -sideX * (8 + run * 0.6), 1.2 + swing * 1.6 * sideX, { sleeve: plateDark, hand: plateDeep, w: 3, cuff: plateDeep }, sideX * 0.8);
+
+  // The plume: fanning up behind the helm from the front, falling down the
+  // back of it from behind.
+  ctx.fillStyle = plume;
+  ctx.beginPath();
+  if (back) {
+    ctx.moveTo(-2.4, -18.8);
+    ctx.quadraticCurveTo(-3.4, -12, -1.6, -6.4);
+    ctx.lineTo(1.6, -6.4);
+    ctx.quadraticCurveTo(3.4, -12, 2.4, -18.8);
+  } else {
+    ctx.moveTo(-1.6, -18.4);
+    ctx.quadraticCurveTo(-5.4, -22.6, -3.6, -25);
+    ctx.quadraticCurveTo(0, -23.6, 2.6, -25.4);
+    ctx.quadraticCurveTo(4.4, -22, 1.6, -18.4);
+  }
+  ctx.closePath();
+  ctx.fill();
+  if (back) {
+    ctx.strokeStyle = plumeDark;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -18.4);
+    ctx.lineTo(0, -7);
+    ctx.stroke();
+  }
+
+  // The great helm: a flat-topped barrel; from the front its eye slit and gold
+  // cross, from behind plain plate with a seam.
+  ctx.fillStyle = back ? plateDark : plate;
+  ctx.beginPath();
+  ctx.moveTo(-4.6, -10.2);
+  ctx.lineTo(-4.8, -18.2);
+  ctx.quadraticCurveTo(0, -19.2, 4.8, -18.2);
+  ctx.lineTo(4.6, -10.2);
+  ctx.quadraticCurveTo(0, -9, -4.6, -10.2);
+  ctx.closePath();
+  ctx.fill();
+  if (back) {
+    ctx.strokeStyle = plateDeep;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(0, -18.6);
+    ctx.lineTo(0, -9.8);
+    ctx.stroke();
+    // The plume, drawn over the helm's back.
+    ctx.fillStyle = plume;
+    ctx.beginPath();
+    ctx.moveTo(-1.8, -18.6);
+    ctx.quadraticCurveTo(-2.6, -14, -1.4, -10.4);
+    ctx.lineTo(1.4, -10.4);
+    ctx.quadraticCurveTo(2.6, -14, 1.8, -18.6);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    ctx.fillStyle = plateLit;
+    ctx.fillRect(-3.2, -17.6, 2, 6.8);
+    ctx.fillStyle = plateDark;
+    ctx.fillRect(3, -17.4, 1.4, 6.8);
+    ctx.strokeStyle = slit; // eye slits either side of the cross
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-3.8, -14.6);
+    ctx.lineTo(-0.7, -14.6);
+    ctx.moveTo(0.7, -14.6);
+    ctx.lineTo(3.8, -14.6);
+    ctx.stroke();
+    ctx.strokeStyle = gold; // the gold cross
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(0, -18);
+    ctx.lineTo(0, -10.4);
+    ctx.moveTo(-1.8, -15.6);
+    ctx.lineTo(1.8, -15.6);
+    ctx.stroke();
+    ctx.fillStyle = slit; // breaths
+    for (const [bx, by] of [[-2.4, -12.2], [-1.6, -11.2], [2.4, -12.2], [1.6, -11.2]]) {
+      ctx.beginPath();
+      ctx.arc(bx, by, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  crown(-4.8, 4.8, -18.4, back ? [-2.8, 0, 2.8] : [-3, 0, 3]);
+
+  // The banner held high on his left.
+  banner();
+  arm(ctx, sideX * 6.4, -7, hx, hy, { sleeve: back ? plateDark : plate, hand: plateDeep, w: 3.2, cuff: gold }, -sideX * 1.2);
 
   ctx.restore();
   ctx.restore();
@@ -7215,7 +8825,9 @@ export function hasEnemySprite(id: string): boolean {
     id === 'cas_grunt' ||
     id === 'cas_grunt2' ||
     id === 'cap_grunt' ||
+    id === 'cap_grunt2' ||
     id === 'cap_runner' ||
+    id === 'cap_brute' ||
     id === 'cas_runner' ||
     id === 'cas_mage' ||
     id === 'cas_brute' ||
@@ -7226,7 +8838,8 @@ export function hasEnemySprite(id: string): boolean {
     id === 'boss5' ||
     id === 'boss6' ||
     id === 'boss7' ||
-    id === 'boss8'
+    id === 'boss8' ||
+    id === 'boss9'
   );
 }
 
@@ -7258,6 +8871,8 @@ export function drawEnemySprite(
   else if (id === 'cas_grunt') drawGrunt(ctx, color, view, faceLeft, p);
   else if (id === 'cas_grunt2') drawGrunt2(ctx, color, view, faceLeft, p);
   else if (id === 'cap_grunt') drawManAtArms(ctx, color, view, faceLeft, p);
+  else if (id === 'cap_grunt2') drawSludgeBrute(ctx, color, view, faceLeft, p);
+  else if (id === 'cap_brute') drawSludgeBehemoth(ctx, color, view, faceLeft, p);
   else if (id === 'cap_runner') drawBloodhound(ctx, color, view, faceLeft, p, sit);
   else if (id === 'cas_runner') drawOutrider(ctx, color, view, faceLeft, p);
   else if (id === 'cas_mage') drawRoyalMage(ctx, color, view, faceLeft, p);
@@ -7266,6 +8881,7 @@ export function drawEnemySprite(
   else if (id === 'boss6') drawRoland(ctx, color, view, faceLeft, p);
   else if (id === 'boss7') drawSergeantAtArms(ctx, color, view, faceLeft, p, sit, flourish);
   else if (id === 'boss8') drawHoundMaster(ctx, color, view, faceLeft, p, sit);
+  else if (id === 'boss9') drawDraven(ctx, color, view, faceLeft, p, sit, flourish);
 }
 
 /**
@@ -7281,10 +8897,13 @@ const ENEMY_CADENCE: Record<string, number> = {
   boss6: 0.2,
   boss7: 0.17,
   boss8: 0.17,
+  boss9: 0.16,
   cas_grunt: 0.22,
   cas_grunt2: 0.2,
   cap_grunt: 0.19,
+  cap_grunt2: 0.17,
   cap_runner: 0.24,
+  cap_brute: 0.15,
   cas_runner: 0.28,
   cas_mage: 0.2,
   cas_brute: 0.2,

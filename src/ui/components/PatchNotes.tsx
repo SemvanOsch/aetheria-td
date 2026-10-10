@@ -20,6 +20,18 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-10-10 · The Sludge Father',
+    changes: [
+      'New boss, Captain Draven (The Sewers): a royal knight who cannot be killed. Your hits land, but his health never drops below 1. You win the stage when he reaches the cistern.',
+      'The Sewers now ends with a cutscene: Draven halts at the cistern as it bubbles and rumbles, and the other foes flee. A huge hand of sludge bursts out and crushes him. Then the Sludge Father drags itself out of the water and roars, and your champions escape through the far tunnel. The Sludge Father stays in the cistern behind the result card. Skip it with the Skip button, Escape, Enter or Space.',
+      'The Sewers’ cistern channel opens from the first wave now, and foes that spawn there rise out of the water with a splash before they wade onto the path.',
+      'Two new sludge foes are on their way to the Sewers: the Sludgeborn, a heap of sewer sludge that regenerates 4% of its health every second, and the Sludge Behemoth, a towering, slow mass of sludge that regenerates 3% every second.',
+      'The bestiary now lists Regeneration and Unkillable on a foe’s page.',
+      'The Sewers’ regular waves are still being worked on: for now only Captain Draven marches through it.',
+      'New sounds for foes surfacing from the water, and for the Sludge Father’s cutscene.',
+    ],
+  },
+  {
     version: '2026-10-10 · Flight from the Capital',
     changes: [
       'Four new Capital stages: Market Square, The Outskirts, The Sewers and The Getaway. The Sewers and The Getaway are still being built: for now they have placeholder waves and no boss yet.',

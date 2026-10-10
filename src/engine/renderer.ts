@@ -59,6 +59,7 @@ import { FEEDBACK, INK, LIGHT, ease, shade, tintRamp, withAlpha } from './palett
 import {
   THROW_ANIM_TIME,
   RISE_LIFT,
+  EMERGE_BACK,
   DODGE_ANIM_TIME,
   DODGE_DIST,
   DEATH_ANIM_TIME,
@@ -114,6 +115,8 @@ export interface BoardScene {
   hideTowers?: boolean;
   /** Indices into `level.decor` of props not to draw. */
   hiddenDecor?: ReadonlySet<number>;
+  /** Uids of foes the scene draws itself (or has done away with): left undrawn, bars and lights too. */
+  hiddenEnemies?: ReadonlySet<number>;
   actors?: SceneActor[];
   lights?: Light[];
 }
@@ -372,11 +375,11 @@ export function drawBoard(
   // 5. Overlays (unshaken, unlit).
   if (!ui.scene) drawLanternOverlays(ctx, engine, ui);
   if (!ui.scene?.hideTowers) drawTowerOverlays(ctx, engine);
-  drawEnemyOverlays(ctx, engine, ui);
+  drawEnemyOverlays(ctx, engine, ui, st);
   drawThrowCharge(ctx, engine, ui);
   drawSelectedAoe(ctx, engine, ui);
   drawFloaters(ctx, engine);
-  drawBossBars(ctx, engine);
+  drawBossBars(ctx, engine, ui.scene);
 }
 
 // ---------------------------------------------------------------------------
@@ -618,7 +621,7 @@ function drawWorld(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: Render
   list.length = 0;
   if (!scene?.hideTowers) for (const t of engine.towers) list.push({ k: 'tower', base: t.pos.y + 10, t });
   for (const e of engine.enemies) {
-    if (e.dead) continue;
+    if (e.dead || scene?.hiddenEnemies?.has(e.uid)) continue;
     list.push({ k: 'enemy', base: e.pos.y - footLiftFor(e.def.id) + e.def.radius * 0.7, e });
   }
   for (const c of st.vfx.corpses) list.push({ k: 'corpse', base: c.y + c.enemy.def.radius * 0.5, c });
@@ -839,15 +842,20 @@ function collectLights(engine: GameEngine, st: BoardState, time: number, scene?:
     out.push({ x: c.pos.x, y: c.pos.y, radius: c.radius * 1.6, family: 'holy', intensity: 0.8 * k });
   }
   for (const e of engine.enemies) {
-    if (e.dead) continue;
+    if (e.dead || scene?.hiddenEnemies?.has(e.uid)) continue;
     if (e.def.boss) {
       const pulse = 0.5 + 0.5 * Math.sin(time * 2.4);
-      const fam = e.def.id === 'boss4' ? 'dark' : 'blood';
+      // Gowzer's shadow, Captain Draven's royal gold, every other boss's blood red.
+      const fam = e.def.id === 'boss4' ? 'dark' : ROYAL_AURA.has(e.def.id) ? 'holy' : 'blood';
       out.push({ x: e.pos.x, y: e.pos.y, radius: 70 + 14 * pulse, family: fam, intensity: 0.35 + 0.15 * pulse, glow: 0.9 });
       // Gowzer's eyes glare gold out of the hood (gone once he falls).
       if (e.def.id === 'boss4' && !e.dying) out.push({ x: e.pos.x, y: e.pos.y - footLiftFor(e.def.id) - 15, radius: 16, family: 'holy', intensity: 0.5, glow: 0.5 });
     } else if (e.def.id === 'cas_mage') {
       out.push({ x: e.pos.x, y: e.pos.y - 10, radius: 40, family: 'arcane', intensity: 0.35 });
+    } else if (e.def.id === 'cap_grunt2' || e.def.id === 'cap_brute') {
+      // The sludge gives off a faint sickly glow in the dark of the tunnels.
+      const big = e.def.id === 'cap_brute';
+      out.push({ x: e.pos.x, y: e.pos.y - (big ? 9 : 6), radius: big ? 38 : 30, family: 'poison', intensity: big ? 0.28 : 0.25 });
     }
   }
   for (const ex of engine.baseExits) {
@@ -868,7 +876,9 @@ function collectLights(engine: GameEngine, st: BoardState, time: number, scene?:
  * the bar and its current/max HP reads inside it. Only shown once a boss has
  * actually spawned (a seated/hidden throne boss doesn't get a bar yet).
  */
-function drawBossBars(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
+function drawBossBars(ctx: CanvasRenderingContext2D, engine: GameEngine, scene?: BoardScene): void {
+  // No bars once a stage's ending has begun (a cutscene directs the board).
+  if (scene) return;
   const bosses = engine.enemies.filter((e) => e.def.boss && (e.rise ?? 0) === 0);
   if (bosses.length === 0) return;
 
@@ -1236,8 +1246,24 @@ export function championFigureStyle(engine: GameEngine, def: Tower['def']): Figu
   return style;
 }
 
+/**
+ * The finish a foe gets on this engine's board (bosses with their larger box)
+ * — for a cutscene drawing a foe as its own actor.
+ */
+export function foeFigureStyle(engine: GameEngine, def: Enemy['def']): FigureStyle {
+  return boardStyle(stateFor(engine), def.visual.color, def.boss);
+}
+
+/**
+ * The stage's figure finish for any other cutscene figure with accent `accent`
+ * (the Sludge Father): set its own `box`, `headY` and `feetY`.
+ */
+export function stageFigureStyle(engine: GameEngine, accent: string): FigureStyle {
+  return boardStyle(stateFor(engine), accent, true);
+}
+
 /** Soft contact shadow pooled under a figure's feet (local origin = figure). */
-function contactShadow(ctx: CanvasRenderingContext2D, y: number, rx: number, ry: number, alpha = 1): void {
+export function contactShadow(ctx: CanvasRenderingContext2D, y: number, rx: number, ry: number, alpha = 1): void {
   const g = ctx.createRadialGradient(0, y, 0, 0, y, rx);
   g.addColorStop(0, `rgba(8,5,14,${0.55 * alpha})`);
   g.addColorStop(0.55, `rgba(8,5,14,${0.32 * alpha})`);
@@ -1729,6 +1755,85 @@ function drawMoraleGlow(ctx: CanvasRenderingContext2D, stacks: number): void {
  * (origin at the shadow centre); `r` is the enemy's board radius so the halo
  * scales with the foe. Non-stacking, so a single fixed intensity.
  */
+/** Foes that march under a royal aura (Captain Draven). */
+const ROYAL_AURA = new Set(['boss9']);
+const AURA_GOLD = LIGHT.holy.glow;
+const AURA_CORE = '#fff3c4';
+const AURA_MOTES = 7;
+const AURA_GLINTS = 6;
+
+/**
+ * A commander's royal aura (Captain Draven), drawn about his feet in his ground
+ * space (origin = his position, feet ≈ `r` × 0.65 below it): a warm gold glow
+ * pooled under him that breathes, a ring of small gold star-glints turning
+ * slowly round his feet, and motes of gold drifting up around him. Each orbit
+ * is split by depth like the Guiding Gale: the `back` layer (before the figure)
+ * holds the glow and the half of each orbit behind him, the `front` layer
+ * (after it) the half passing in front. `t` in seconds.
+ */
+export function drawRoyalAura(ctx: CanvasRenderingContext2D, r: number, t: number, layer: 'back' | 'front'): void {
+  const fy = r * 0.65;
+  const pulse = 0.5 + 0.5 * Math.sin(t * 2.2);
+  const front = layer === 'front';
+  ctx.save();
+  if (!front) {
+    // The glow pooled at his feet.
+    const g = ctx.createRadialGradient(0, fy, 0, 0, fy, r * 1.35);
+    g.addColorStop(0, withAlpha(AURA_GOLD, 0.34 + 0.14 * pulse));
+    g.addColorStop(0.55, withAlpha(AURA_GOLD, 0.14 + 0.06 * pulse));
+    g.addColorStop(1, withAlpha(AURA_GOLD, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(0, fy, r * 1.35, r * 0.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = withAlpha(AURA_GOLD, 0.22 + 0.16 * pulse);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(0, fy, r * 1.08, r * 0.44, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'lighter';
+  // Star-glints turning round his feet on the ring.
+  for (let k = 0; k < AURA_GLINTS; k++) {
+    const a = t * 0.55 + (k / AURA_GLINTS) * Math.PI * 2;
+    if (Math.sin(a) > 0 !== front) continue;
+    const px = Math.cos(a) * r * 1.08;
+    const py = fy + Math.sin(a) * r * 0.44;
+    const tw = 0.55 + 0.45 * Math.sin(t * 4 + k * 1.9);
+    const s = 1.6 + 1.2 * tw;
+    ctx.fillStyle = withAlpha(AURA_CORE, 0.55 * tw);
+    ctx.beginPath();
+    ctx.moveTo(px, py - s);
+    ctx.lineTo(px + s * 0.3, py - s * 0.3);
+    ctx.lineTo(px + s, py);
+    ctx.lineTo(px + s * 0.3, py + s * 0.3);
+    ctx.lineTo(px, py + s);
+    ctx.lineTo(px - s * 0.3, py + s * 0.3);
+    ctx.lineTo(px - s, py);
+    ctx.lineTo(px - s * 0.3, py - s * 0.3);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // Motes of gold rising round him, fading in low and out high.
+  for (let i = 0; i < AURA_MOTES; i++) {
+    const u = (((t / 2.4 + i / AURA_MOTES) % 1) + 1) % 1;
+    const a = i * 2.4 + t * 0.7;
+    if (Math.sin(a) > 0 !== front) continue;
+    const px = Math.cos(a) * r * (0.85 - 0.25 * u);
+    const py = fy + Math.sin(a) * r * 0.35 - u * r * 2.4;
+    const alpha = Math.sin(Math.PI * u) * 0.75;
+    ctx.fillStyle = withAlpha(AURA_GOLD, alpha * 0.45);
+    ctx.beginPath();
+    ctx.arc(px, py, 2.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = withAlpha(AURA_CORE, alpha);
+    ctx.beginPath();
+    ctx.arc(px, py, 1.1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 function drawWardGlow(ctx: CanvasRenderingContext2D, r: number): void {
   const osc = moralePulse(); // 0..1 — share the morale oscillator for a matched pulse
   ctx.save();
@@ -2016,7 +2121,9 @@ const GOWZER_FOOT_LIFT = 6; // Gowzer's slight 1.15× frame
 const ROLAND_FOOT_LIFT = 9; // Captain Roland's 1.3× mounted frame
 const SERGEANT_FOOT_LIFT = 10; // the Sergeant-at-Arms' 1.35× frame
 const HOUND_MASTER_FOOT_LIFT = 9; // the Hound Master's 1.3× frame
-function footLiftFor(id: string): number {
+const DRAVEN_FOOT_LIFT = 9; // Captain Draven's 1.3× frame
+export function footLiftFor(id: string): number {
+  if (id === 'boss9') return DRAVEN_FOOT_LIFT;
   if (id === 'boss5') return KING_FOOT_LIFT;
   if (id === 'boss1') return CAPTAIN_FOOT_LIFT;
   if (id === 'boss2') return MERCENARY_FOOT_LIFT;
@@ -2078,9 +2185,14 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
   // A boss rising off its throne is drawn lifted (its seat height above the
   // path) easing to 0 as it stands. A tall sprite also gets a fixed foot-lift
   // so its feet/shadow rest on the path centreline instead of below it.
-  const lift = RISE_LIFT * (e.rise ?? 0);
+  // A foe surfacing out of a pool (an `emerge` lane) instead starts sunk below
+  // the water and rises through the surface, clipped at the waterline.
+  const surfacing = e.riseFrom === 'water' && (e.rise ?? 0) > 0;
+  const lift = surfacing ? 0 : RISE_LIFT * (e.rise ?? 0);
+  const sink = surfacing ? (1 - ease.inOutSine(1 - e.rise)) * R * EMERGE_SINK : 0;
   const groundY = e.pos.y - footLiftFor(e.def.id);
-  const y = groundY - lift;
+  const y = groundY - lift + sink;
+  const waterline = groundY + EMERGE_WATERLINE;
 
   // Dodge weave: sidestep perpendicular to travel and spring back.
   let dodgeX = 0;
@@ -2097,9 +2209,19 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
   ctx.save();
   ctx.translate(x + dodgeX + rc.dx * 0.5, groundY + dodgeY + rc.dy * 0.5);
   if ((e.wardReduction ?? 0) > 0) drawWardGlow(ctx, R);
-  contactShadow(ctx, R * 0.7, R * (1 - 0.25 * (e.rise ?? 0)), R * 0.42, boss ? 1.1 : 0.9);
+  if (surfacing) drawSurfaceRipples(ctx, R, 1 - e.rise, EMERGE_WATERLINE);
+  else contactShadow(ctx, R * 0.7, R * (1 - 0.25 * (e.rise ?? 0)), R * 0.42, boss ? 1.1 : 0.9);
+  const aura = ROYAL_AURA.has(e.def.id);
+  if (aura) drawRoyalAura(ctx, R, now() / 1000, 'back');
   ctx.restore();
 
+  ctx.save();
+  if (surfacing) {
+    // Only what has broken the surface shows.
+    ctx.beginPath();
+    ctx.rect(x - 80, waterline - 160, 160, 160);
+    ctx.clip();
+  }
   ctx.save();
   ctx.translate(x + dodgeX + rc.dx, y + dodgeY + dodgeHop + rc.dy);
   {
@@ -2117,9 +2239,12 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
       style.ink = INK.threat;
       style.glow = 2;
     }
-    // A rising boss shouldn't throw a long sun shadow off the throne.
+    // A rising boss shouldn't throw a long sun shadow off the throne (nor a
+    // foe still half under water).
     if ((e.rise ?? 0) > 0) style.cast = undefined;
-    const rising = (e.rise ?? 0) > 0;
+    // The throne-rise blends the pose each frame, so it skips the cache; a foe
+    // surfacing from water just walks in place and stays cacheable.
+    const rising = (e.rise ?? 0) > 0 && !surfacing;
     const sf = strideFrame(e.def.id, e.dist);
     const left = e.heading.x < 0;
     // A speaking boss with a taunt pose (Gowzer) straightens up and twirls a
@@ -2135,7 +2260,7 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
     const cower = Math.round((e.cower ?? 0) * 6) / 6;
     // A summoner (the Hound Master) lifts his whistle, quantized to 8 steps.
     const call = Math.round(summonPose(e) * 8) / 8;
-    const pose = taunting ? 1 : rally > 0 ? rally : call > 0 ? call : cower > 0 ? cower : (e.rise ?? 0);
+    const pose = taunting ? 1 : rally > 0 ? rally : call > 0 ? call : cower > 0 ? cower : surfacing ? 0 : (e.rise ?? 0);
     const flourish = taunting ? twirl : snap;
     paintFigure(
       ctx,
@@ -2163,6 +2288,94 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
     ctx.fillText(e.def.visual.icon, 0, 1);
   }
   ctx.restore();
+  ctx.restore();
+  if (aura) {
+    ctx.save();
+    ctx.translate(x + dodgeX + rc.dx * 0.5, groundY + dodgeY + rc.dy * 0.5);
+    drawRoyalAura(ctx, R, now() / 1000, 'front');
+    ctx.restore();
+  }
+  if (surfacing) drawSurfaceCollar(ctx, x + dodgeX, waterline, R, 1 - e.rise);
+  else if (e.riseFrom === 'water' && e.dist < 0) {
+    // Up, and wading the last stretch of the pool to its rim: the water still
+    // swirls about its feet, thinning out as it reaches the path.
+    drawSurfaceCollar(ctx, x + dodgeX, waterline, R, 0.35 + 0.65 * (1 + e.dist / EMERGE_BACK));
+  }
+}
+
+// A foe surfacing from a pool starts sunk R × EMERGE_SINK below the water (its
+// whole figure under) and the surface sits EMERGE_WATERLINE px below its
+// position: where its feet rest once it stands on the path.
+const EMERGE_SINK = 2.6;
+const EMERGE_WATERLINE = 12.5;
+const POOL_FOAM = '#a9bf6a';
+const POOL_RIPPLE = '#7f9a4a';
+
+/**
+ * Ripples spreading on the water around a surfacing foe (`u` 0→1 through its
+ * rise), drawn under it in its ground space: two rings looping outward, fading
+ * as it finishes climbing out. The origin is the foe's position.
+ */
+function drawSurfaceRipples(ctx: CanvasRenderingContext2D, R: number, u: number, wy: number): void {
+  const t = now() / 1000;
+  ctx.save();
+  ctx.lineWidth = 1.1;
+  for (let i = 0; i < 2; i++) {
+    const k = (t * 0.9 + i * 0.5) % 1;
+    const r = R * (0.6 + k * 0.95); // kept small enough to stay on the water
+    ctx.globalAlpha = (1 - k) * (1 - u * 0.8) * 0.55;
+    ctx.strokeStyle = POOL_RIPPLE;
+    ctx.beginPath();
+    ctx.ellipse(0, wy, r, r * 0.32, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
+ * The foam collar where a surfacing foe's body breaks the water: a churned ring
+ * that widens as more of the body comes up, then thins out as it steps clear.
+ */
+function drawSurfaceCollar(ctx: CanvasRenderingContext2D, x: number, wy: number, R: number, u: number): void {
+  const w = R * (0.45 + 0.45 * ease.outCubic(Math.min(1, u * 2.5)));
+  ctx.save();
+  ctx.globalAlpha = 0.75 * (1 - ease.inCubic(u));
+  ctx.fillStyle = withAlpha(POOL_RIPPLE, 0.5);
+  ctx.beginPath();
+  ctx.ellipse(x, wy, w * 1.15, w * 0.34, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = POOL_FOAM;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.ellipse(x, wy, w, w * 0.3, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Whether a foe is out of sight inside a doorway (a tunnel arch, a castle gate,
+ * the sewer mouth): a standing prop is drawn in front of it (the same depth
+ * test `drawWorld` sorts by) and covers its position. A prop that fades to let
+ * figures behind it show (`occludes`) only hides a foe walking through its own
+ * cells, where it stays solid. Off the board's edge counts too, for a lane that
+ * starts beyond it.
+ */
+function inDoorway(engine: GameEngine, st: BoardState, e: Enemy): boolean {
+  const { x, y } = e.pos;
+  if (y < 0 || x < 0 || x > BOARD_WIDTH || y > BOARD_HEIGHT) return true;
+  const decor = engine.level.decor;
+  if (!decor) return false;
+  const key = cellKey(Math.floor(x / TILE), Math.floor(y / TILE));
+  const base = y - footLiftFor(e.def.id) + e.def.radius * 0.7;
+  return decor.some((p, i) => {
+    const meta = PROP_META[p.kind];
+    if (meta.layer !== 'standing') return false;
+    const a = propAnchor(p.col, p.row);
+    if (base >= a.y + meta.base) return false; // drawn behind the foe
+    if (meta.occludes && !st.propCells[i]?.has(key)) return false; // fades to show it
+    const [x0, y0, x1, y1] = meta.bounds;
+    return x > a.x + x0 && x < a.x + x1 && y > a.y + y0 && y < a.y + y1;
+  });
 }
 
 /**
@@ -2170,11 +2383,16 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
  * dark room. A full-health rank-and-file foe shows no bar at all — the board
  * stays calm until something is actually taking damage.
  */
-function drawEnemyOverlays(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: RenderUiState): void {
+function drawEnemyOverlays(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: RenderUiState, st: BoardState): void {
   for (const e of engine.enemies) {
-    if (e.dead || e.dying) continue;
+    if (e.dead || e.dying || ui.scene?.hiddenEnemies?.has(e.uid)) continue;
+    // Still inside a tunnel arch or gate it is walking through: the figure is
+    // hidden behind the prop, so its bar and shield pips stay hidden too.
+    if (inDoorway(engine, st, e)) continue;
+    // Still under water: no bar or pips floating over the pool yet.
+    if (e.riseFrom === 'water' && (e.rise ?? 0) > 0) continue;
     const R = e.def.radius;
-    const y = e.pos.y - footLiftFor(e.def.id) - RISE_LIFT * (e.rise ?? 0);
+    const y = e.pos.y - footLiftFor(e.def.id) - (e.riseFrom === 'water' ? 0 : RISE_LIFT * (e.rise ?? 0));
     let dodgeX = 0;
     if ((e.dodge ?? 0) > 0) dodgeX = -e.heading.y * Math.sin(Math.PI * (1 - e.dodge / DODGE_ANIM_TIME)) * DODGE_DIST;
     const pct = Math.max(0, e.health / e.def.health);

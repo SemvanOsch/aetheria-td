@@ -69,6 +69,20 @@ export interface EnemyDef {
    */
   shieldHits?: number;
   /**
+   * Regeneration (the Sludge Brute): heals this fraction of its max health per
+   * second, e.g. 0.02 = 2%/s. Ticked continuously every frame (not once a
+   * second), so the health bar refills smoothly. Never above max health.
+   * Omitted or 0 means no regeneration.
+   */
+  regen?: number;
+  /**
+   * Can't die (Captain Draven, who is never meant to fall to the player): hits
+   * land as usual, but at the damage choke point its health never drops below
+   * 1. Such a boss is ended by its stage instead (see `LevelDef.bossHaltAt`).
+   * Omitted for mortals.
+   */
+  unkillable?: boolean;
+  /**
    * Rally (the Sergeant-at-Arms): every `every` seconds this enemy halts for
    * `duration` seconds and raises its standard; `at` (0-1) of the way in, every
    * *other* living enemy on the board gains `shield` shield points (see
@@ -170,23 +184,25 @@ export interface EnemyVisual {
 // --- Regular enemies, three archetypes per section --------------------------
 // Archetypes: grunt (balanced), runner (fast), brute (slow/tanky).
 const REGULAR: Record<string, EnemyDef> = {
-  // Castle — disciplined rebels and siege beasts.
+  // Castle
   cas_grunt: { id: 'cas_grunt', name: 'Footman', health: 60, speed: 46, reward: 2, mana: 1, damageToBase: 1, visual: { color: '#b3bccb', icon: '🛡️' }, boss: false, radius: 13 },
   cas_grunt2: { id: 'cas_grunt2', name: 'Sergeant', health: 140, speed: 42, reward: 5, mana: 2, damageToBase: 1, visual: { color: '#9aa6be', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2 },
   cas_runner: { id: 'cas_runner', name: 'Outrider', health: 65, speed: 94, reward: 3, mana: 2, damageToBase: 1, visual: { color: '#d7a94a', icon: '🐎' }, boss: false, radius: 14 },
   cas_mage: { id: 'cas_mage', name: 'Royal Wizard', health: 110, speed: 50, reward: 4, mana: 2, damageToBase: 1, visual: { color: '#530a69', icon: '🧙' }, boss: false, radius: 12, magicResist: 0.2 },
   cas_brute: { id: 'cas_brute', name: 'Siege Ram', health: 245, speed: 30, reward: 8, mana: 3, damageToBase: 3, visual: { color: '#8a93a8', icon: '🐏' }, boss: false, radius: 17, physicalResist: 0.2 },
 
-  // Capital — the royal army in full harness.
+  // Capital
   cap_grunt: { id: 'cap_grunt', name: 'Man-at-Arms', health: 185, speed: 40, reward: 6, mana: 3, damageToBase: 2, visual: { color: '#a3adbb', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2, shieldHits: 5, mechanic: 'His shield turns aside the first 5 hits completely, only once it breaks does he take damage.' },
+  cap_grunt2: { id: 'cap_grunt2', name: 'Sludgeborn', health: 280, speed: 38, reward: 8, mana: 3, damageToBase: 2, visual: { color: '#6f9a2e', icon: '🫠' }, boss: false, radius: 15, regen: 0.04, mechanic: 'Its sludge knits back together regenerating health every moment its alive.' },
+  cap_brute: { id: 'cap_brute', name: 'Sludge Behemoth', health: 860, speed: 26, reward: 12, mana: 5, damageToBase: 3, visual: { color: '#56742a', icon: '👹' }, boss: false, radius: 18, regen: 0.03, mechanic: 'Its sludge knits back together regenerating health every moment its alive.' },
   cap_runner: { id: 'cap_runner', name: 'Bloodhound', health: 115, speed: 120, reward: 3, mana: 2, damageToBase: 1, visual: { color: '#2e2624', icon: '🐕' }, boss: false, radius: 13, lightSlow: 0.4, mechanic: 'Runs you down fast in the mist, a lit lantern\'s burning smell makes it lose your scent and slows down.' },
 
-  // Forest — wild beasts and ancient growth.
+  // Forest
   for_grunt: { id: 'for_grunt', name: 'Goblin Forager', health: 96, speed: 48, reward: 6, mana: 6, damageToBase: 1, visual: { color: '#7bb86f', icon: '👺' }, boss: false, radius: 13 },
   for_runner: { id: 'for_runner', name: 'Dire Wolf', health: 66, speed: 100, reward: 8, mana: 6, damageToBase: 1, visual: { color: '#a7b3c2', icon: '🐺' }, boss: false, radius: 12 },
   for_brute: { id: 'for_brute', name: 'Elder Treant', health: 380, speed: 27, reward: 18, mana: 14, damageToBase: 2, visual: { color: '#6a9a5a', icon: '🌲' }, boss: false, radius: 18 },
 
-  // Inn — rowdy patrons and cellar horrors.
+  // Inn
   inn_grunt: { id: 'inn_grunt', name: 'Cellar Rat', health: 112, speed: 50, reward: 6, mana: 7, damageToBase: 1, visual: { color: '#9a86c4', icon: '🐀' }, boss: false, radius: 13 },
   inn_runner: { id: 'inn_runner', name: 'Drunken Brawler', health: 80, speed: 104, reward: 8, mana: 7, damageToBase: 1, visual: { color: '#e0a040', icon: '🍺' }, boss: false, radius: 13 },
   inn_brute: { id: 'inn_brute', name: 'Cask Golem', health: 410, speed: 28, reward: 18, mana: 14, damageToBase: 2, visual: { color: '#8a6a4a', icon: '🛢️' }, boss: false, radius: 18 },
@@ -232,6 +248,8 @@ interface BossMeta {
   rally?: RallyDef;
   /** Periodic summon of more foes beside it (see `EnemyDef.summon`). */
   summon?: SummonDef;
+  /** Never drops below 1 HP (see `EnemyDef.unkillable`). */
+  unkillable?: boolean;
   /** Short description of a special mechanic, shown in the Enemy Index. */
   mechanic?: string;
   /** Flavour text for the Enemy Index (authored later). */
@@ -271,6 +289,10 @@ const BOSS_META: BossMeta[] = [
     summon: { enemyId: 'cap_runner', count: 3, every: 5, duration: 1, at: 0.55 },
     mechanic: 'Every 5 seconds he blows his whistle, and Bloodhounds burst out at his side.',
   },
+  {
+    // The Sewers: he is never meant to fall to the player.
+    level: 9, name: 'Captain Draven', icon: '🏳️', color: '#c9d4e4', health: 10000, speed: 70, radius: 26, unkillable: true,
+  },
 
 ];
 
@@ -297,6 +319,7 @@ function buildBosses(): Record<string, EnemyDef> {
       shieldHits: m.shieldHits,
       rally: m.rally,
       summon: m.summon,
+      unkillable: m.unkillable,
       mechanic: m.mechanic,
       lore: m.lore,
       spawnLines: m.spawnLines,
