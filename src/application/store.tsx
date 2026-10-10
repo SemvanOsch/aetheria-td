@@ -19,6 +19,7 @@ import {
 import {
   addArmor,
   addEnemyKills,
+  resetEnemyKills as resetEnemyKillsTx,
   equipArmor as equipArmorTx,
   equippedArmor,
   isArmorActive,
@@ -141,6 +142,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
     },
     [commit],
   );
+
+  const resetEnemyKills = useCallback(() => {
+    commit(resetEnemyKillsTx(stateRef.current));
+  }, [commit]);
 
   const buyMasteryUpgrade = useCallback(
     (unitId: string, upgradeId: string) => {
@@ -266,6 +271,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       recordEndlessRun,
       awardMastery,
       awardEnemyKills,
+      resetEnemyKills,
       buyMasteryUpgrade,
       setActiveMasteryUpgrade,
       setMasteryDisabled,
@@ -285,7 +291,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       grantGems,
       summonCost: SUMMON_COST,
     }),
-    [state, summon, completeLevel, recordEndlessRun, awardMastery, awardEnemyKills, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, reorderTeam, placeInTeam, setPrefs, setAudioSettings, setPlayerProfile, setPlayerChampionClass, markChapterRead, awardArmor, equipArmor, unequipArmor, salvageArmor, resetAccount, grantGems],
+    [state, summon, completeLevel, recordEndlessRun, awardMastery, awardEnemyKills, resetEnemyKills, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, reorderTeam, placeInTeam, setPrefs, setAudioSettings, setPlayerProfile, setPlayerChampionClass, markChapterRead, awardArmor, equipArmor, unequipArmor, salvageArmor, resetAccount, grantGems],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

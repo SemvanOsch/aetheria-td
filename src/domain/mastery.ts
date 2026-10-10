@@ -34,7 +34,14 @@ export const EXP_PER_BOSS = 15;
  * Gold a generator champion (Farmer) must produce to earn 1 mastery EXP.
  * Farmers don't kill, so they earn mastery from the wealth they generate.
  */
-export const GOLD_PER_EXP = 10;
+export const GOLD_PER_EXP = 5;
+/** EXP every team champion earns per wave of a stage they win (deployed or not). */
+export const STAGE_CLEAR_EXP_PER_WAVE = 5;
+
+/** Mastery EXP each team champion earns for winning a stage of `waves` waves. */
+export function stageClearExp(waves: number): number {
+  return waves * STAGE_CLEAR_EXP_PER_WAVE;
+}
 
 /**
  * Mastery EXP a champion earns for killing a given enemy. Bosses are worth the
@@ -418,7 +425,7 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
       name: 'Better Soil',
       description:
         'Richer earth yields 20% more gold from every harvest.',
-      cost: 100,
+      cost: 250,
       major: true,
       exclusiveGroup: 'farming',
       generateMult: 1.2,
@@ -428,7 +435,7 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
       name: 'Fresh Food',
       description:
         'Well-fed troops march sooner - start every stage with 🪙50 more gold while this champion is on your team.',
-      cost: 100,
+      cost: 250,
       major: true,
       exclusiveGroup: 'farming',
       startingGoldBonus: 50,

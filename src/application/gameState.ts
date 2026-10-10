@@ -677,6 +677,14 @@ export function addEnemyKills(
   return { ...state, enemyKills };
 }
 
+/**
+ * Developer tool: forget every lifetime kill, relocking the Enemy Index, so
+ * each foe's in-stage field note pops up again when it is next recorded.
+ */
+export function resetEnemyKills(state: GameState): GameState {
+  return { ...state, enemyKills: {} };
+}
+
 /** Lifetime kills the player has scored against a given enemy id. */
 export function enemyKillCount(state: GameState, enemyId: string): number {
   return state.enemyKills[enemyId] ?? 0;
@@ -687,8 +695,12 @@ export function enemyKillCount(state: GameState, enemyId: string): number {
  * first defeat; normal enemies unlock after ENEMY_KILLS_TO_UNLOCK kills.
  */
 export function isEnemyUnlocked(state: GameState, def: EnemyDef): boolean {
-  const kills = enemyKillCount(state, def.id);
-  return def.boss ? kills >= 1 : kills >= ENEMY_KILLS_TO_UNLOCK;
+  return enemyKillCount(state, def.id) >= enemyUnlockKills(def);
+}
+
+/** Kills that record an enemy in the bestiary (a boss on its first defeat). */
+export function enemyUnlockKills(def: EnemyDef): number {
+  return def.boss ? 1 : ENEMY_KILLS_TO_UNLOCK;
 }
 
 /** Skill-tree upgrade ids a champion has purchased. */
@@ -894,14 +906,19 @@ export function completedCount(state: GameState, levelIds: number[]): number {
   return levelIds.filter((id) => state.completedLevels.includes(id)).length;
 }
 
+/** Whether every stage of a chapter has been cleared. */
+export function isSectionCleared(state: GameState, section: SectionId): boolean {
+  const stages = levelsForSection(section);
+  return stages.length > 0 && completedCount(state, stages.map((l) => l.id)) === stages.length;
+}
+
 /**
  * A chapter's endless run opens once every stage of that chapter is cleared
  * (and the chapter has an endless stage and isn't a work in progress).
  */
 export function isEndlessUnlocked(state: GameState, section: SectionId): boolean {
   if (getSection(section).wip || !endlessLevelFor(section)) return false;
-  const stages = levelsForSection(section);
-  return stages.length > 0 && completedCount(state, stages.map((l) => l.id)) === stages.length;
+  return isSectionCleared(state, section);
 }
 
 /** Record a finished endless run, keeping the chapter's best wave count. */

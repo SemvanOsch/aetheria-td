@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEve
 import { createPortal } from 'react-dom';
 import { BOARD_HEIGHT, BOARD_WIDTH, COLS, ROWS, TILE, cellKey, expandPathCells, type Cell } from '../../domain/grid';
 import {
+  BASE_PROP_KINDS,
   DEFAULT_BANNER_COLOR,
   DEFAULT_PATH_LAYERS,
   DEFAULT_THEME,
@@ -634,7 +635,7 @@ export function LevelDesigner({ onClose }: Props) {
     }
     if (props.length > 0) {
       const items = props
-        .map((p) => `  { kind: '${p.kind}', col: ${p.col}, row: ${p.row}${p.color ? `, color: '${p.color}'` : ''} },`)
+        .map((p) => `  { kind: '${p.kind}', col: ${p.col}, row: ${p.row}${p.color ? `, color: '${p.color}'` : ''}${p.lit ? ', lit: true' : ''} },`)
         .join('\n');
       lines.push(`decor: [\n${items}\n],`);
     }
@@ -656,27 +657,25 @@ export function LevelDesigner({ onClose }: Props) {
   };
 
   // Per-path sanity: spawns belong on the off-board ring, and so do castles —
-  // unless a castle or gate prop stands at the path's end as the base.
+  // unless a base prop (castle, gate, sewer mouth) stands at the path's end.
   const laneIssues = lanes.flatMap((lane, i) => {
     if (lane.length === 0) return [];
     const start = lane[0];
     const end = lane[lane.length - 1];
     const endProp = propAt(props, end);
     const startOk = isOffBoard(start.col, start.row);
-    const endOk = isOffBoard(end.col, end.row) || endProp?.kind === 'castle' || endProp?.kind === 'burningCastle' || endProp?.kind === 'gate';
+    const endOk = isOffBoard(end.col, end.row) || (endProp != null && BASE_PROP_KINDS.has(endProp.kind));
     const issues: string[] = [];
     if (!startOk) issues.push('its spawn (first point) is on the board');
-    if (!endOk) issues.push('its castle (last point) is on the board with no castle or gate prop there');
+    if (!endOk) issues.push('its castle (last point) is on the board with no castle, gate or sewer entrance there');
     return issues.length ? [`Path ${i + 1}: ${issues.join(', and ')}.`] : [];
   });
   const totalPoints = lanes.reduce((n, l) => n + l.length, 0);
-  // A castle or gate at the path's end is the base itself, not an obstruction.
+  // A base prop at the path's end is the base itself, not an obstruction.
   const blocked = props.filter(
     (p) =>
       p.kind !== 'battlements' &&
-      p.kind !== 'castle' &&
-      p.kind !== 'burningCastle' &&
-      p.kind !== 'gate' &&
+      !BASE_PROP_KINDS.has(p.kind) &&
       propCells(p).some((c) => pathCells.has(cellKey(c.col, c.row))),
   ).length;
 

@@ -441,6 +441,26 @@ export class Vfx {
         case 'dodge':
           this.burst('gust', e.x, e.y - 4, 4, 60, { life: 0.3, size: 5, color: '#dff4ff' });
           break;
+        case 'block':
+          this.onBlock(e);
+          break;
+        case 'rally':
+          if (!e.granted) {
+            // The standard goes up: a gold flare above him and a dust kick.
+            this.flash(e.x, e.y - 40, 40, 0.3, '#ffe6a0');
+            this.burst('dust', e.x, e.y + 12, 10, 36, { life: 0.5, size: 1.4, color: '#c9b48c', drag: 5, vy: -6 });
+            this.pulse(e.x, e.y - 30, 120, 'holy', 0.6, 0.6);
+          } else {
+            // The blessing: a gold ring sweeping out from him, and each foe's
+            // shield lighting up blue with motes rising off it.
+            this.ring(e.x, e.y, 10, 170, 0.7, '#ffd76a', 2.6, 0.5);
+            this.flash(e.x, e.y - 30, 60, 0.3, '#fff1c4');
+            for (const t of e.targets) {
+              this.ring(t.x, t.y - 4, 3, 18, 0.4, '#8fb4ff', 1.6);
+              this.burst('mote', t.x, t.y - 4, 5, 24, { life: 0.6, size: 1.5, color: '#bcd4ff', vy: -26, drag: 1.5 });
+            }
+          }
+          break;
         case 'breach':
           this.flash(e.x, e.y, e.boss ? 90 : 40, 0.4, '#ff5a5a');
           this.ring(e.x, e.y, 6, e.boss ? 110 : 46, 0.5, '#ff6a5a', 3, 0.6);
@@ -451,6 +471,27 @@ export class Vfx {
           this.burst('dust', e.x, e.y + 10, 10, 40, { life: 0.5, size: 1.4, color: '#c9b48c', drag: 5, vy: -8 });
           this.burst('mote', e.x, e.y, 8, 26, { life: 0.7, size: 1.6, color: e.color, vy: -30, drag: 1.5 });
           this.pulse(e.x, e.y, 70, 'holy', 0.5, 0.5);
+          break;
+        case 'summon':
+          // The hounds burst out of the mist beside him: a kick of dust and dark
+          // smoke where each one appears.
+          for (const s of e.spawns) {
+            this.burst('smoke', s.x, s.y + 6, 8, 40, { life: 0.8, size: 5, grow: 9, color: '#1c1a18', drag: 3 });
+            this.burst('dust', s.x, s.y + 10, 10, 46, { life: 0.55, size: 1.5, color: '#b8a888', drag: 5, vy: -10 });
+            this.ring(s.x, s.y + 10, 4, 22, 0.4, '#8a7a66', 1.6, 0.45);
+          }
+          break;
+        case 'skid':
+          // Paws braced: a spray of dust thrown forward off the skid.
+          this.burst('dust', e.x + e.dx * 6, e.y + 10, 9, 40, { life: 0.55, size: 1.5, color: '#b8a888', drag: 5, vy: -10 });
+          break;
+        case 'lantern':
+          // The wick catches: a flare in the glass, a few sparks, and a warm
+          // ring sweeping out over the ground to the edge of the cleared mist.
+          this.flash(e.x, e.y, 34, 0.45, '#fff1c4');
+          this.burst('ember', e.x, e.y, 10, 46, { life: 0.7, size: 1.3, color: '#ffc874', vy: -26 });
+          this.ring(e.cx, e.cy + 6, 8, e.radius, 0.55, '#ffd27a', 2.2, 0.55);
+          this.pulse(e.x, e.y, e.radius * 1.4, 'lantern', 0.8, 0.9);
           break;
         case 'bossSpawn':
           this.ring(e.x, e.y + 8, 10, 120, 0.9, '#ff3a3a', 3, 0.5);
@@ -512,6 +553,35 @@ export class Vfx {
       this.flash(hx, hy, 46, 0.22, '#fff1c4');
       this.pulse(hx, hy, 110, fam.light, 0.7, 0.3, fam.tint);
       this.exposure = Math.min(0.5, this.exposure + 0.08);
+    }
+  }
+
+  /**
+   * A shielded foe turning a blow aside: a cold steel glint and a spray of sparks
+   * glancing back toward the attacker, with a small ring off the shield face. The
+   * last point breaking is bigger: a bright flash, a wider ring and tumbling
+   * shield chips.
+   */
+  private onBlock(e: Extract<FxEvent, { kind: 'block' }>): void {
+    const ang = Math.atan2(e.y - e.fromY, e.x - e.fromX);
+    const hx = e.x - Math.cos(ang) * 7;
+    const hy = e.y - 3 - Math.sin(ang) * 4;
+    // Sparks glance back off the shield, away from the target.
+    this.burst('spark', hx, hy, e.broke ? 12 : 6, e.broke ? 170 : 120, {
+      dir: ang + Math.PI,
+      spread: 2.2,
+      life: 0.22,
+      size: 1.1,
+      color: '#ffffff',
+      color2: '#9fc4ff',
+      drag: 5,
+      grav: 140,
+    });
+    this.flash(hx, hy, e.broke ? 34 : 14, e.broke ? 0.2 : 0.1, '#dce8ff');
+    this.ring(hx, hy, 2, e.broke ? 30 : 14, e.broke ? 0.34 : 0.2, '#cfe0ff', e.broke ? 2.4 : 1.4);
+    if (e.broke) {
+      this.burst('debris', hx, hy, 8, 90, { life: 0.6, size: 1.8, color: '#25397a', color2: '#c9d2dc', grav: 260, vy: -50 });
+      this.pulse(hx, hy, 80, 'holy', 0.5, 0.3);
     }
   }
 

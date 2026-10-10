@@ -7,8 +7,9 @@
  *
  * Tracks: `menu` (home / menus / journal — a calm D-minor harp-and-flute piece)
  * and one battle theme per story chapter (`SECTION_MUSIC`: `castle`, and
- * `capital` — a C-minor chase after the king's fall). A chapter without a
- * theme of its own yet borrows the castle's.
+ * `capital` — a C-minor chase after the king's fall), and `journey` for the
+ * Capital's getaway ending (a tense D-minor flight). A chapter without a theme of its own yet borrows
+ * the castle's.
  *
  * Usage: `setMusicTrack(id)` declares what should be playing (switching
  * crossfades; the same id is a no-op), `setMusicIntensity(0..1)` lets a battle
@@ -20,7 +21,7 @@
 import type { SectionId } from '../domain/levels';
 import { audioBus } from './audioBus';
 
-export type MusicTrackId = 'menu' | 'castle' | 'capital';
+export type MusicTrackId = 'menu' | 'castle' | 'capital' | 'journey';
 
 /** Battle theme per story chapter. Unlisted chapters fall back to the castle's. */
 const SECTION_MUSIC: Partial<Record<SectionId, MusicTrackId>> = {
@@ -91,6 +92,7 @@ function lowpass(ac: AudioContext, freq: number, q = 0.5): BiquadFilterNode {
 function pad({ ac, out }: Ctx, t: number, notes: number[], dur: number, vel: number, cutoff = 1000): void {
   const f = lowpass(ac, cutoff);
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0, t);
   g.gain.linearRampToValueAtTime(vel, t + Math.min(0.7, dur * 0.4));
   g.gain.setValueAtTime(vel, t + dur);
@@ -112,6 +114,7 @@ function pad({ ac, out }: Ctx, t: number, notes: number[], dur: number, vel: num
 /** Plucked harp: a triangle with a bright octave partial, long exponential decay. */
 function harp({ ac, out }: Ctx, t: number, m: number, vel: number): void {
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0, t);
   g.gain.linearRampToValueAtTime(vel, t + 0.005);
   g.gain.exponentialRampToValueAtTime(0.0001, t + 1.8);
@@ -133,6 +136,7 @@ function harp({ ac, out }: Ctx, t: number, m: number, vel: number): void {
 function flute({ ac, out }: Ctx, t: number, m: number, dur: number, vel: number): void {
   const freq = mtof(m);
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0, t);
   g.gain.linearRampToValueAtTime(vel, t + 0.09);
   g.gain.setValueAtTime(vel * 0.85, t + dur);
@@ -144,6 +148,7 @@ function flute({ ac, out }: Ctx, t: number, m: number, dur: number, vel: number)
   bg.gain.value = 0.22;
   const lfo = osc(ac, 'sine', 5.2);
   const depth = ac.createGain();
+  depth.gain.value = 0; // silent until its envelope starts
   depth.gain.setValueAtTime(0, t);
   depth.gain.linearRampToValueAtTime(freq * 0.007, t + Math.min(0.45, dur));
   lfo.connect(depth);
@@ -160,6 +165,7 @@ function flute({ ac, out }: Ctx, t: number, m: number, dur: number, vel: number)
 /** Soft bell / chime: inharmonic sine partials, long ring. */
 function bell({ ac, out }: Ctx, t: number, m: number, vel: number): void {
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0, t);
   g.gain.linearRampToValueAtTime(vel, t + 0.004);
   g.gain.exponentialRampToValueAtTime(0.0001, t + 3.2);
@@ -177,6 +183,7 @@ function bell({ ac, out }: Ctx, t: number, m: number, vel: number): void {
 /** Low sine drone with its octave. */
 function drone({ ac, out }: Ctx, t: number, m: number, dur: number, vel: number): void {
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0, t);
   g.gain.linearRampToValueAtTime(vel, t + 0.5);
   g.gain.setValueAtTime(vel, t + dur);
@@ -198,6 +205,7 @@ function stringHit({ ac, out }: Ctx, t: number, m: number, dur: number, vel: num
   f.frequency.setValueAtTime(2400, t);
   f.frequency.exponentialRampToValueAtTime(800, t + 0.12);
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0, t);
   g.gain.linearRampToValueAtTime(vel, t + 0.008);
   g.gain.exponentialRampToValueAtTime(Math.max(0.0001, vel * 0.35), t + dur);
@@ -218,6 +226,7 @@ function brass({ ac, out }: Ctx, t: number, notes: number[], dur: number, vel: n
   f.frequency.exponentialRampToValueAtTime(2600, t + 0.07);
   f.frequency.exponentialRampToValueAtTime(1300, t + 0.4);
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0, t);
   g.gain.linearRampToValueAtTime(vel, t + 0.03);
   g.gain.setValueAtTime(vel * 0.8, t + dur);
@@ -241,6 +250,7 @@ function horn({ ac, out }: Ctx, t: number, m: number, dur: number, vel: number):
   const freq = mtof(m);
   const f = lowpass(ac, 1700, 1);
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0, t);
   g.gain.linearRampToValueAtTime(vel, t + 0.05);
   g.gain.setValueAtTime(vel * 0.85, t + dur);
@@ -252,6 +262,7 @@ function horn({ ac, out }: Ctx, t: number, m: number, dur: number, vel: number):
   bg.gain.value = 0.3;
   const lfo = osc(ac, 'sine', 5.5);
   const depth = ac.createGain();
+  depth.gain.value = 0; // silent until its envelope starts
   depth.gain.setValueAtTime(0, t);
   depth.gain.setValueAtTime(0, t + Math.min(0.25, dur * 0.5));
   depth.gain.linearRampToValueAtTime(freq * 0.008, t + Math.min(0.6, dur));
@@ -273,6 +284,7 @@ function timpani({ ac, out }: Ctx, t: number, m: number, vel: number): void {
   o.frequency.setValueAtTime(freq * 1.35, t);
   o.frequency.exponentialRampToValueAtTime(freq, t + 0.05);
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0, t);
   g.gain.linearRampToValueAtTime(vel, t + 0.004);
   g.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
@@ -283,6 +295,7 @@ function timpani({ ac, out }: Ctx, t: number, m: number, vel: number): void {
   n.buffer = noise(ac);
   const nf = lowpass(ac, 500);
   const ng = ac.createGain();
+  ng.gain.value = 0; // silent until its envelope starts
   ng.gain.setValueAtTime(vel * 0.6, t);
   ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
   n.connect(nf).connect(ng).connect(out);
@@ -296,6 +309,7 @@ function warDrum({ ac, out }: Ctx, t: number, vel: number): void {
   o.frequency.setValueAtTime(95, t);
   o.frequency.exponentialRampToValueAtTime(48, t + 0.14);
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0, t);
   g.gain.linearRampToValueAtTime(vel, t + 0.003);
   g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
@@ -312,6 +326,7 @@ function snare({ ac, out }: Ctx, t: number, vel: number): void {
   hp.type = 'highpass';
   hp.frequency.value = 1400;
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(vel, t);
   g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
   n.connect(hp).connect(g).connect(out);
@@ -319,6 +334,7 @@ function snare({ ac, out }: Ctx, t: number, vel: number): void {
   n.stop(t + 0.18);
   const o = osc(ac, 'triangle', 190);
   const og = ac.createGain();
+  og.gain.value = 0; // silent until its envelope starts
   og.gain.setValueAtTime(vel * 0.6, t);
   og.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
   o.connect(og).connect(out);
@@ -334,6 +350,7 @@ function crash({ ac, out }: Ctx, t: number, vel: number): void {
   hp.type = 'highpass';
   hp.frequency.value = 5000;
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(vel, t);
   g.gain.exponentialRampToValueAtTime(0.0001, t + 1.9);
   n.connect(hp).connect(g).connect(out);
@@ -623,7 +640,147 @@ const CAPITAL: TrackDef = {
   },
 };
 
-const TRACKS: Record<MusicTrackId, TrackDef> = { menu: MENU, castle: CASTLE, capital: CAPITAL };
+// --- Getaway ending: "Flight from the Capital" — a tense D-minor ride in 6/8.
+// Counted in eighths (a beat = one eighth, six to the bar), and scored by bar
+// from the moment the ride begins, to follow the cutscene: two bars of pulse
+// with the royal army's call behind them, the chase (the flight theme on low
+// horns over galloping strings and war drums), then from bar 12, as the old
+// forest closes in, a dark tremolo over a dominant pedal that tightens toward
+// the stop. Below 0.5 intensity (the wagon has pulled up at the inn) it sinks
+// to an uneasy hush, safe for now but never resolved: pads that end each phrase
+// on the dominant, a low bell, a faint heartbeat on the timpani.
+
+const FLIGHT_CHORDS: Chord[] = [
+  { bass: 38, tones: [62, 65, 69] }, // Dm
+  { bass: 34, tones: [62, 65, 70] }, // Bb
+  { bass: 43, tones: [62, 67, 70] }, // Gm
+  { bass: 45, tones: [61, 64, 69] }, // A
+  { bass: 38, tones: [62, 65, 69] }, // Dm
+  { bass: 41, tones: [60, 65, 69] }, // F
+  { bass: 43, tones: [62, 67, 70] }, // Gm
+  { bass: 45, tones: [61, 67, 69] }, // A7
+];
+
+/** The flight theme (horns, an octave down): climbing, then thrown forward. */
+const FLIGHT_THEME: Note[][] = [
+  [[62, 1], [65, 1], [69, 1], [74, 3]],
+  [[74, 2], [72, 1], [70, 3]],
+  [[70, 1], [69, 1], [67, 1], [70, 2], [74, 1]],
+  [[73, 3], [69, 3]],
+  [[62, 1], [65, 1], [69, 1], [74, 2], [77, 1]],
+  [[77, 2], [76, 1], [72, 3]],
+  [[74, 2], [72, 1], [70, 2], [67, 1]],
+  [[69, 4], [73, 1], [76, 1]],
+];
+
+/** The royal army's call, low and far behind (after the Capital's fanfare). */
+const PURSUIT_CALL: Note[] = [[50, 1], [50, 1], [50, 1], [57, 3]];
+
+/** Over the A pedal as the forest closes in: Dm, Bb, Gm, A. */
+const FOREST_CHORDS: number[][] = [
+  [62, 65, 69],
+  [62, 65, 70],
+  [62, 67, 70],
+  [61, 64, 69],
+];
+
+/** The hush at the inn: Dm(add9), Bb(maj7), Gm, A — left hanging on the dominant. */
+const HUSH_CHORDS: Chord[] = [
+  { bass: 38, tones: [62, 64, 65, 69] },
+  { bass: 34, tones: [62, 65, 69, 70] },
+  { bass: 43, tones: [58, 62, 67, 70] },
+  { bass: 45, tones: [57, 61, 64, 69] },
+];
+
+/** The gallop: hits on eighths 0, 2, 3 and 5 (da-dum da-da-dum). */
+const GALLOP = [0, 2, 3, 5];
+
+const CHASE_FROM = 2;
+const FOREST_FROM = 12;
+
+const FLIGHT: TrackDef = {
+  bpm: 330,
+  beatsPerBar: 6,
+  reverb: 0.32,
+  level: 0.85,
+  bar(c, bar, t, beat, intensity) {
+    const len = beat * 6;
+
+    if (intensity < 0.5) {
+      // Pulled up at the inn: safe for now, but nothing is resolved.
+      const ch = HUSH_CHORDS[bar % 4];
+      const title = intensity < 0.2;
+      pad(c, t, ch.tones, len, 0.034, 800);
+      drone(c, t, ch.bass, len, 0.05);
+      if (bar % 2 === 0) bell(c, t, bar % 4 === 0 ? 62 : 57, 0.026);
+      if (!title) {
+        // A faint heartbeat, slowing as it settles.
+        timpani(c, t, 38, 0.05);
+        timpani(c, t + beat, 38, 0.03);
+        harp(c, t + beat * 3, ch.tones[ch.tones.length - 1] + 12, 0.024);
+      }
+      return;
+    }
+
+    if (bar < FOREST_FROM) {
+      const chase = bar >= CHASE_FROM;
+      const i = chase ? (bar - CHASE_FROM) % 8 : 0;
+      const ch = FLIGHT_CHORDS[i];
+      // Low strings at the gallop, doubled an octave up once the chase is on.
+      for (const k of GALLOP) {
+        const accent = k === 0 || k === 3;
+        stringHit(c, t + k * beat, ch.bass + 12, beat * 0.85, accent ? 0.055 : 0.035);
+        if (chase) stringHit(c, t + k * beat, ch.bass + 24, beat * 0.7, accent ? 0.03 : 0.018);
+      }
+      pad(c, t, ch.tones.map((m) => m - 12), len, chase ? 0.03 : 0.022, 700);
+      drone(c, t, ch.bass, len, 0.04);
+      timpani(c, t, ch.bass + 12, chase ? 0.12 : 0.1);
+      timpani(c, t + 3 * beat, ch.bass + 12, chase ? 0.08 : 0.06);
+
+      if (!chase) {
+        // Behind them, the army's call; the snare's cadence already rattling.
+        playLine(PURSUIT_CALL, t, beat, (at, m, dur) => horn(c, at, m, dur, 0.034));
+        for (const k of [2, 4, 5]) snare(c, t + k * beat, 0.012 + 0.008 * bar);
+        return;
+      }
+
+      // Flat-out: war drums on the hooves, snare on the off-strides.
+      warDrum(c, t, 0.17);
+      warDrum(c, t + 3 * beat, 0.13);
+      for (const k of [2, 5]) snare(c, t + k * beat, 0.03);
+      snare(c, t + 4.5 * beat, 0.016);
+      // Brass stabs push into the second half of each bar.
+      brass(c, t + 3 * beat, ch.tones, beat * 0.9, 0.042);
+      playLine(FLIGHT_THEME[i], t, beat, (at, m, dur) => horn(c, at, m - 12, dur, 0.06));
+      // Second time round, high strings shadow the horns in octaves.
+      if (bar - CHASE_FROM >= 8) {
+        playLine(FLIGHT_THEME[i], t, beat, (at, m, dur) => stringHit(c, at, m, dur, 0.022));
+      }
+      if (i === 0) crash(c, t, 0.04);
+      return;
+    }
+
+    // Into the forest: the drums fall back, the strings shiver over an A pedal
+    // and everything tightens toward the stop.
+    const f = bar - FOREST_FROM;
+    const tones = FOREST_CHORDS[f % 4];
+    const rise = Math.min(1, f / 6);
+    for (let s = 0; s < 12; s++) {
+      stringHit(c, t + s * beat * 0.5, tones[s % 3], beat * 0.45, 0.014 + 0.014 * rise);
+    }
+    for (const k of GALLOP) stringHit(c, t + k * beat, 45 + 12, beat * 0.85, k === 0 || k === 3 ? 0.045 : 0.028);
+    pad(c, t, tones.map((m) => m - 12), len, 0.03 + 0.012 * rise, 600);
+    drone(c, t, 33, len, 0.06);
+    // A timpani roll on the pedal, swelling bar by bar.
+    for (let k = 0; k < 6; k++) timpani(c, t + k * beat, 45, 0.04 + 0.05 * rise * (k / 5));
+    warDrum(c, t, 0.12);
+    // The low horn holds and turns, as if something watches from the trees.
+    if (f % 2 === 0) horn(c, t, f % 4 === 0 ? 57 : 58, len * 0.95, 0.04);
+    if (f % 4 === 0) bell(c, t, 69, 0.022);
+  },
+};
+
+const TRACKS: Record<MusicTrackId, TrackDef> = { menu: MENU, castle: CASTLE, capital: CAPITAL, journey: FLIGHT };
 
 // ---------------------------------------------------------------------------
 // Sequencer

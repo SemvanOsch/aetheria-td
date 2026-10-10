@@ -4,11 +4,10 @@ import { enemyKillCount, isEnemyUnlocked } from '../../application/gameState';
 import {
   BOSS_ENEMIES,
   ENEMY_KILLS_TO_UNLOCK,
-  hasResistance,
   REGULAR_ENEMIES,
   type EnemyDef,
 } from '../../domain/enemies';
-import { getLevel } from '../../domain/levels';
+import { foeKicker, foeLedgerRows, foeTraits } from '../foeNotes';
 import { EnemySprite } from './EnemySprite';
 import { Icon } from './Icon';
 import { CompassRose, Flourish, PageCorners } from './JournalArt';
@@ -23,19 +22,6 @@ interface Props {
   ready: boolean;
   /** Plays the page-turn sound and sweeps a leaf across the spread. */
   onTurn: (dir: 'next' | 'prev') => void;
-}
-
-/** Coarse speed descriptor for an entry. */
-function speedLabel(speed: number): string {
-  if (speed >= 85) return 'fast';
-  if (speed >= 40) return 'medium';
-  return 'slow';
-}
-
-/** The stage a boss guards, from its `boss<levelId>` id. */
-function bossLair(def: EnemyDef): string | null {
-  const id = Number(def.id.replace(/^boss/, ''));
-  return Number.isFinite(id) ? getLevel(id)?.name ?? null : null;
 }
 
 /**
@@ -78,7 +64,7 @@ export function JournalBestiary({ ready, onTurn }: Props) {
       <div className="book-page left" key={`jb-left-${selected?.id ?? tab}`}>
         <PageCorners />
         {selected ? (
-          <FoeEntry def={selected} number={list.indexOf(selected) + 1} kills={enemyKillCount(state, selected.id)} />
+          <FoeEntry def={selected} kills={enemyKillCount(state, selected.id)} />
         ) : (
           <div className="frontispiece">
             <CompassRose className="frontis-rose" />
@@ -165,36 +151,17 @@ export function JournalBestiary({ ready, onTurn }: Props) {
 }
 
 /** The left page: one recorded foe, written up as field notes. */
-function FoeEntry({ def, number, kills }: { def: EnemyDef; number: number; kills: number }) {
-  const lair = def.boss ? bossLair(def) : null;
-  const rows: { label: string; value: string }[] = [
-    { label: 'Health', value: `${def.health.toLocaleString()} HP` },
-    { label: 'Speed', value: `${def.speed} · ${speedLabel(def.speed)}` },
-    // Bosses omit castle damage (breaking through is an instant loss).
-    ...(def.boss ? [] : [{ label: 'Castle damage', value: `${def.damageToBase}` }]),
-    // Mana a hero recovers for the killing blow.
-    ...(def.mana ? [{ label: 'Mana granted', value: `${def.mana}` }] : []),
-    ...(def.dodgeChance ? [{ label: 'Evasion', value: `${Math.round(def.dodgeChance * 100)}% dodge` }] : []),
-    ...((def.physicalResist ?? 0) > 0
-      ? [{ label: 'Physical resist', value: `−${Math.round((def.physicalResist ?? 0) * 100)}%` }]
-      : []),
-    ...((def.magicResist ?? 0) > 0 ? [{ label: 'Magic resist', value: `−${Math.round((def.magicResist ?? 0) * 100)}%` }] : []),
-    ...(def.boss ? [] : [{ label: 'Slain', value: kills.toLocaleString() }]),
-  ];
+function FoeEntry({ def, kills }: { def: EnemyDef; kills: number }) {
+  const rows = foeLedgerRows(def, kills);
 
   return (
     <div className={`j-entry foe${def.boss ? ' boss' : ''}`}>
-      <div className="plate-kicker">
-        {def.boss ? (lair ? `Boss of ${lair}` : 'Boss') : `Specimen No. ${String(number).padStart(2, '0')}`}
-      </div>
+      <div className="plate-kicker">{foeKicker(def)}</div>
       <div className="j-frame foe">
         <EnemySprite enemy={def} size={def.boss ? 160 : 136} />
       </div>
       <div className="j-name">{def.name}</div>
-      <div className="j-traits">
-        {def.boss ? 'Boss' : 'Foe'}
-        {hasResistance(def) ? ' · Resistant' : ' · Takes full damage'}
-      </div>
+      <div className="j-traits">{foeTraits(def)}</div>
 
       <div className="j-ledger">
         {rows.map((r) => (

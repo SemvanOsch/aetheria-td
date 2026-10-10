@@ -685,6 +685,7 @@ function paintPaths(ctx: Ctx, laneWaypoints: Pt[][], theme: BoardTheme, seed: nu
     // Carpet trim rides the border band: laid right after the edge layer so
     // the fill of a crossing segment covers it cleanly.
     if (li === 0 && kind === 'carpet') paintCarpetTrim(ctx, lanes, edgeCol, outerW, fillW);
+    if (li === 0 && kind === 'sewer') paintSewerCurb(ctx, lanes, edgeCol, outerW, fillW);
   });
   ctx.restore();
 
@@ -699,6 +700,9 @@ function paintPaths(ctx: Ctx, laneWaypoints: Pt[][], theme: BoardTheme, seed: nu
       break;
     case 'cobble':
       paintCobbleDetail(d, lanes, fillCol, r);
+      break;
+    case 'sewer':
+      paintSewerDetail(d, lanes, all, fillCol, centreCol, fillW, r);
       break;
     case 'stone':
       paintStonePathDetail(d, all, fillCol, fillW, r);
@@ -895,6 +899,123 @@ function paintCarpetTrim(ctx: Ctx, lanes: Pt[][], edge: string, outerW: number, 
     });
   }
   ctx.restore();
+}
+
+/**
+ * Sewer channel curbs: dressed stones along the border band (joints across
+ * it), and a pale worn lip where the curb drops into the water, left showing
+ * by the fill laid over it.
+ */
+function paintSewerCurb(ctx: Ctx, lanes: Pt[][], edge: string, outerW: number, fillW: number): void {
+  ctx.save();
+  ctx.strokeStyle = shade(edge, 0.32);
+  ctx.lineWidth = fillW + 3;
+  strokeAll(ctx, lanes);
+  ctx.strokeStyle = withAlpha(shade(edge, -0.5), 0.75);
+  ctx.lineWidth = 1;
+  ctx.lineCap = 'butt';
+  const inner = fillW / 2;
+  const outer = outerW / 2;
+  for (const pts of lanes) {
+    samples(pts, 11).forEach((s, i) => {
+      for (const side of [-1, 1]) {
+        // Stagger the joints on the two sides so they don't read as rungs.
+        if ((i + (side > 0 ? 1 : 0)) % 2 === 0) continue;
+        ctx.beginPath();
+        ctx.moveTo(s.x - s.ty * inner * side, s.y + s.tx * inner * side);
+        ctx.lineTo(s.x - s.ty * outer * side, s.y + s.tx * outer * side);
+        ctx.stroke();
+      }
+    });
+  }
+  ctx.restore();
+}
+
+/**
+ * Murky sewer water: dark wet edges under the curbs, sheen streaks drawn out
+ * along the flow, yellow-green scum gathered at the sides, floating debris
+ * and small ripples.
+ */
+function paintSewerDetail(
+  d: Ctx,
+  lanes: Pt[][],
+  all: { x: number; y: number; tx: number; ty: number }[],
+  fill: string,
+  centre: string,
+  width: number,
+  r: () => number,
+): void {
+  d.lineCap = 'round';
+  // Shadowed water along both curbs.
+  for (const side of [-1, 1]) {
+    const off = (width / 2 - 2) * side;
+    d.strokeStyle = withAlpha(shade(fill, -0.45), 0.55);
+    d.lineWidth = 5;
+    d.beginPath();
+    for (const pts of lanes) {
+      samples(pts, 4).forEach((s, i) => {
+        const x = s.x - s.ty * off;
+        const y = s.y + s.tx * off;
+        if (i === 0) d.moveTo(x, y);
+        else d.lineTo(x, y);
+      });
+    }
+    d.stroke();
+  }
+  // Scum and floating muck near the sides.
+  for (let i = 0; i < all.length; i += 2) {
+    const s = all[i];
+    if (r() < 0.16) {
+      const o = (r() < 0.5 ? -1 : 1) * width * (0.28 + r() * 0.16);
+      d.fillStyle = withAlpha(r() < 0.6 ? '#8a9a4a' : '#6e7a3a', 0.22 + r() * 0.2);
+      d.beginPath();
+      d.ellipse(s.x - s.ty * o, s.y + s.tx * o, 2 + r() * 5, 1 + r() * 2.4, Math.atan2(s.ty, s.tx), 0, Math.PI * 2);
+      d.fill();
+    }
+    if (r() < 0.05) {
+      const o = (r() - 0.5) * width * 0.7;
+      const x = s.x - s.ty * o;
+      const y = s.y + s.tx * o;
+      d.fillStyle = withAlpha(r() < 0.5 ? '#2a2016' : '#5a4a30', 0.75);
+      if (r() < 0.5) {
+        d.beginPath();
+        d.arc(x, y, 0.8 + r() * 1.2, 0, Math.PI * 2);
+        d.fill();
+      } else {
+        d.save();
+        d.translate(x, y);
+        d.rotate(r() * Math.PI);
+        d.fillRect(-3, -0.5, 6, 1);
+        d.restore();
+      }
+    }
+  }
+  // Sheen: pale streaks drawn out along the flow, brightest mid-channel.
+  for (let i = 0; i < all.length; i += 3) {
+    if (r() > 0.4) continue;
+    const s = all[i];
+    const o = (r() - 0.5) * width * 0.6;
+    const len = 6 + r() * 14;
+    const x = s.x - s.ty * o;
+    const y = s.y + s.tx * o;
+    d.strokeStyle = withAlpha(shade(centre, 0.7), 0.1 + r() * 0.14);
+    d.lineWidth = 0.6 + r() * 0.8;
+    d.beginPath();
+    d.moveTo(x, y);
+    d.lineTo(x + s.tx * len, y + s.ty * len);
+    d.stroke();
+  }
+  // Small ripple arcs.
+  for (let i = 0; i < all.length; i += 9) {
+    if (r() > 0.5) continue;
+    const s = all[i];
+    const o = (r() - 0.5) * width * 0.5;
+    d.strokeStyle = withAlpha(shade(fill, 0.55), 0.2);
+    d.lineWidth = 0.6;
+    d.beginPath();
+    d.ellipse(s.x - s.ty * o, s.y + s.tx * o, 2.5 + r() * 2, 1.2 + r(), Math.atan2(s.ty, s.tx) + Math.PI / 2, 0, Math.PI);
+    d.stroke();
+  }
 }
 
 /** Blades of grass leaning over a dirt track's edge from the turf side. */

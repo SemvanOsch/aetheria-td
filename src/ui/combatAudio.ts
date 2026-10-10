@@ -66,6 +66,7 @@ function noiseSweep(
   bp.frequency.setValueAtTime(from, t);
   bp.frequency.exponentialRampToValueAtTime(Math.max(40, to), t + dur);
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0.0001, t);
   g.gain.linearRampToValueAtTime(gain, t + Math.min(0.01, dur * 0.3));
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
@@ -87,6 +88,7 @@ function toneGlide(
   const osc = ac.createOscillator();
   osc.type = type;
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   const t = ac.currentTime + AUDIO_LEAD + delay;
   osc.frequency.setValueAtTime(from, t);
   osc.frequency.exponentialRampToValueAtTime(Math.max(30, to), t + dur);
@@ -111,6 +113,7 @@ function pluck(ac: AudioContext, freq: number, dur: number, gain: number, delay 
   lp.frequency.setValueAtTime(Math.min(9000, freq * 7), t);
   lp.frequency.exponentialRampToValueAtTime(Math.max(200, freq * 1.3), t + dur * 0.5);
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0.0001, t);
   g.gain.linearRampToValueAtTime(gain, t + 0.004);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
@@ -154,6 +157,7 @@ function fmZap(
   mod.frequency.setValueAtTime(from * ratio, t);
   mod.frequency.exponentialRampToValueAtTime(Math.max(30, to * ratio), t + dur);
   const depth = ac.createGain();
+  depth.gain.value = 0; // silent until its envelope starts
   depth.gain.setValueAtTime(from * index, t);
   depth.gain.exponentialRampToValueAtTime(Math.max(1, to * index * 0.08), t + dur);
   mod.connect(depth).connect(car.frequency);
@@ -167,6 +171,7 @@ function fmZap(
     oscs.push(lfo);
   }
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0.0001, t);
   g.gain.linearRampToValueAtTime(gain, t + Math.min(0.006, dur * 0.2));
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
@@ -425,6 +430,59 @@ const VOICES: Record<SfxName, (ac: AudioContext) => void> = {
 
   // Bard — a short, unhurried lute phrase as the minstrel strikes up: three
   // spaced, soft notes from a random motif in a random major key.
+  // Shield block (the Man-at-Arms' tower shield) — a short, dull clang: a
+  // bandpassed tap on the boards, a mid triangle knock, and a faint high ring off
+  // the steel rim.
+  shieldBlock: (ac) => {
+    noiseSweep(ac, jit(1300, 150), 700, 0.05, 0.02, 1.6);
+    toneGlide(ac, jit(520, 30), 470, 0.09, 0.022, 'triangle');
+    toneGlide(ac, jit(1760, 60), 1700, 0.18, 0.006, 'sine');
+  },
+  // Shield break — the last blow splits it: a woody crack and crunch, a heavy
+  // thud, and the rim's ring dropping away.
+  shieldBreak: (ac) => {
+    noiseSweep(ac, jit(2400, 200), 500, 0.16, 0.03, 0.8);
+    noiseSweep(ac, jit(700, 60), 180, 0.22, 0.026, 0.7, 'lowpass');
+    toneGlide(ac, jit(220, 15), 110, 0.18, 0.03, 'triangle');
+    toneGlide(ac, jit(1500, 50), 900, 0.35, 0.008, 'sine', 0.02);
+  },
+
+  // Rally call (the Sergeant-at-Arms raising his standard) — a short brass
+  // horn blast: two detuned low saws a fifth over a root, swelling and fading,
+  // with a breathy edge.
+  rallyCall: (ac) => {
+    toneGlide(ac, 196, 196, 0.7, 0.02, 'sawtooth');
+    toneGlide(ac, 197.5, 196, 0.7, 0.014, 'sawtooth');
+    toneGlide(ac, 294, 294, 0.55, 0.012, 'sawtooth', 0.12);
+    noiseSweep(ac, 900, 600, 0.5, 0.006, 0.8, 'lowpass');
+  },
+  // Rally blessing — the foes' shields light up: a bright rising shimmer over a
+  // soft steel ring.
+  rallyShield: (ac) => {
+    sparkle(ac, 6, 1800, 3200, 0.3, 0.007);
+    toneGlide(ac, 880, 1320, 0.35, 0.014, 'sine');
+    toneGlide(ac, 1760, 1700, 0.5, 0.006, 'sine', 0.05);
+  },
+
+  // A lantern lit — a match scratched, the wick catching with a soft
+  // whoomph, and a warm two-note glow rising out of it.
+  lanternLight: (ac) => {
+    noiseSweep(ac, jit(3800, 200), 1800, 0.09, 0.022, 1.2);
+    noiseSweep(ac, 650, 180, 0.42, 0.02, 0.7, 'lowpass', 0.07);
+    toneGlide(ac, 660, 700, 0.6, 0.01, 'sine', 0.12);
+    toneGlide(ac, 990, 1040, 0.7, 0.006, 'sine', 0.2);
+  },
+
+  // The Hound Master's dog whistle — two shrill blasts, a short one then a
+  // long one sliding up, with breath hissing through it.
+  houndWhistle: (ac) => {
+    toneGlide(ac, jit(2500, 40), 2700, 0.16, 0.009, 'sine');
+    toneGlide(ac, 2450, 3050, 0.5, 0.009, 'sine', 0.24);
+    toneGlide(ac, 3050, 2950, 0.14, 0.006, 'sine', 0.72);
+    noiseSweep(ac, 5200, 4200, 0.16, 0.004, 2);
+    noiseSweep(ac, 5200, 4400, 0.6, 0.004, 2, 'bandpass', 0.24);
+  },
+
   bardPlay: (ac) => {
     const root = BARD_ROOTS[Math.floor(Math.random() * BARD_ROOTS.length)];
     const phrase = BARD_PHRASES[Math.floor(Math.random() * BARD_PHRASES.length)];

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { useGame } from '../../application/gameContext';
-import { hasAffordableMasteryUpgrade, isLevelUnlocked } from '../../application/gameState';
+import { hasAffordableMasteryUpgrade, isLevelUnlocked, isSectionCleared } from '../../application/gameState';
 import { canAffordSummon } from '../../application/summon';
 import { unlockedChapterCount } from '../../domain/journal';
 import { LEVELS, getSection } from '../../domain/levels';
@@ -196,7 +196,7 @@ export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, ret
             <div className="desk-rod" />
             <div className="desk-drape left" />
             <div className="desk-window">
-              <WindowView />
+              <WindowView burning={isSectionCleared(state, 'castle')} />
               <div className="desk-window-bars" />
             </div>
             <div className="desk-drape right" />

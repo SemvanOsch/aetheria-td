@@ -45,6 +45,12 @@ export interface Atmosphere {
   /** Optional low fog tint + strength (drifting bands near the floor). */
   fog?: string;
   fogAlpha?: number;
+  /**
+   * Drifting banks of mist laid over the lit board (`engine/mistLayer.ts`): their
+   * colour, and `alpha` the thickest a bank gets. Lit lanterns clear holes in
+   * it (on a misty stage, where the mist is also a rule — see `domain/mist.ts`).
+   */
+  mist?: { color: string; alpha: number };
   /** Colour grade laid over the whole board (soft-light), + strength. */
   grade?: string;
   gradeAlpha?: number;
@@ -180,6 +186,92 @@ export const MOODS = {
     gradeAlpha: 0.1,
     vignette: 0.3,
     sun: { angle: 0.7, color: '#fff0c8', alpha: 0.16 },
+  },
+
+  // The Capital's market square at blue hour — the sky gone violet, the lamps
+  // and windows lit, ash from the burning castle drifting over the roofs.
+  townDusk: {
+    ambient: '#1a1834',
+    darkness: 0.32,
+    light: 'lantern',
+    championLight: 56,
+    weather: 'ash',
+    weatherDensity: 0.45,
+    grade: '#ff9a5a',
+    gradeAlpha: 0.08,
+    vignette: 0.46,
+    sun: { angle: 0.4, color: '#ff9a6a', alpha: 0.12 },
+  },
+
+  // The Capital's outskirts by night — cold moonlight and a low ground mist
+  // around the sewers, torches and a few candle-lit windows, the last of the
+  // castle's ash still drifting down.
+  outskirtsNight: {
+    ambient: '#0c1222',
+    darkness: 0.44,
+    light: 'moon',
+    championLight: 62,
+    weather: 'ash',
+    weatherDensity: 0.25,
+    fog: '#7f8f86',
+    fogAlpha: 0.14,
+    grade: '#7a90c8',
+    gradeAlpha: 0.1,
+    vignette: 0.55,
+    sun: { angle: 2.3, color: '#a8bce8', alpha: 0.08 },
+  },
+
+  // The outskirts drowned in mist — thick grey-green banks rolling over the
+  // hovels and the road, only a hint of moon through it. The lantern posts the
+  // player lights burn warm holes in it.
+  outskirtsMist: {
+    ambient: '#0b1214',
+    darkness: 0.42,
+    light: 'lantern',
+    championLight: 50,
+    weather: 'motes',
+    weatherDensity: 0.12,
+    fog: '#9aa8a2',
+    fogAlpha: 0.2,
+    mist: { color: '#aebcb6', alpha: 0.5 },
+    grade: '#8aa0a4',
+    gradeAlpha: 0.14,
+    vignette: 0.62,
+    sun: { angle: 2.3, color: '#c4d2dc', alpha: 0.05 },
+  },
+
+  // The sewers under the Capital — near-black brick tunnels, a sickly green
+  // murk hanging over the channels, lit by lanterns, a shaft of moonlight and
+  // glowing fungus.
+  sewerDepths: {
+    ambient: '#050a08',
+    darkness: 0.56,
+    light: 'lantern',
+    championLight: 70,
+    weather: 'motes',
+    weatherDensity: 0.35,
+    fog: '#6a8a5a',
+    fogAlpha: 0.15,
+    grade: '#6a9a64',
+    gradeAlpha: 0.1,
+    vignette: 0.62,
+  },
+
+  // Out of the sewers at first light — a rose-gold dawn low over the river,
+  // mist lifting off the water, the night's chill still in the shadows.
+  escapeDawn: {
+    ambient: '#1e1a30',
+    darkness: 0.24,
+    light: 'lantern',
+    championLight: 50,
+    weather: 'motes',
+    weatherDensity: 0.4,
+    fog: '#e8d0d8',
+    fogAlpha: 0.12,
+    grade: '#ffb898',
+    gradeAlpha: 0.12,
+    vignette: 0.4,
+    sun: { angle: 0.25, color: '#ffc0a0', alpha: 0.2 },
   },
 
   // --- Spare presets for new stages (unused until a stage picks one) ---

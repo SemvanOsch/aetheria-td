@@ -218,8 +218,8 @@ export const ARMOR_SETS: readonly ArmorSetDef[] = [
     },
     setBonus: {
       name: 'Oath of the Crown',
-      description: '+10% damage and +15% range.',
-      stats: { damage: 0.1, range: 0.15 },
+      description: '+15% range.',
+      stats: { range: 0.15 },
     },
   },
 ];

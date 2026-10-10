@@ -27,6 +27,8 @@ export interface GameStore {
   awardMastery: (gains: Record<string, number>) => void;
   /** Bank enemy kills earned in a stage (enemy id → count), for the Enemy Index. */
   awardEnemyKills: (gains: Record<string, number>) => void;
+  /** Developer tool: wipe all enemy kills (relocks the Enemy Index, re-arms field notes). */
+  resetEnemyKills: () => void;
   /** Spend a champion's EXP to learn a permanent skill-tree upgrade. */
   buyMasteryUpgrade: (unitId: string, upgradeId: string) => void;
   /** Choose which learned member of an exclusive skill-tree group is active. */

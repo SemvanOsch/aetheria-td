@@ -16,7 +16,7 @@ import {
   type LevelDef,
   type SectionId,
 } from '../../domain/levels';
-import { getEnemy } from '../../domain/enemies';
+import { ENEMIES, getEnemy, type EnemyDef } from '../../domain/enemies';
 import { getUnit } from '../../domain/units';
 import { GameEngine } from '../../engine/GameEngine';
 import { drawBoard } from '../../engine/renderer';
@@ -196,8 +196,9 @@ function StageBriefing({
   const { state } = useGame();
   const unlocked = isLevelUnlocked(state, level.id);
   const done = state.completedLevels.includes(level.id);
-  const boss = getEnemy(level.bossId);
-  const bossKnown = isEnemyUnlocked(state, boss);
+  // A stage still being authored may not have its boss yet.
+  const boss = ENEMIES[level.bossId] as EnemyDef | undefined;
+  const bossKnown = boss ? isEnemyUnlocked(state, boss) : false;
   const hasUnits = state.ownedUnits.length > 0;
   const foes = [
     ...new Set(level.lanes.flatMap((l) => l.waves.flatMap((w) => w.groups.map((g) => g.enemyId)))),
@@ -230,20 +231,22 @@ function StageBriefing({
         </span>
       </div>
 
-      <div className={`campaign-boss${bossKnown ? '' : ' unknown'}`}>
-        <div className="campaign-boss-portrait">
-          <EnemySprite enemy={boss} size={56} silhouette={!bossKnown} />
-        </div>
-        <div>
-          <div className="campaign-boss-tag">
-            <Icon name="skull" /> Boss
+      {boss && (
+        <div className={`campaign-boss${bossKnown ? '' : ' unknown'}`}>
+          <div className="campaign-boss-portrait">
+            <EnemySprite enemy={boss} size={56} silhouette={!bossKnown} />
           </div>
-          <div className="campaign-boss-name">{bossKnown ? boss.name : '???'}</div>
-          <div className="campaign-boss-hint">
-            {bossKnown ? `Defeated ${enemyKillCount(state, boss.id)}×` : 'Defeat it to learn its secrets.'}
+          <div>
+            <div className="campaign-boss-tag">
+              <Icon name="skull" /> Boss
+            </div>
+            <div className="campaign-boss-name">{bossKnown ? boss.name : '???'}</div>
+            <div className="campaign-boss-hint">
+              {bossKnown ? `Defeated ${enemyKillCount(state, boss.id)}×` : 'Defeat it to learn its secrets.'}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {foes.length > 0 && (
         <>

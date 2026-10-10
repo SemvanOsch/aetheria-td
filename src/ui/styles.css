@@ -1723,8 +1723,51 @@ button:disabled .icon {
   60% { opacity: 0.25; transform: translate(6px, -5px); }
   100% { opacity: 0; transform: translate(11px, 1px); }
 }
+/* The castle smouldering once its chapter is won: flickering flames, a
+   breathing glow, embers and a thin smoke wisp leaning with the wind. */
+.wv-flame {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: wv-flame 0.9s ease-in-out infinite;
+}
+@keyframes wv-flame {
+  0%, 100% { transform: scale(1, 1) skewX(0deg); }
+  25% { transform: scale(0.9, 1.12) skewX(-5deg); }
+  50% { transform: scale(1.06, 0.9) skewX(3deg); }
+  75% { transform: scale(0.95, 1.06) skewX(-2deg); }
+}
+.wv-fire-glow { animation: wv-fire-glow 1.6s ease-in-out infinite; }
+@keyframes wv-fire-glow {
+  0%, 100% { opacity: 0.85; }
+  35% { opacity: 1; }
+  65% { opacity: 0.65; }
+}
+.wv-ember { opacity: 0; animation: wv-ember 2.7s ease-out infinite; }
+@keyframes wv-ember {
+  0% { transform: translate(0, 0); opacity: 0; }
+  15% { opacity: 1; }
+  100% { transform: translate(7px, -26px); opacity: 0; }
+}
+.wv-smoke {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: wv-smoke 4.8s linear infinite;
+}
+@keyframes wv-smoke {
+  0% { transform: translate(0, 0) scale(0.5); opacity: 0; }
+  20% { opacity: 0.4; }
+  100% { transform: translate(22px, -46px) scale(2); opacity: 0; }
+}
 
 @media (prefers-reduced-motion: reduce) {
+  .wv-flame,
+  .wv-fire-glow,
+  .wv-ember,
+  .wv-smoke {
+    animation: none;
+  }
+  .wv-smoke { opacity: 0.25; }
   .desk-light,
   .desk-drape,
   .cb-swirl,
@@ -3088,6 +3131,30 @@ button.cd-mastery:hover {
   color: #c08cff;
   text-shadow: 0 0 6px rgba(176, 120, 255, 0.6);
 }
+/* Range cut by the mist (a misty stage, away from any lit lantern). */
+.stat-row .s.debuff-range b {
+  color: #9fb4c4;
+  opacity: 0.85;
+}
+
+/* The mist rule, explained in the side panel on a misty stage. */
+.mist-note {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
+  border-color: rgba(174, 188, 182, 0.35);
+}
+.mist-note b {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #d8c48a;
+  font-size: 13px;
+}
 
 /* Active-buffs inspector in the selected-champion panel. */
 .buffs-box {
@@ -4273,6 +4340,69 @@ button.cd-mastery:hover {
   pointer-events: none;
 }
 
+/* "Light this lantern?" popup, anchored over a clicked dark lantern. */
+.lantern-prompt {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 10px));
+  padding: 8px 10px 9px;
+  border-radius: 10px;
+  background: rgba(14, 12, 10, 0.95);
+  border: 1px solid rgba(255, 200, 116, 0.55);
+  box-shadow: var(--shadow), 0 0 16px rgba(255, 190, 100, 0.18);
+  z-index: 16;
+  white-space: nowrap;
+  animation: lantern-prompt-in 0.14s ease-out;
+}
+.lantern-prompt::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 9px;
+  height: 9px;
+  background: inherit;
+  border-right: 1px solid rgba(255, 200, 116, 0.55);
+  border-bottom: 1px solid rgba(255, 200, 116, 0.55);
+  transform: translateX(-50%) rotate(45deg);
+}
+.lantern-prompt.below {
+  transform: translate(-50%, 64px);
+}
+.lantern-prompt.below::after {
+  bottom: auto;
+  top: -5px;
+  border: none;
+  border-left: 1px solid rgba(255, 200, 116, 0.55);
+  border-top: 1px solid rgba(255, 200, 116, 0.55);
+}
+.lantern-prompt .lp-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f2dca4;
+}
+.lantern-prompt .lp-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 7px;
+}
+.lantern-prompt .btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  gap: 4px;
+}
+.lantern-prompt .btn.unaffordable {
+  opacity: 0.6;
+}
+@keyframes lantern-prompt-in {
+  from {
+    opacity: 0;
+    margin-top: 4px;
+  }
+}
+
 /* hovered-enemy tooltip (positioned as % of the board, follows the enemy) */
 .enemy-tooltip {
   position: absolute;
@@ -4350,6 +4480,30 @@ button.cd-mastery:hover {
   font-weight: 600;
   color: var(--text-dim);
   white-space: nowrap;
+}
+/* A shielded foe's remaining shield hits, matching the board's pips. */
+.enemy-tooltip .et-shield {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #b9cdf5;
+  white-space: nowrap;
+}
+.enemy-tooltip .et-pips {
+  display: inline-flex;
+  gap: 2px;
+}
+.enemy-tooltip .et-pips > i {
+  width: 6px;
+  height: 7px;
+  background: rgba(70, 80, 100, 0.55);
+  clip-path: polygon(0 0, 100% 0, 100% 45%, 50% 100%, 0 45%);
+}
+.enemy-tooltip .et-pips > i.on {
+  background: #8fb4ff;
 }
 .boss-banner {
   display: flex;
@@ -7729,6 +7883,203 @@ button.cd-mastery.cd-armory:hover {
   font-size: 16px;
   color: var(--rarity);
 }
+/* ---- Field notes: a new foe's journal tab at the board's side ---- */
+.field-note-tab {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 46%;
+  padding: 7px 14px 7px 8px;
+  border-radius: 6px 10px 10px 6px;
+  border: 1px solid #3a2414;
+  border-left: 5px solid #8a2a22; /* the ribbon bound into the spine */
+  background:
+    repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.06) 0 2px, transparent 2px 6px),
+    linear-gradient(160deg, #7a4f2a, #4e3019);
+  box-shadow: inset 0 0 0 2px rgba(232, 191, 94, 0.25), var(--shadow);
+  color: var(--parch-0);
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translateY(-50%);
+  animation:
+    fn-tab-in 0.5s var(--ease-spring) both,
+    fn-tab-nudge 2.8s ease-in-out 0.6s infinite;
+}
+.field-note-tab:hover {
+  filter: brightness(1.12);
+}
+@keyframes fn-tab-in {
+  from { opacity: 0; transform: translate(40px, -50%) rotate(6deg); }
+  to { opacity: 1; transform: translate(0, -50%); }
+}
+@keyframes fn-tab-nudge {
+  0%, 70%, 100% { transform: translate(0, -50%) rotate(0); }
+  76% { transform: translate(-3px, -50%) rotate(-3deg); }
+  84% { transform: translate(-1px, -50%) rotate(2deg); }
+}
+.fn-tab-book {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 4px;
+  background: linear-gradient(160deg, var(--parch-0), var(--parch-2));
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink-soft);
+}
+.fn-tab-book svg { width: 20px; height: 20px; }
+.fn-tab-text { display: flex; flex-direction: column; min-width: 0; }
+.fn-tab-kicker {
+  font-family: var(--font-title);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #e8bf5e;
+}
+.fn-tab-name {
+  font-family: var(--font-hand);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* The slanted hand overhangs its last glyph's box; room for it inside the
+     clip, given back to the tab's own padding. */
+  padding-right: 0.25em;
+  margin-right: -0.15em;
+}
+.fn-tab-count {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 4px;
+  border-radius: 10px;
+  background: #8a2a22;
+  border: 1.5px solid var(--parch-0);
+  color: var(--parch-0);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* ---- Field notes: the single page the foe is written onto ---- */
+.field-note-backdrop {
+  z-index: 60;
+}
+.book-page.field-note-page {
+  flex: none;
+  width: min(440px, 100%);
+  height: min(640px, calc(100vh - 40px));
+  margin: auto;
+  padding: 26px 34px 62px;
+  border-radius: 6px;
+  box-shadow:
+    2px 2px 0 #dcc597,
+    4px 4px 0 #cdb17c,
+    6px 6px 0 #bea068,
+    7px 7px 0 #3a2414,
+    0 20px 50px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+  animation: fn-page-in 0.32s var(--ease-spring) both;
+}
+.book-page.field-note-page.done { cursor: default; }
+@keyframes fn-page-in {
+  from { opacity: 0; transform: translateY(16px) rotate(-1.5deg) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+.field-note-page .j-entry { animation: none; }
+.field-note-page .j-frame { width: 156px; height: 162px; }
+.field-note-page .j-ledger > .fn-ink { width: 100%; }
+/* Long names step down a size (useFitText) rather than wrapping. */
+.field-note-page .j-name { white-space: nowrap; }
+
+/* One written line: its body is unmasked left to right while the quill rides
+   the leading edge, then lifts off the page. */
+.fn-ink {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+}
+.fn-ink-body {
+  animation: fn-write var(--dur) linear var(--at) both;
+}
+@keyframes fn-write {
+  from { clip-path: inset(-30% 100% -30% 0); }
+  to { clip-path: inset(-30% -4% -30% 0); }
+}
+.fn-quill {
+  position: absolute;
+  bottom: 40%;
+  left: 0;
+  width: 22px;
+  height: 22px;
+  color: var(--ink);
+  opacity: 0;
+  pointer-events: none;
+  animation: fn-quill-ride var(--dur) linear var(--at) forwards;
+}
+.fn-quill svg { width: 100%; height: 100%; }
+@keyframes fn-quill-ride {
+  0% { left: 0; opacity: 1; transform: rotate(-4deg); }
+  25% { transform: translateY(-2px) rotate(4deg); }
+  50% { transform: rotate(-4deg); }
+  75% { transform: translateY(-2px) rotate(4deg); }
+  99% { left: 100%; opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+/* Paragraph words land one after another, each a quick stroke of ink. */
+.fn-word {
+  display: inline-block;
+  animation: fn-word 0.16s ease-out var(--at) both;
+}
+@keyframes fn-word {
+  from { opacity: 0; clip-path: inset(-30% 100% -30% 0); filter: blur(0.6px); }
+  to { opacity: 1; clip-path: inset(-30% -4% -30% 0); filter: none; }
+}
+/* The figure is sketched in: a faint pencil outline that inks and colours. */
+.fn-sketch .unit-sprite {
+  animation: fn-sketch var(--dur) ease-out var(--at) both;
+}
+@keyframes fn-sketch {
+  0% { opacity: 0; filter: grayscale(1) sepia(0.8) contrast(2.2) brightness(1.5); }
+  45% { opacity: 0.75; filter: grayscale(1) sepia(0.7) contrast(1.6) brightness(1.15); }
+  100% { opacity: 1; filter: none; }
+}
+.fn-stamp {
+  animation: fn-stamp 0.32s cubic-bezier(0.3, 1.6, 0.5, 1) both;
+}
+@keyframes fn-stamp {
+  from { opacity: 0; transform: rotate(-6deg) scale(1.9); }
+  to { opacity: 0.85; transform: rotate(-6deg) scale(1); }
+}
+/* "Skip" all the way: everything shows at once. */
+.field-note-page.done .fn-ink-body,
+.field-note-page.done .fn-word,
+.field-note-page.done .fn-sketch .unit-sprite {
+  animation: none;
+}
+.field-note-page.done .fn-quill { display: none; }
+.fn-close {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.j-btn.fn-close:hover:not(:disabled) { transform: translate(-50%, -1px); }
+@media (prefers-reduced-motion: reduce) {
+  .field-note-tab { animation: fn-tab-in 0.01s both; }
+}
+
 .loot-list {
   margin: 4px 0 18px;
 }
@@ -8326,5 +8677,230 @@ button.cd-mastery.cd-armory:hover {
 @media (max-width: 900px) {
   .cd-top {
     flex-direction: column;
+  }
+}
+
+/* ---------- Ending cutscene (GetawayCutscene) ---------- */
+/* A black stage over the whole screen, the 16:10 board canvas centred in it,
+   cinematic letterbox bars, storybook captions in the lower bar and a gilt
+   chapter title card. It opens with the board zooming out from its place on
+   the battle screen (set inline by the component) while only the backdrop
+   fades to black around it; the bars and the Skip pill follow once it lands. */
+.cutscene {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: grid;
+  place-items: center;
+  background: #000;
+  animation: cutscene-in 1.1s ease both;
+}
+
+/* The ending is over: the overlay fades off the result card beneath it. */
+.cutscene.leaving {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.8s ease;
+}
+
+@keyframes cutscene-in {
+  from {
+    background-color: rgba(0, 0, 0, 0);
+  }
+  to {
+    background-color: #000;
+  }
+}
+
+.cutscene-frame {
+  position: relative;
+  width: min(100vw, calc(100vh * 1.6));
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+}
+
+.cutscene-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.cutscene-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  height: 0;
+  background: #000;
+}
+
+.cutscene-bar.top {
+  top: 0;
+}
+
+.cutscene-bar.bottom {
+  bottom: 0;
+}
+
+.cutscene-bar.in {
+  height: 9.5%;
+  /* Slides in once the board has landed, and stays until the whole overlay
+     fades out (`.cutscene.leaving`). */
+  animation: cutscene-bar-in 1s var(--ease-out) 0.9s both;
+}
+
+@keyframes cutscene-bar-in {
+  from {
+    height: 0;
+  }
+}
+
+.cutscene-caption {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  bottom: 0;
+  z-index: 2;
+  height: 9.5%;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-family: var(--font-story);
+  font-style: italic;
+  font-size: clamp(14px, 2.2vw, 25px);
+  line-height: 1.2;
+  color: var(--text);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
+  animation: cutscene-caption 4.8s ease both;
+}
+
+@keyframes cutscene-caption {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  14%,
+  84% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.cutscene-title {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 0 8%;
+  text-align: center;
+  animation: cutscene-title 1.8s var(--ease-out) both;
+}
+
+.phase-out .cutscene-title {
+  animation: cutscene-out 0.9s ease forwards;
+}
+
+@keyframes cutscene-title {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes cutscene-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.cutscene-title-eyebrow {
+  font-family: var(--font-title);
+  font-size: clamp(11px, 1.3vw, 15px);
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.cutscene-title-name {
+  margin: 0;
+  font-family: var(--font-title);
+  font-size: clamp(34px, 6.5vw, 78px);
+  letter-spacing: 0.06em;
+  background: var(--gild);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 3px 14px rgba(0, 0, 0, 0.85));
+}
+
+.cutscene-title-rule {
+  width: min(360px, 42%);
+  height: 1px;
+  background: var(--gild-line);
+}
+
+.cutscene-title-line {
+  margin: 0;
+  font-family: var(--font-story);
+  font-style: italic;
+  font-size: clamp(14px, 1.8vw, 21px);
+  color: var(--text-dim);
+}
+
+.cutscene-skip {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid rgba(232, 191, 94, 0.35);
+  border-radius: 999px;
+  background: rgba(10, 8, 16, 0.55);
+  color: var(--text-dim);
+  font-family: var(--font-title);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity 0.2s, color 0.2s, border-color 0.2s;
+  animation: cutscene-skip-in 0.6s ease 1.2s both;
+}
+
+.cutscene-skip:hover,
+.cutscene-skip:focus-visible {
+  opacity: 1;
+  color: var(--gold-hi);
+  border-color: var(--gold);
+}
+
+@keyframes cutscene-skip-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cutscene,
+  .cutscene-bar.in,
+  .cutscene-skip {
+    animation-duration: 0.01s;
+    animation-delay: 0s;
   }
 }

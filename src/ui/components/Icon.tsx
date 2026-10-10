@@ -63,7 +63,8 @@ export type IconName =
   | 'dice'
   | 'turn'
   | 'undo'
-  | 'quill';
+  | 'quill'
+  | 'lantern';
 
 const F = 'ic-fill';
 
@@ -370,6 +371,14 @@ const GLYPHS: Record<IconName, ReactNode> = {
     <>
       <path className={F} d="M19.8 4.2c-6.2.6-10.6 4.8-12.2 11.6l2.4.2c3.2-1.2 6.6-4.2 9.8-11.8z" />
       <path d="M19.8 4.2c-6.2.6-10.6 4.8-12.2 11.6l2.4.2c3.2-1.2 6.6-4.2 9.8-11.8zM7.6 15.8l-3.2 4M11.2 11.2l-1.8 3.2" />
+    </>
+  ),
+  lantern: (
+    <>
+      <path d="M12 2.6v2.2M9.4 7.6L12 4.8l2.6 2.8" />
+      <rect className={F} x="8" y="7.6" width="8" height="10" rx="1.4" />
+      <rect x="8" y="7.6" width="8" height="10" rx="1.4" />
+      <path d="M12 10.4c1 1.2 1.2 2.2 0 3.6-1.2-1.4-1-2.4 0-3.6zM7.4 17.6h9.2M9.6 20.6h4.8M12 17.6v3" />
     </>
   ),
 };

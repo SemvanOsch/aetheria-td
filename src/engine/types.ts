@@ -27,6 +27,12 @@ export interface Enemy {
   /** Multiplicative slow (1 = normal speed); reserved for future effects. */
   slowFactor: number;
   slowTimer: number;
+  /**
+   * A light-shy foe (`EnemyDef.lightSlow`) losing the scent in lantern light,
+   * 0→1: eases up while it is in the light and back down out of it. Blends its
+   * speed toward `lightSlow` and its sprite from gallop to slink.
+   */
+  cower: number;
   dead: boolean;
   /** Brief hit flash timer for damage feedback. */
   hitFlash: number;
@@ -76,6 +82,32 @@ export interface Enemy {
    */
   wardReduction: number;
   /**
+   * Shield points left (see `EnemyDef.shieldHits`): each hit while > 0 is
+   * absorbed outright and knocks one off. Starts at `def.shieldHits ?? 0`; the
+   * renderer shows it as pips over the health bar.
+   */
+  shield: number;
+  /**
+   * The most shield points this enemy has held (its own `shieldHits`, raised
+   * when a rally stacks more on). Sizes the pip row so spent points show hollow.
+   */
+  shieldMax: number;
+  /**
+   * Rally state (see `EnemyDef.rally`): `rallyTimer` counts down to the next
+   * rally while walking; `rallyT` counts up through one (seconds in), -1 when
+   * not rallying. While rallying the enemy stands still. Both unused without a
+   * `def.rally`.
+   */
+  rallyTimer: number;
+  rallyT: number;
+  /**
+   * Summon state (see `EnemyDef.summon`), like the rally's: `summonTimer`
+   * counts down to the next call while walking; `summonT` counts up through one
+   * (seconds in), -1 when not summoning. It stands still while it calls.
+   */
+  summonTimer: number;
+  summonT: number;
+  /**
    * Death-animation state. When an enemy with a `def.deathAnimation` takes a
    * lethal hit it doesn't vanish immediately: `dying` flips true and `deathT`
    * counts up in seconds while the renderer plays the special death (Gowzer's
@@ -107,6 +139,13 @@ export function attackAnimTime(shape: string): number {
   if (shape === 'player-staff') return 0.42;
   return 0.18;
 }
+
+/**
+ * Where a lantern post's glass hangs, relative to its cell's centre: the
+ * painting (`lanternPost` in `props.ts`), its light and the engine's light-up
+ * fx all share it.
+ */
+export const LANTERN_GLASS = { x: 13, y: -32 } as const;
 
 // Signature moves (`Tower.specialAnim`): each plays its own longer pose, and the
 // engine lands the blow `*_HIT_DELAY` into it — matched to the sprite's cut
@@ -170,6 +209,34 @@ export function specialAnimTime(shape: string): number {
 }
 
 /** Whether an enemy is still delivering its spawn lines (frozen & untargetable). */
+/**
+ * How far into its rally pose an enemy is, 0..1: eases up over the first
+ * `RALLY_POSE_EASE` of the rally, holds, and eases back down over the last
+ * stretch. 0 when not rallying. Read by the renderer to blend the sprite.
+ */
+export function rallyPose(e: Enemy): number {
+  const r = e.def.rally;
+  if (!r || e.rallyT < 0) return 0;
+  const k = e.rallyT / r.duration;
+  return Math.max(0, Math.min(1, k / RALLY_POSE_EASE, (1 - k) / RALLY_POSE_EASE));
+}
+/** Fraction of a rally spent raising (and again lowering) the standard. */
+export const RALLY_POSE_EASE = 0.2;
+
+/**
+ * How far into its summon pose an enemy is, 0..1 (the Hound Master raising his
+ * whistle): eases up over the first `SUMMON_POSE_EASE` of the call, holds while
+ * he blows, and eases back down. 0 when not summoning.
+ */
+export function summonPose(e: Enemy): number {
+  const s = e.def.summon;
+  if (!s || e.summonT < 0) return 0;
+  const k = e.summonT / s.duration;
+  return Math.max(0, Math.min(1, k / SUMMON_POSE_EASE, (1 - k) / SUMMON_POSE_EASE));
+}
+/** Fraction of a summon spent raising (and again lowering) the whistle. */
+export const SUMMON_POSE_EASE = 0.25;
+
 export function isSpeaking(e: Enemy): boolean {
   return (
     !!e.def.spawnLines &&
@@ -236,6 +303,12 @@ export interface Tower {
    * the exact percentage; set alongside `rangeBuffed` on the board recompute.
    */
   rangeBuffMult: number;
+  /**
+   * The mist multiplier on this tower's range (1 = clear; `MIST_RANGE_MULT` when
+   * it stands in the mist of a misty stage, away from any lit lantern). Folded
+   * into `range` on the board recompute, like the range aura.
+   */
+  mistMult: number;
   /**
    * Pixels each hit shoves an enemy back along its path (0 = none; see the
    * Wizard's Gale Force). A fixed deploy-time property read in `damageEnemy`.
@@ -752,8 +825,52 @@ export type FxEvent =
       length: number;
     }
   | { kind: 'dodge'; x: number; y: number }
+  | {
+      /** A shielded foe turned a hit aside; `broke` when that was its last shield point. */
+      kind: 'block';
+      x: number;
+      y: number;
+      fromX: number;
+      fromY: number;
+      broke: boolean;
+    }
+  | {
+      /**
+       * A rally's call (`granted: false`, as the standard goes up) or its
+       * blessing (`granted: true`): `targets` are the foes that just gained shield.
+       */
+      kind: 'rally';
+      x: number;
+      y: number;
+      granted: boolean;
+      targets: { x: number; y: number }[];
+    }
   | { kind: 'breach'; x: number; y: number; boss: boolean }
   | { kind: 'deploy'; x: number; y: number; color: string }
+  | {
+      /** A summoner's call answered: `spawns` are where the new foes burst out. */
+      kind: 'summon';
+      x: number;
+      y: number;
+      spawns: { x: number; y: number }[];
+    }
+  | {
+      /** A light-shy foe skidding as it loses the scent; `dx`,`dy` its heading. */
+      kind: 'skid';
+      x: number;
+      y: number;
+      dx: number;
+      dy: number;
+    }
+  | {
+      /** A lantern post lit: `x`,`y` its glass, `radius` the mist it clears around its cell's centre (`cx`,`cy`). */
+      kind: 'lantern';
+      x: number;
+      y: number;
+      cx: number;
+      cy: number;
+      radius: number;
+    }
   | { kind: 'bossSpawn'; x: number; y: number; color: string };
 
 export type Outcome = 'playing' | 'won' | 'lost';

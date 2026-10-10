@@ -899,9 +899,43 @@ const LIT = [
   [452, 168],
 ];
 
+/** Where the castle burns once its chapter is won: [x, y (the flame's foot), scale]. */
+const BLAZES: [number, number, number][] = [
+  [467, 119, 1],
+  [410.5, 139, 0.7],
+  [360, 154, 0.5],
+];
+
+/** A small fire with its glow, a rising wisp of smoke and a few embers, its
+ *  foot at the origin. */
+function Blaze({ x, y, s, delay }: { x: number; y: number; s: number; delay: number }) {
+  const d = (k: number) => ({ animationDelay: `${delay + k}s` });
+  return (
+    <g transform={`translate(${x} ${y}) scale(${s})`}>
+      {[0, 1, 2].map((i) => (
+        <circle key={i} className="wv-smoke" cx="1" cy="-16" r="5" fill="#4a4658" filter="url(#wv-blur)" style={d(i * -1.6)} />
+      ))}
+      <circle className="wv-fire-glow" cy="-6" r="20" fill="url(#wv-fire-glow)" style={d(0)} />
+      <g className="wv-flame" style={d(-0.4)}>
+        <path d="M0 0 C-5 0 -6 -4 -4 -8 C-3 -11 -1 -12 0 -17 C1 -12 4.5 -10 4.5 -6 C5 -2.5 3.5 0 0 0 Z" fill="#d9481f" />
+        <path d="M0 0 C-3 0 -3.5 -3 -2 -6 C-1 -8 0 -9 0.4 -11.5 C1.6 -8.5 2.8 -6 2.5 -3.5 C2.4 -1 1.5 0 0 0 Z" fill="#ffa63d" />
+        <path d="M0 0 C-1.4 0 -1.6 -1.8 -0.6 -3.6 L0.3 -5.6 C1 -3.8 1.4 -2.4 1.2 -1.2 C1 -0.2 0.6 0 0 0 Z" fill="#ffe7a0" />
+      </g>
+      <g className="wv-flame" style={d(-1.1)}>
+        <path d="M-3 0 C-6 -1 -6.5 -4 -5 -7 L-4.4 -10 C-3 -7 -1.5 -5 -1.6 -2.5 C-1.7 -1 -2 0 -3 0 Z" fill="#e8642a" />
+      </g>
+      {[-2, 1.5, 3].map((ex, i) => (
+        <circle key={i} className="wv-ember" cx={ex} cy="-8" r="0.7" fill="#ffc46a" style={d(i * -0.9)} />
+      ))}
+    </g>
+  );
+}
+
 /** The moonlit view through the window: drifting clouds, a lit castle on its
- *  cliff, a bridge, a lake that glitters, birds, fireflies, a shooting star. */
-export function WindowView() {
+ *  cliff, a bridge, a lake that glitters, birds, fireflies, a shooting star.
+ *  Once the Castle chapter is won (`burning`), the castle smoulders: a few
+ *  small fires on its roofs and walls. */
+export function WindowView({ burning = false }: { burning?: boolean }) {
   return (
     <svg className="desk-window-view" viewBox="0 0 600 260" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
       <defs>
@@ -930,6 +964,11 @@ export function WindowView() {
         <filter id="wv-blur" x="-20%" y="-50%" width="140%" height="200%">
           <feGaussianBlur stdDeviation="2.2" />
         </filter>
+        <radialGradient id="wv-fire-glow">
+          <stop offset="0" stopColor="#ff8a3a" stopOpacity="0.5" />
+          <stop offset="0.5" stopColor="#ff6a2a" stopOpacity="0.16" />
+          <stop offset="1" stopColor="#ff6a2a" stopOpacity="0" />
+        </radialGradient>
         <filter id="wv-haze" x="-20%" y="-50%" width="140%" height="200%">
           <feGaussianBlur stdDeviation="5" />
         </filter>
@@ -986,6 +1025,7 @@ export function WindowView() {
         <path d="M0 0 L0 -12" stroke="#0b1330" strokeWidth="1.2" />
         <path className="wv-flag" d="M0 -12 L11 -9 L0 -6 Z" fill="#a83a3a" />
       </g>
+      {burning && BLAZES.map(([x, y, s], i) => <Blaze key={i} x={x} y={y} s={s} delay={i * -0.7} />)}
 
       {/* The bridge from the far shore to the cliff, its lanterns lit. */}
       <path d="M150 192 L340 186 L340 196 L150 202 Z" fill="#0f1a3a" />
@@ -1004,6 +1044,10 @@ export function WindowView() {
       {LIT.slice(0, 5).map(([x], i) => (
         <rect key={i} className="wv-glint" x={x - 2} y={214 + i * 3} width="7" height="1.4" fill="#ffc46a" opacity="0.5" style={{ animationDelay: `${i * 0.6}s` }} />
       ))}
+      {burning &&
+        BLAZES.map(([x, , s], i) => (
+          <rect key={i} className="wv-glint" x={x - 5 * s} y={208 + i * 2} width={10 * s} height="1.6" rx="0.8" fill="#ff8a3a" opacity="0.6" style={{ animationDelay: `${i * -0.8}s` }} />
+        ))}
       {[0, 1, 2, 3, 4].map((i) => (
         <rect key={i} className="wv-glint" x={238 - i * 3} y={212 + i * 8} width={22 + i * 7} height="1.6" rx="0.8" fill="#dfe8ff" opacity="0.55" style={{ animationDelay: `${i * 0.45}s` }} />
       ))}

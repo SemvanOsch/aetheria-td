@@ -51,6 +51,8 @@ import {
 import { BOSS_BOX, DEFAULT_BOX, paintFigure, type FigureStyle } from './figure';
 import { bakeTerrain } from './terrain';
 import { Lighting, flicker, type Light } from './lighting';
+import { MistLayer, type MistClear } from './mistLayer';
+import { lightableProp } from '../domain/mist';
 import { Vfx, type Corpse } from './vfx';
 import { drawLegacyDecor, drawProp, propAnchor, PROP_META } from './props';
 import { FEEDBACK, INK, LIGHT, ease, shade, tintRamp, withAlpha } from './palette';
@@ -73,6 +75,8 @@ import {
   GREATER_ORB_LAND,
   GREATER_ORB_THROW_TIME,
   isSpeaking,
+  rallyPose,
+  summonPose,
   manaStormStance,
   PIERCING_CAST_ANIM_TIME,
   specialAnimTime,
@@ -89,6 +93,29 @@ export interface RenderUiState {
   selectedTowerUid: number | null;
   /** Enemy under the cursor (outlined as a threat); optional. */
   hoverEnemyUid?: number | null;
+  /** A cutscene directing the board (see `BoardScene`); optional. */
+  scene?: BoardScene;
+}
+
+/** A figure a cutscene adds to the board, depth-sorted with the world by `base`. */
+export interface SceneActor {
+  base: number;
+  draw: (ctx: CanvasRenderingContext2D) => void;
+}
+
+/**
+ * A cutscene's hold on the board (the getaway ending): it can take the
+ * deployed champions and chosen props off the board to animate them itself as
+ * `actors` (drawn in the lit, depth-sorted world), and add moving `lights`.
+ * Cosmetic only — the engine never sees it.
+ */
+export interface BoardScene {
+  /** Leave the deployed champions undrawn (the scene draws them). */
+  hideTowers?: boolean;
+  /** Indices into `level.decor` of props not to draw. */
+  hiddenDecor?: ReadonlySet<number>;
+  actors?: SceneActor[];
+  lights?: Light[];
 }
 
 /**
@@ -96,11 +123,11 @@ export interface RenderUiState {
  * about the feet. Slightly larger than the authored sprite so silhouettes read
  * at a glance; bosses scale themselves inside their own sprite.
  */
-const FIGURE_SCALE = 1.12;
+export const FIGURE_SCALE = 1.12;
 
 /** Stable cache-key fragment for a player avatar config (memoized per object). */
 const CFG_KEYS = new WeakMap<object, string>();
-function cfgKey(cfg: object | undefined): string {
+export function cfgKey(cfg: object | undefined): string {
   if (!cfg) return '';
   let k = CFG_KEYS.get(cfg);
   if (!k) {
@@ -132,13 +159,36 @@ const FONT_UI = "'Inter', system-ui, sans-serif";
 interface StaticLight extends Light {
   flicker: boolean;
   phase: number;
+  /** Index of the decor prop casting it (a scene may hide that prop). */
+  decor: number;
+  /** A lightable prop's light: dark until the player lights it. */
+  lantern: boolean;
 }
 
 interface BoardState {
   atmo: Atmosphere;
   terrain: HTMLCanvasElement | null;
   terrainKey: string;
+  /**
+   * While a hidden lane rolls out: the ground baked as it will look once the
+   * lane is in (`terrainNext`), a scratch canvas it is masked through, and
+   * each rolling lane's new stretch (start/end distance along its waypoints).
+   */
+  terrainNext: HTMLCanvasElement | null;
+  terrainNextKey: string;
+  /** The lanes baked into `terrain` and `terrainNext`. */
+  terrainLanes: number[];
+  terrainNextLanes: number[];
+  revealMask: HTMLCanvasElement | null;
+  revealSpans: Map<number, [number, number]>;
   lighting: Lighting;
+  /** The drifting mist layer (made on first use, for a mood with `mist`). */
+  mist: MistLayer | null;
+  /**
+   * Each lit lantern's light coming up, 0→1 by decor index: its glow and the
+   * hole it burns in the mist swell in over `LANTERN_KINDLE` seconds.
+   */
+  lanternGlow: Map<number, number>;
   vfx: Vfx;
   last: number;
   /** Prop lights (static positions; flicker applied per frame). */
@@ -178,7 +228,7 @@ function stateFor(engine: GameEngine): BoardState {
   const propLights: StaticLight[] = [];
   const flames: BoardState['flames'] = [];
   const chimneys: BoardState['chimneys'] = [];
-  for (const p of engine.level.decor ?? []) {
+  (engine.level.decor ?? []).forEach((p, di) => {
     const meta = PROP_META[p.kind];
     const a = propAnchor(p.col, p.row);
     for (const L of meta.lights ?? []) {
@@ -191,16 +241,27 @@ function stateFor(engine: GameEngine): BoardState {
         glow: L.glow ?? 1,
         flicker: !!L.flicker,
         phase: (p.col * 7.1 + p.row * 3.3) % 6.28,
+        decor: di,
+        lantern: !!lightableProp(p.kind),
       });
     }
     for (const f of meta.flames ?? []) flames.push({ x: a.x + f.dx, y: a.y + f.dy, strength: f.strength ?? 1 });
     for (const c of meta.chimneys ?? []) chimneys.push({ x: a.x + c.dx, y: a.y + c.dy });
-  }
+  });
   st = {
     atmo: engine.level.atmosphere ?? atmosphereFor(engine.level.mood, engine.level.section),
     terrain: null,
     terrainKey: '',
+    terrainNext: null,
+    terrainNextKey: '',
+    terrainLanes: [],
+    terrainNextLanes: [],
+    revealMask: null,
+    revealSpans: new Map(),
     lighting: new Lighting(),
+    mist: null,
+    // Lanterns already burning when the stage opens start at full light.
+    lanternGlow: new Map([...engine.litLanterns].map((i) => [i, 1])),
     vfx: new Vfx(),
     last: now(),
     propLights,
@@ -241,6 +302,9 @@ export function drawBoard(
   }
   st.vfx.update(dt);
   st.vfx.weather(st.atmo.weather, st.atmo.weatherDensity ?? 1, dt);
+  for (const i of engine.litLanterns) {
+    st.lanternGlow.set(i, Math.min(1, (st.lanternGlow.get(i) ?? 0) + dt / LANTERN_KINDLE));
+  }
   for (const f of st.flames) st.vfx.flame(f.x, f.y, dt, f.strength);
   for (const c of st.chimneys) st.vfx.chimney(c.x, c.y, dt);
   for (const tw of engine.towers) {
@@ -265,6 +329,7 @@ export function drawBoard(
 
   // 1. Ground.
   drawGround(ctx, engine, st);
+  drawGroundProps(ctx, engine, ui);
   st.vfx.drawDecals(ctx);
   drawManaPools(ctx, engine);
   drawManaSwirls(ctx, engine, false);
@@ -278,10 +343,14 @@ export function drawBoard(
   drawShots(ctx, engine);
 
   // 3. Lighting.
-  const lights = collectLights(engine, st, t / 1000);
+  const lights = collectLights(engine, st, t / 1000, ui.scene);
   const bossDark = engine.enemies.some((e) => e.def.boss && !e.dead) ? 0.08 : 0;
   const atmo = bossDark ? { ...st.atmo, darkness: Math.min(0.75, st.atmo.darkness + bossDark) } : st.atmo;
   st.lighting.render(ctx, lights, atmo, st.vfx.exposure);
+  if (st.atmo.mist) {
+    st.mist ??= new MistLayer();
+    st.mist.render(ctx, st.atmo.mist, mistClears(engine, st), t / 1000);
+  }
 
   // 4. Glow: attacks and spells read as light.
   drawSlices(ctx, engine);
@@ -301,7 +370,8 @@ export function drawBoard(
   ctx.restore();
 
   // 5. Overlays (unshaken, unlit).
-  drawTowerOverlays(ctx, engine);
+  if (!ui.scene) drawLanternOverlays(ctx, engine, ui);
+  if (!ui.scene?.hideTowers) drawTowerOverlays(ctx, engine);
   drawEnemyOverlays(ctx, engine, ui);
   drawThrowCharge(ctx, engine, ui);
   drawSelectedAoe(ctx, engine, ui);
@@ -335,8 +405,10 @@ function themeFor(engine: GameEngine): BoardTheme | undefined {
 
 /**
  * The baked floor + path, re-baked only when the set of fully revealed lanes
- * changes (or the device scale does). A lane still rolling out is stroked live
- * on top with its plain layers until it completes and joins the bake.
+ * changes (or the device scale does). A lane still rolling out is unmasked
+ * live on top (`drawRollingLanes`), and when it lands its stretch is stamped
+ * onto the ground already showing instead of re-baking: a fresh bake deals
+ * every speck of path detail anew, so the old paths would visibly jump.
  */
 function drawGround(ctx: CanvasRenderingContext2D, engine: GameEngine, st: BoardState): void {
   const scale = Math.min(2, Math.max(1, ctx.getTransform().a));
@@ -349,40 +421,165 @@ function drawGround(ctx: CanvasRenderingContext2D, engine: GameEngine, st: Board
   });
   const key = `${done.join(',')}@${scale}`;
   if (!st.terrain || st.terrainKey !== key) {
-    st.terrain = bakeTerrain({
-      stageKey: engine.level.id,
-      theme: themeFor(engine),
-      lanes: done.map((i) => engine.lanes[i].waypoints),
-      scale,
-    });
+    const landed = done.filter((i) => !st.terrainLanes.includes(i));
+    const next = st.terrainNext;
+    const stamp =
+      st.terrain &&
+      next &&
+      st.terrainKey === `${st.terrainLanes.join(',')}@${scale}` &&
+      st.terrainNextKey === `${st.terrainNextLanes.join(',')}@${scale}` &&
+      st.terrainLanes.every((i) => done.includes(i)) &&
+      landed.every((i) => st.terrainNextLanes.includes(i) && st.revealSpans.has(i));
+    if (stamp) {
+      const mask = paintRevealMask(st, engine, landed.map((i) => [i, 1]), scale).mask;
+      const grown = document.createElement('canvas');
+      grown.width = st.terrain!.width;
+      grown.height = st.terrain!.height;
+      const g = grown.getContext('2d')!;
+      g.drawImage(st.terrain!, 0, 0);
+      g.drawImage(mask, 0, 0);
+      st.terrain = grown;
+    } else {
+      st.terrain = bakeTerrain({
+        stageKey: engine.level.id,
+        theme: themeFor(engine),
+        lanes: done.map((i) => engine.lanes[i].waypoints),
+        scale,
+      });
+    }
     st.terrainKey = key;
+    st.terrainLanes = done;
   }
   ctx.drawImage(st.terrain, 0, 0, BOARD_WIDTH, BOARD_HEIGHT);
-  if (rolling.length) drawRollingLanes(ctx, engine, rolling);
+  if (rolling.length) drawRollingLanes(ctx, engine, st, rolling, scale);
+  else st.terrainNext = null;
 }
 
-/** A hidden lane rolling out mid-battle: its leading fraction, plain layers. */
-function drawRollingLanes(ctx: CanvasRenderingContext2D, engine: GameEngine, lanes: number[]): void {
-  ctx.save();
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  const layers: [string, number][] = themeFor(engine)?.path ?? DEFAULT_PATH_LAYERS;
-  const shapes = lanes.map((i) => partialPolyline(engine.lanes[i].waypoints, engine.laneRevealFraction(i)));
-  for (const [color, width] of layers) {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    for (const pts of shapes) strokePolyline(ctx, pts);
+/**
+ * A hidden lane rolling out mid-battle. Only its new stretch unrolls (from
+ * where it leaves the visible paths to where it first joins one, never back
+ * over a channel that is already there), and in the real path material: the
+ * ground is baked once as it will look with the lane in, and a growing stroke
+ * along the lane unmasks it over the ground already showing.
+ */
+function drawRollingLanes(
+  ctx: CanvasRenderingContext2D,
+  engine: GameEngine,
+  st: BoardState,
+  rolling: number[],
+  scale: number,
+): void {
+  const all = [...st.terrainLanes, ...rolling].sort((a, b) => a - b);
+  const key = `${all.join(',')}@${scale}`;
+  if (!st.terrainNext || st.terrainNextKey !== key) {
+    st.terrainNext = bakeTerrain({
+      stageKey: engine.level.id,
+      theme: themeFor(engine),
+      lanes: all.map((i) => engine.lanes[i].waypoints),
+      scale,
+    });
+    st.terrainNextKey = key;
+    st.terrainNextLanes = all;
   }
-  // A bright leading edge where the carpet is unrolling.
-  for (const pts of shapes) {
-    const tip = pts[pts.length - 1];
+  const { mask, tips } = paintRevealMask(
+    st,
+    engine,
+    rolling.map((i) => [i, engine.laneRevealFraction(i)]),
+    scale,
+  );
+  ctx.drawImage(mask, 0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+
+  // A bright leading edge where the path is opening up; it dies away as the
+  // path lands, so the hand-off to the ground is seamless.
+  ctx.save();
+  for (const tip of tips) {
     const g = ctx.createRadialGradient(tip.x, tip.y, 0, tip.x, tip.y, 26);
-    g.addColorStop(0, 'rgba(255,220,150,0.55)');
+    g.addColorStop(0, `rgba(255,220,150,${(0.55 * Math.min(1, (1 - tip.frac) / 0.25)).toFixed(3)})`);
     g.addColorStop(1, 'rgba(255,220,150,0)');
     ctx.fillStyle = g;
     ctx.fillRect(tip.x - 26, tip.y - 26, 52, 52);
   }
   ctx.restore();
+}
+
+/**
+ * `terrainNext` cut down to the opened part (by `frac`, 0→1) of each lane's
+ * new stretch, into the reused `revealMask` canvas at bake resolution. The
+ * cut is feathered, so where the stretch meets an older path its detail
+ * blends into theirs rather than showing a seam.
+ */
+function paintRevealMask(
+  st: BoardState,
+  engine: GameEngine,
+  lanes: [number, number][],
+  scale: number,
+): { mask: HTMLCanvasElement; tips: { x: number; y: number; frac: number }[] } {
+  const next = st.terrainNext!;
+  let mask = st.revealMask;
+  if (!mask || mask.width !== next.width || mask.height !== next.height) {
+    mask = st.revealMask = document.createElement('canvas');
+    mask.width = next.width;
+    mask.height = next.height;
+  }
+  const m = mask.getContext('2d')!;
+  m.setTransform(1, 0, 0, 1, 0, 0);
+  m.globalCompositeOperation = 'source-over';
+  m.clearRect(0, 0, mask.width, mask.height);
+  m.setTransform(scale, 0, 0, scale, 0, 0);
+  m.lineJoin = 'round';
+  m.lineCap = 'round';
+  // Wide enough for the border band, the shadow the path casts and the feather.
+  m.lineWidth = ((themeFor(engine)?.path ?? DEFAULT_PATH_LAYERS)[0]?.[1] ?? TILE - 4) + 14;
+  m.strokeStyle = '#000';
+  m.filter = `blur(${3 * scale}px)`;
+  const tips: { x: number; y: number; frac: number }[] = [];
+  for (const [i, frac] of lanes) {
+    const pts = engine.lanes[i].waypoints;
+    let span = st.revealSpans.get(i);
+    if (!span) {
+      span = revealSpan(pts, st.terrainLanes.map((j) => engine.lanes[j].waypoints));
+      st.revealSpans.set(i, span);
+    }
+    const [from, to] = span;
+    const part = slicePolyline(pts, from, from + (to - from) * ease.inOutSine(frac));
+    if (part.length < 2) continue;
+    strokePolyline(m, part);
+    tips.push({ ...part[part.length - 1], frac });
+  }
+  m.filter = 'none';
+  m.setTransform(1, 0, 0, 1, 0, 0);
+  m.globalCompositeOperation = 'source-in';
+  m.drawImage(next, 0, 0);
+  return { mask, tips };
+}
+
+/**
+ * The stretch of a lane that is new on the board, as [from, to] distances
+ * along its waypoints: from where it leaves the already-visible paths (its
+ * start, usually) to where its centreline first meets one of theirs again.
+ */
+function revealSpan(pts: Vec2[], others: Vec2[][]): [number, number] {
+  const STEP = 2;
+  const onOther = (p: Vec2) => others.some((o) => o.some((b, k) => k > 0 && distToSegment(p, o[k - 1], b) < 1));
+  const total = polylineLength(pts);
+  let from = -1;
+  for (let d = 0; d <= total; d += STEP) {
+    const on = onOther(pointAlong(pts, d));
+    if (from < 0) {
+      if (!on) from = Math.max(0, d - STEP);
+    } else if (on) {
+      return [from, d];
+    }
+  }
+  return [Math.max(0, from), total];
+}
+
+function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+  return Math.hypot(p.x - a.x - dx * t, p.y - a.y - dy * t);
 }
 
 // ---------------------------------------------------------------------------
@@ -394,21 +591,32 @@ type Drawable =
   | { k: 'tower'; base: number; t: Tower }
   | { k: 'enemy'; base: number; e: Enemy }
   | { k: 'corpse'; base: number; c: Corpse }
-  | { k: 'king'; base: number };
+  | { k: 'king'; base: number }
+  | { k: 'actor'; base: number; a: SceneActor };
+
+/**
+ * Floor-level props (the throne dais, the plaza mosaic, pigeons) belong to the
+ * ground: painted straight after it, so decals, placement hints and range
+ * rings all draw over them.
+ */
+function drawGroundProps(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: RenderUiState): void {
+  const hidden = ui.scene?.hiddenDecor;
+  (engine.level.decor ?? []).forEach((p, i) => {
+    if (PROP_META[p.kind].layer !== 'ground' || hidden?.has(i)) return;
+    const a = propAnchor(p.col, p.row);
+    drawProp(ctx, p.kind, a.x, a.y, p.color);
+  });
+}
 
 function drawWorld(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: RenderUiState, st: BoardState, dt: number): void {
   const decor = engine.level.decor ?? [];
-  // Ground-layer props first (under every figure).
-  for (const p of decor) {
-    if (PROP_META[p.kind].layer !== 'ground') continue;
-    const a = propAnchor(p.col, p.row);
-    drawProp(ctx, p.kind, a.x, a.y, p.color);
-  }
+  const scene = ui.scene;
+  // Ground-layer props were painted with the floor (`drawGroundProps`).
   if (decor.length === 0) drawLegacyDecor(ctx, engine.level.id);
 
   const list = st.drawables;
   list.length = 0;
-  for (const t of engine.towers) list.push({ k: 'tower', base: t.pos.y + 10, t });
+  if (!scene?.hideTowers) for (const t of engine.towers) list.push({ k: 'tower', base: t.pos.y + 10, t });
   for (const e of engine.enemies) {
     if (e.dead) continue;
     list.push({ k: 'enemy', base: e.pos.y - footLiftFor(e.def.id) + e.def.radius * 0.7, e });
@@ -416,9 +624,10 @@ function drawWorld(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: Render
   for (const c of st.vfx.corpses) list.push({ k: 'corpse', base: c.y + c.enemy.def.radius * 0.5, c });
   const king = seatedKingSpawn(engine);
   if (king) list.push({ k: 'king', base: king.y - RISE_LIFT + 4 });
+  for (const a of scene?.actors ?? []) list.push({ k: 'actor', base: a.base, a });
   decor.forEach((p, i) => {
     const meta = PROP_META[p.kind];
-    if (meta.layer !== 'standing') return;
+    if (meta.layer !== 'standing' || scene?.hiddenDecor?.has(i)) return;
     const a = propAnchor(p.col, p.row);
     list.push({ k: 'prop', base: a.y + meta.base, i, alpha: 1 });
   });
@@ -459,13 +668,14 @@ function drawWorld(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: Render
       case 'prop': {
         const p = decor[d.i];
         const a = propAnchor(p.col, p.row);
+        const lit = engine.isLanternLit(d.i);
         if (d.alpha < 1) {
           ctx.save();
           ctx.globalAlpha = d.alpha;
-          drawProp(ctx, p.kind, a.x, a.y, p.color);
+          drawProp(ctx, p.kind, a.x, a.y, p.color, lit);
           ctx.restore();
         } else {
-          drawProp(ctx, p.kind, a.x, a.y, p.color);
+          drawProp(ctx, p.kind, a.x, a.y, p.color, lit);
         }
         break;
       }
@@ -482,32 +692,81 @@ function drawWorld(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: Render
       case 'king':
         drawSeatedKing(ctx, engine, st);
         break;
+      case 'actor':
+        d.a.draw(ctx);
+        break;
     }
   }
 
   // Overhead props (chandeliers) hang above everyone.
-  for (const p of decor) {
-    if (PROP_META[p.kind].layer !== 'overhead') continue;
+  decor.forEach((p, i) => {
+    if (PROP_META[p.kind].layer !== 'overhead' || scene?.hiddenDecor?.has(i)) return;
     const a = propAnchor(p.col, p.row);
     drawProp(ctx, p.kind, a.x, a.y, p.color);
-  }
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Lights
 // ---------------------------------------------------------------------------
 
-function collectLights(engine: GameEngine, st: BoardState, time: number): Light[] {
+/** Seconds a freshly lit lantern takes to come up to full light. */
+const LANTERN_KINDLE = 0.9;
+
+/** The holes the lit lanterns burn in the mist, each swelling in as it kindles. */
+function mistClears(engine: GameEngine, st: BoardState): MistClear[] {
+  const out: MistClear[] = [];
+  const decor = engine.level.decor ?? [];
+  for (const i of engine.litLanterns) {
+    const p = decor[i];
+    const light = p && lightableProp(p.kind);
+    if (!light) continue;
+    const a = propAnchor(p.col, p.row);
+    const k = ease.outCubic(st.lanternGlow.get(i) ?? 0);
+    out.push({ x: a.x, y: a.y, radius: light.radius * (0.5 + 0.5 * k), amount: k });
+  }
+  return out;
+}
+
+/**
+ * With the cursor on a lantern (and no champion being placed), the reach of
+ * its light: where champions keep their full range in the mist.
+ */
+function drawLanternOverlays(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: RenderUiState): void {
+  if (ui.selectedUnitId || ui.hoverCol < 0 || engine.outcome !== 'playing') return;
+  const i = engine.lanternAt(ui.hoverCol, ui.hoverRow);
+  const p = i == null ? undefined : engine.level.decor?.[i];
+  const light = p && lightableProp(p.kind);
+  if (i == null || !p || !light) return;
+  const a = propAnchor(p.col, p.row);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(a.x, a.y, light.radius, 0, Math.PI * 2);
+  ctx.fillStyle = engine.isLanternLit(i) ? 'rgba(255,214,130,0.05)' : 'rgba(255,214,130,0.09)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,214,130,0.75)';
+  ctx.setLineDash([5, 5]);
+  ctx.lineDashOffset = -(now() / 1000) * 12;
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function collectLights(engine: GameEngine, st: BoardState, time: number, scene?: BoardScene): Light[] {
   const out = st.lights;
   out.length = 0;
   for (const L of st.propLights) {
+    if (scene?.hiddenDecor?.has(L.decor)) continue;
+    // A lantern shines only once lit, swelling up as it kindles.
+    const on = L.lantern ? ease.outCubic(st.lanternGlow.get(L.decor) ?? 0) : 1;
+    if (on <= 0) continue;
     const f = L.flicker ? flicker(time, L.phase) : 1;
-    out.push({ x: L.x, y: L.y, radius: L.radius * (0.96 + 0.04 * f), family: L.family, intensity: L.intensity * f, glow: L.glow });
+    out.push({ x: L.x, y: L.y, radius: L.radius * (0.96 + 0.04 * f) * (0.6 + 0.4 * on), family: L.family, intensity: L.intensity * f * on, glow: L.glow });
   }
   // Champions carry a soft pool of light — the player's units are always the
   // best-lit things on the board (readability before mood).
   const pool = st.atmo.championLight;
-  for (const t of engine.towers) {
+  for (const t of scene?.hideTowers ? [] : engine.towers) {
     out.push({ x: t.pos.x, y: t.pos.y + 2, radius: pool, family: 'candle', intensity: 0.6, glow: 0.18 });
     // Guiding Gale's wind carries a faint cool light so it reads in dark rooms.
     if (t.rangeBuffed) out.push({ x: t.pos.x, y: t.pos.y - 4, radius: 30, family: 'wind', intensity: 0.2 });
@@ -594,6 +853,7 @@ function collectLights(engine: GameEngine, st: BoardState, time: number): Light[
   for (const ex of engine.baseExits) {
     out.push({ x: ex.x, y: ex.y, radius: 70, family: 'moon', intensity: 0.4, glow: 0.6 });
   }
+  if (scene?.lights) out.push(...scene.lights);
   st.vfx.lights(out);
   return out;
 }
@@ -679,6 +939,8 @@ function drawBossBars(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
     ctx.strokeText(hp, BOARD_WIDTH / 2, by + barH / 2 + 0.5);
     ctx.fillStyle = '#ffffff';
     ctx.fillText(hp, BOARD_WIDTH / 2, by + barH / 2 + 0.5);
+    // A shielded boss shows its shield count just past the bar's right cap.
+    if (e.shield > 0) drawShieldCount(ctx, bx + barW + 34, by + 1, e.shield, 12);
     ctx.restore();
 
     top += rowH;
@@ -726,36 +988,42 @@ function strokePolyline(ctx: CanvasRenderingContext2D, pts: { x: number; y: numb
   ctx.stroke();
 }
 
-/**
- * The leading portion of a polyline covering `frac` (0→1) of its total length,
- * ending at an interpolated point — used to animate a path "rolling out" from
- * its spawn toward the exit.
- */
-function partialPolyline(
-  pts: { x: number; y: number }[],
-  frac: number,
-): { x: number; y: number }[] {
-  if (pts.length < 2) return pts;
+function polylineLength(pts: Vec2[]): number {
   let total = 0;
-  for (let i = 0; i < pts.length - 1; i++) {
-    total += Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
-  }
-  const target = total * frac;
-  const out = [pts[0]];
+  for (let i = 1; i < pts.length; i++) total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  return total;
+}
+
+/** The point `dist` along a polyline (clamped to its ends). */
+function pointAlong(pts: Vec2[], dist: number): Vec2 {
   let acc = 0;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const a = pts[i];
-    const b = pts[i + 1];
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1];
+    const b = pts[i];
     const len = Math.hypot(b.x - a.x, b.y - a.y);
-    if (len === 0) continue;
-    if (acc + len >= target) {
-      const t = (target - acc) / len;
-      out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
-      return out;
+    if (len > 0 && acc + len >= dist) {
+      const t = Math.max(0, (dist - acc) / len);
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
     }
-    out.push(b);
     acc += len;
   }
+  return pts[pts.length - 1];
+}
+
+/**
+ * The part of a polyline between distances `from` and `to` along it, with
+ * interpolated ends — used to animate a path "rolling out".
+ */
+function slicePolyline(pts: Vec2[], from: number, to: number): Vec2[] {
+  if (pts.length < 2 || to <= from) return [];
+  const out: Vec2[] = [pointAlong(pts, from)];
+  let acc = 0;
+  for (let i = 1; i < pts.length; i++) {
+    acc += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    if (acc >= to) break;
+    if (acc > from) out.push(pts[i]);
+  }
+  out.push(pointAlong(pts, to));
   return out;
 }
 
@@ -900,11 +1168,24 @@ function drawPlacementHints(
   const ok = buildable && engine.currency >= def.cost;
   const cx = hoverCol * TILE + TILE / 2;
   const cy = hoverRow * TILE + TILE / 2;
-  // Preview the range the unit will actually deploy with (mastery included).
-  const previewRange = engine.deployStats(def.id)?.range ?? def.range;
+  // Preview the range the unit will actually deploy with (mastery included),
+  // cut by the mist on this cell.
+  const fullRange = engine.deployStats(def.id)?.range ?? def.range;
+  const mist = engine.mistRangeMult(hoverCol, hoverRow);
+  const previewRange = Math.round(fullRange * mist);
 
   // Range preview.
   ctx.save();
+  if (mist < 1) {
+    // The reach the mist is swallowing: a faint ring at the full range.
+    ctx.beginPath();
+    ctx.arc(cx, cy, fullRange, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(200, 214, 224, 0.4)';
+    ctx.setLineDash([4, 5]);
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
   ctx.beginPath();
   ctx.arc(cx, cy, previewRange, 0, Math.PI * 2);
   ctx.fillStyle = ok ? 'rgba(95, 211, 138, 0.10)' : 'rgba(255, 90, 90, 0.10)';
@@ -939,6 +1220,20 @@ function boardStyle(st: BoardState, accent: string, boss = false): FigureStyle {
       ? { dx: Math.cos(sun.angle) * 0.55, dy: Math.max(0.12, Math.sin(sun.angle) * 0.4), alpha: 0.28 }
       : undefined,
   };
+}
+
+/**
+ * The finish a champion gets on this engine's board (stage-lit rim, outline,
+ * sun-cast shadow; the player's adventurer with its softer portrait light) —
+ * for a cutscene drawing champions as its own actors.
+ */
+export function championFigureStyle(engine: GameEngine, def: Tower['def']): FigureStyle {
+  const style = boardStyle(stateFor(engine), def.visual.playerConfig?.outfitColor ?? def.visual.color);
+  if (def.visual.playerConfig) {
+    style.rimAlpha = (style.rimAlpha ?? 0.55) * 0.25;
+    style.shading = 0.5;
+  }
+  return style;
 }
 
 /** Soft contact shadow pooled under a figure's feet (local origin = figure). */
@@ -1719,6 +2014,8 @@ const MERCENARY_FOOT_LIFT = 9;
 const WARDEN_FOOT_LIFT = 13; // the Iron Warden's heavy 1.5× frame
 const GOWZER_FOOT_LIFT = 6; // Gowzer's slight 1.15× frame
 const ROLAND_FOOT_LIFT = 9; // Captain Roland's 1.3× mounted frame
+const SERGEANT_FOOT_LIFT = 10; // the Sergeant-at-Arms' 1.35× frame
+const HOUND_MASTER_FOOT_LIFT = 9; // the Hound Master's 1.3× frame
 function footLiftFor(id: string): number {
   if (id === 'boss5') return KING_FOOT_LIFT;
   if (id === 'boss1') return CAPTAIN_FOOT_LIFT;
@@ -1726,6 +2023,8 @@ function footLiftFor(id: string): number {
   if (id === 'boss3') return WARDEN_FOOT_LIFT;
   if (id === 'boss4') return GOWZER_FOOT_LIFT;
   if (id === 'boss6') return ROLAND_FOOT_LIFT;
+  if (id === 'boss7') return SERGEANT_FOOT_LIFT;
+  if (id === 'boss8') return HOUND_MASTER_FOOT_LIFT;
   return 0;
 }
 
@@ -1737,11 +2036,15 @@ function viewFor(h: { x: number; y: number }): 'side' | 'front' | 'back' {
 /**
  * Where the Throne Room boss sits until he rises: one `RISE_LIFT` above the
  * hidden reveal lane's spawn cell, so the hand-off to the live, rising enemy is
- * seamless. Null when no seated boss should be drawn.
+ * seamless. Only a hidden lane the boss arrives on counts (other stages hide
+ * lanes for plain foes). Null when no seated boss should be drawn.
  */
 function seatedKingSpawn(engine: GameEngine): { x: number; y: number } | null {
   if (engine.bossHasSpawned || engine.outcome !== 'playing') return null;
-  const laneIdx = engine.level.lanes.findIndex((l) => l.revealAtWave !== undefined);
+  const bossId = engine.level.bossId;
+  const laneIdx = engine.level.lanes.findIndex(
+    (l) => l.revealAtWave !== undefined && l.waves.some((w) => w.groups.some((g) => g.enemyId === bossId)),
+  );
   if (laneIdx < 0) return null;
   if (!hasEnemySprite(engine.level.bossId)) return null;
   return engine.lanes[laneIdx].waypoints[0];
@@ -1824,14 +2127,23 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
     // quantized to 16 cached frames.
     const taunting = isSpeaking(e) && TAUNT_POSE.has(e.def.id);
     const twirl = taunting ? Math.floor(((now() / 1000 / TAUNT_TWIRL) % 1) * 16) / 16 : 0;
-    const pose = taunting ? 1 : (e.rise ?? 0);
+    // A rallying foe (the Sergeant-at-Arms) blends into its rally pose, quantized
+    // to 8 steps, with its banner snapping on a 12-frame loop.
+    const rally = Math.round(rallyPose(e) * 8) / 8;
+    const snap = rally > 0 ? Math.floor(((now() / 1000 / RALLY_FLAP) % 1) * 12) / 12 : 0;
+    // A light-shy foe (the Bloodhound) slinks in lantern light, quantized to 6 steps.
+    const cower = Math.round((e.cower ?? 0) * 6) / 6;
+    // A summoner (the Hound Master) lifts his whistle, quantized to 8 steps.
+    const call = Math.round(summonPose(e) * 8) / 8;
+    const pose = taunting ? 1 : rally > 0 ? rally : call > 0 ? call : cower > 0 ? cower : (e.rise ?? 0);
+    const flourish = taunting ? twirl : snap;
     paintFigure(
       ctx,
-      (g) => drawEnemySprite(g, e.def.id, e.def.visual.color, view, left, rising ? e.dist : sf.q, pose, twirl),
+      (g) => drawEnemySprite(g, e.def.id, e.def.visual.color, view, left, rising ? e.dist : sf.q, pose, flourish),
       style,
       rising
         ? undefined
-        : `e|${e.def.id}|${e.def.visual.color}|${view}|${left ? 1 : 0}|${sf.idx}${taunting ? `|t${twirl}` : ''}`,
+        : `e|${e.def.id}|${e.def.visual.color}|${view}|${left ? 1 : 0}|${sf.idx}${taunting ? `|t${twirl}` : ''}${rally > 0 ? `|r${rally}|${snap}` : ''}${cower > 0 ? `|c${cower}` : ''}${call > 0 ? `|h${call}` : ''}`,
     );
   } else {
     // Emoji fallback token: lit disc, inked rim (gold for a boss).
@@ -1868,7 +2180,10 @@ function drawEnemyOverlays(ctx: CanvasRenderingContext2D, engine: GameEngine, ui
     const pct = Math.max(0, e.health / e.def.health);
     const hovered = ui.hoverEnemyUid === e.uid;
     const by = y - R - (e.def.boss ? 14 : 9);
-    if (pct < 0.999 || e.def.boss || hovered) {
+    const showBar = pct < 0.999 || e.def.boss || hovered;
+    // A shielded foe always shows its shield points, over the bar when it's up.
+    if (e.shield > 0) drawShieldPips(ctx, e.pos.x + dodgeX, showBar ? by - 6 : by - 1, e.shield, e.shieldMax);
+    if (showBar) {
       const w = e.def.boss ? R * 2.2 : Math.max(18, R * 1.7);
       const bx = e.pos.x + dodgeX - w / 2;
       const h = e.def.boss ? 4 : 3;
@@ -1886,6 +2201,85 @@ function drawEnemyOverlays(ctx: CanvasRenderingContext2D, engine: GameEngine, ui
     const line = currentSpeechLine(e);
     if (line) drawSpeechBubble(ctx, e.pos.x + dodgeX, by - 8, line);
   }
+}
+
+/** Above this many shield points a pip row gets too wide; show one pip and a count. */
+const MAX_SHIELD_PIPS = 6;
+
+/**
+ * A shielded foe's remaining shield points as a row of tiny heater-shield pips
+ * centred on `cx`, their tops at `y`: steel-blue and lit while they hold, dark
+ * hollows once knocked off, so "3 of 5 left" reads at a glance. A big shield
+ * (the Sergeant-at-Arms' 15, or a rally-stacked one) shows a pip and its count.
+ */
+function drawShieldPips(ctx: CanvasRenderingContext2D, cx: number, y: number, left: number, max: number): void {
+  const w = 4.2;
+  const h = 5;
+  const gap = 1.4;
+  if (max > MAX_SHIELD_PIPS) {
+    drawShieldCount(ctx, cx, y, left, 9);
+    return;
+  }
+  const x0 = cx - (max * w + (max - 1) * gap) / 2;
+  const pip = (x: number) => {
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + w, y);
+    ctx.lineTo(x + w, y + h * 0.45);
+    ctx.quadraticCurveTo(x + w, y + h * 0.85, x + w / 2, y + h);
+    ctx.quadraticCurveTo(x, y + h * 0.85, x, y + h * 0.45);
+    ctx.closePath();
+  };
+  ctx.save();
+  ctx.fillStyle = 'rgba(8,4,12,0.78)';
+  roundRect(ctx, x0 - 1.5, y - 1.5, max * w + (max - 1) * gap + 3, h + 3, 2);
+  ctx.fill();
+  for (let i = 0; i < max; i++) {
+    const x = x0 + i * (w + gap);
+    pip(x);
+    if (i < left) {
+      ctx.fillStyle = FEEDBACK.shield;
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.fillRect(x + 0.6, y + 0.5, w - 1.2, 1);
+    } else {
+      ctx.fillStyle = FEEDBACK.shieldSpent;
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+/**
+ * One lit shield pip followed by "×N", centred on `cx` with its top at `y`, on a
+ * dark plate. `size` is the count's font size (the pip scales with it).
+ */
+function drawShieldCount(ctx: CanvasRenderingContext2D, cx: number, y: number, count: number, size: number): void {
+  const label = `×${count}`;
+  ctx.save();
+  ctx.font = `700 ${size}px ${FONT_UI}`;
+  const w = size * 0.5;
+  const h = size * 0.6;
+  const tw = ctx.measureText(label).width;
+  const total = w + 2 + tw;
+  const x0 = cx - total / 2;
+  ctx.fillStyle = 'rgba(8,4,12,0.78)';
+  roundRect(ctx, x0 - 2, y - 1.5, total + 4, h + 3, 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x0, y);
+  ctx.lineTo(x0 + w, y);
+  ctx.lineTo(x0 + w, y + h * 0.45);
+  ctx.quadraticCurveTo(x0 + w, y + h * 0.85, x0 + w / 2, y + h);
+  ctx.quadraticCurveTo(x0, y + h * 0.85, x0, y + h * 0.45);
+  ctx.closePath();
+  ctx.fillStyle = FEEDBACK.shield;
+  ctx.fill();
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#dce8ff';
+  ctx.fillText(label, x0 + w + 2, y + h / 2 + 0.5);
+  ctx.restore();
 }
 
 /**
@@ -1940,6 +2334,9 @@ function drawCorpse(ctx: CanvasRenderingContext2D, st: BoardState, c: Corpse): v
   }
   ctx.restore();
 }
+
+/** Seconds per loop of a rallying standard's banner snap. */
+const RALLY_FLAP = 0.45;
 
 /** Enemies with an intro taunt pose, driven by `sit`/`flourish` while speaking. */
 const TAUNT_POSE = new Set(['boss4']);

@@ -118,6 +118,9 @@ export const FEEDBACK = {
   mana: '#6fb6ff',
   danger: '#ff5a5a',
   heal: '#7fe08a',
+  /** A shielded foe's remaining shield points (pips) and the spent ones. */
+  shield: '#8fb4ff',
+  shieldSpent: 'rgba(70,80,100,0.55)',
 } as const;
 
 // ---------------------------------------------------------------------------

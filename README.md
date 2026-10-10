@@ -12,7 +12,7 @@ terrain, sound effects and music are drawn or synthesized in code.
 
 ```bash
 npm install
-npm run dev        # start the dev server (http://localhost:5173)
+npm run dev        # start the dev server (http://localhost:5174)
 npm run build      # type-check + production build
 npm run lint       # eslint
 npm run typecheck  # tsc only
@@ -45,7 +45,8 @@ npm run enemies    # dev server opened on the enemy stats sheet (#enemies)
    let foes reach your castle. Clearing a stage unlocks the next and pays a 💎
    gem reward the first time. Progress is saved automatically.
 8. Every stage, won or lost, earns **mastery EXP** to spend in each champion's
-   permanent **skill tree** (from the journal).
+   permanent **skill tree** (from the journal). Winning a stage also gives every
+   champion in your team 5 EXP per wave the stage had.
 9. Clear every stage of a chapter to unlock its **endless** mode: randomly
    rolled waves that keep growing, with a boss every 5th wave worth 50 gems.
 10. Once your adventurer learns the armor node in their skill tree, endless
@@ -59,8 +60,8 @@ npm run enemies    # dev server opened on the enemy stats sheet (#enemies)
 
 - **💎 Gems** — the persistent currency: earned from first clears and endless
   bosses, spent on summons.
-- **✨ Mastery EXP** — earned by each champion from its kills in every stage, spent in its
-  skill tree.
+- **✨ Mastery EXP** — earned by each champion from its kills in every stage, plus 5 per
+  wave for every team champion when a stage is won; spent in its skill tree.
 - **🪙 Gold** — a per-stage battle resource only: each stage starts you with a
   fixed amount, slain enemies (and the Farmer) add more, and you spend it on
   deploying and upgrading champions. It does not carry between stages.

@@ -24,6 +24,7 @@ function tone(ac: AudioContext, freq: number, dur: number, gain: number, delay =
   const osc = ac.createOscillator();
   osc.type = type;
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   const t = ac.currentTime + delay;
   osc.frequency.setValueAtTime(freq, t);
   g.gain.setValueAtTime(0.0001, t);
@@ -39,6 +40,7 @@ function sweep(ac: AudioContext, from: number, to: number, dur: number, gain: nu
   const osc = ac.createOscillator();
   osc.type = type;
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   const t = ac.currentTime + delay;
   osc.frequency.setValueAtTime(from, t);
   osc.frequency.exponentialRampToValueAtTime(to, t + dur);
@@ -63,6 +65,7 @@ function shimmer(ac: AudioContext, dur: number, freq: number, gain: number, dela
   bp.frequency.value = freq;
   bp.Q.value = 0.8;
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   const t = ac.currentTime + delay;
   g.gain.setValueAtTime(0.0001, t);
   g.gain.linearRampToValueAtTime(gain, t + dur * 0.4);

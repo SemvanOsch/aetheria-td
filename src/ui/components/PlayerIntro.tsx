@@ -473,7 +473,7 @@ export function PlayerIntro({
           </div>
 
           {/* Bookmarks peeking out of the top of the book (navigable journal). */}
-          {navigable && phase === 'page' && (
+          {isReview && phase === 'page' && (
             <div className="journal-bookmarks" role="tablist" aria-label="Journal sections">
               {SECTION_ORDER.map((id) => {
                 const label =

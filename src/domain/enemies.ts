@@ -61,6 +61,36 @@ export interface EnemyDef {
    */
   damageAura?: { reduction: number; radius: number };
   /**
+   * Shield hits: the first `shieldHits` hits this enemy takes are absorbed
+   * outright (no damage, whatever their size), one shield point per hit; only
+   * once the shield is broken does damage reach its health. Every hit counts the
+   * same, so many small hits break it fastest. Tracked per enemy in
+   * `Enemy.shield`; omitted or 0 means unshielded.
+   */
+  shieldHits?: number;
+  /**
+   * Rally (the Sergeant-at-Arms): every `every` seconds this enemy halts for
+   * `duration` seconds and raises its standard; `at` (0-1) of the way in, every
+   * *other* living enemy on the board gains `shield` shield points (see
+   * `shieldHits`), stacking on whatever shield it has. Omitted for enemies that
+   * never rally.
+   */
+  rally?: RallyDef;
+  /**
+   * Summon (the Hound Master): every `every` seconds this enemy halts for
+   * `duration` seconds to sound a call (his whistle); `at` (0-1) of the way in, `count`
+   * foes of `enemyId` burst out beside it on its lane and run on ahead.
+   * Omitted for enemies that never summon.
+   */
+  summon?: SummonDef;
+  /**
+   * Light-shy (the Bloodhound): while it is inside a lit lantern's light (see
+   * `domain/mist.ts`) its speed is multiplied by this, blended in and out over
+   * a moment as it loses and finds the scent (`Enemy.cower`). Omitted for foes
+   * the light doesn't touch.
+   */
+  lightSlow?: number;
+  /**
    * Short description of a special mechanic (mainly for bosses) shown in the
    * Enemy Index detail. Omitted when the enemy has no notable mechanic.
    */
@@ -92,11 +122,28 @@ export interface EnemyDef {
   deathLine?: string;
 }
 
+/** A periodic rally that shields the rest of the field (see `EnemyDef.rally`). */
+/** A periodic summon (see `EnemyDef.summon`). */
+export interface SummonDef {
+  enemyId: string;
+  count: number;
+  every: number;
+  duration: number;
+  at: number;
+}
+
+export interface RallyDef {
+  every: number;
+  duration: number;
+  shield: number;
+  at: number;
+}
+
 /** Named special death sequences (see `EnemyDef.deathAnimation`). */
 export type DeathAnimation = 'shadowSwallow';
 
 /** Kills of a normal enemy required before its Enemy Index entry unlocks. */
-export const ENEMY_KILLS_TO_UNLOCK = 100;
+export const ENEMY_KILLS_TO_UNLOCK = 1;
 
 /**
  * Damage multiplier (in [0,1]) an enemy's resistances apply to one hit of the
@@ -122,15 +169,17 @@ export interface EnemyVisual {
 
 // --- Regular enemies, three archetypes per section --------------------------
 // Archetypes: grunt (balanced), runner (fast), brute (slow/tanky).
-// Stats scale up section by section so later realms hit harder.
 const REGULAR: Record<string, EnemyDef> = {
   // Castle — disciplined rebels and siege beasts.
   cas_grunt: { id: 'cas_grunt', name: 'Footman', health: 60, speed: 46, reward: 2, mana: 1, damageToBase: 1, visual: { color: '#b3bccb', icon: '🛡️' }, boss: false, radius: 13 },
   cas_grunt2: { id: 'cas_grunt2', name: 'Sergeant', health: 140, speed: 42, reward: 5, mana: 2, damageToBase: 1, visual: { color: '#9aa6be', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2 },
-  cas_grunt3: { id: 'cas_grunt3', name: 'Man-at-Arms', health: 185, speed: 46, reward: 6, mana: 2, damageToBase: 2, visual: { color: '#7d8697', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2 },
   cas_runner: { id: 'cas_runner', name: 'Outrider', health: 65, speed: 94, reward: 3, mana: 2, damageToBase: 1, visual: { color: '#d7a94a', icon: '🐎' }, boss: false, radius: 14 },
   cas_mage: { id: 'cas_mage', name: 'Royal Wizard', health: 110, speed: 50, reward: 4, mana: 2, damageToBase: 1, visual: { color: '#530a69', icon: '🧙' }, boss: false, radius: 12, magicResist: 0.2 },
   cas_brute: { id: 'cas_brute', name: 'Siege Ram', health: 245, speed: 30, reward: 8, mana: 3, damageToBase: 3, visual: { color: '#8a93a8', icon: '🐏' }, boss: false, radius: 17, physicalResist: 0.2 },
+
+  // Capital — the royal army in full harness.
+  cap_grunt: { id: 'cap_grunt', name: 'Man-at-Arms', health: 185, speed: 40, reward: 6, mana: 3, damageToBase: 2, visual: { color: '#a3adbb', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2, shieldHits: 5, mechanic: 'His shield turns aside the first 5 hits completely, only once it breaks does he take damage.' },
+  cap_runner: { id: 'cap_runner', name: 'Bloodhound', health: 115, speed: 120, reward: 3, mana: 2, damageToBase: 1, visual: { color: '#2e2624', icon: '🐕' }, boss: false, radius: 13, lightSlow: 0.4, mechanic: 'Runs you down fast in the mist, a lit lantern\'s burning smell makes it lose your scent and slows down.' },
 
   // Forest — wild beasts and ancient growth.
   for_grunt: { id: 'for_grunt', name: 'Goblin Forager', health: 96, speed: 48, reward: 6, mana: 6, damageToBase: 1, visual: { color: '#7bb86f', icon: '👺' }, boss: false, radius: 13 },
@@ -177,6 +226,12 @@ interface BossMeta {
   magicResist?: number;
   /** Protective aura shielding nearby enemies (see `EnemyDef.damageAura`). */
   damageAura?: { reduction: number; radius: number };
+  /** Hits absorbed outright before damage lands (see `EnemyDef.shieldHits`). */
+  shieldHits?: number;
+  /** Periodic rally shielding the other foes (see `EnemyDef.rally`). */
+  rally?: RallyDef;
+  /** Periodic summon of more foes beside it (see `EnemyDef.summon`). */
+  summon?: SummonDef;
   /** Short description of a special mechanic, shown in the Enemy Index. */
   mechanic?: string;
   /** Flavour text for the Enemy Index (authored later). */
@@ -193,8 +248,8 @@ interface BossMeta {
 // field may be added to an entry to override its calculated default.
 const BOSS_META: BossMeta[] = [
   { level: 1, name: 'Captain Aldric', icon: '🗡️', color: '#c3ccdc', health: 400, speed: 40, radius: 25 },
-  { level: 2, name: 'Garrick Vane', icon: '🔪', color: '#8a94a8', health: 600, speed: 60, radius: 20, dodgeChance: 0.20, mechanic: 'Evasive — sidesteps a fifth of all incoming hits, taking no damage from them.' },
-  { level: 3, name: 'The Iron Warden', icon: '🛡️', color: '#c05a6a', health: 350, speed: 30, radius: 30, physicalResist: 0.4, damageAura: { reduction: 0.3, radius: 96 }, mechanic: 'Aegis aura — every other enemy near the Warden takes 30% less damage.' },
+  { level: 2, name: 'Garrick Vane', icon: '🔪', color: '#8a94a8', health: 600, speed: 60, radius: 20, dodgeChance: 0.20, mechanic: 'Sidesteps a fifth of all incoming hits, taking no damage from them.' },
+  { level: 3, name: 'The Iron Warden', icon: '🛡️', color: '#c05a6a', health: 350, speed: 30, radius: 30, physicalResist: 0.4, damageAura: { reduction: 0.3, radius: 96 }, mechanic: 'Every other enemy near the Warden takes 30% less damage.' },
   {
     level: 4,
     name: 'Gowzer, the Night Falcon', icon: '🦅', color: '#1b031a', health: 700, speed: 44, radius: 20, magicResist: 0.2,
@@ -205,6 +260,17 @@ const BOSS_META: BossMeta[] = [
   { level: 5, name: 'King Kael', icon: '👑', color: '#e0574a', health: 900, speed: 20, radius: 30, mechanic: 'Rises from his throne as the final wave begins.' },
   // Capital
   { level: 6, name: 'Captain Roland', icon: '🗡️', color: '#c2d3f0', health: 650, speed: 90, radius: 28 },
+  {
+    level: 7, name: 'Sergeant-at-Arms', icon: '🚩', color: '#b9c3d1', health: 800, speed: 36, radius: 26, physicalResist: 0.2,
+    shieldHits: 15,
+    rally: { every: 6, duration: 1.8, shield: 3, at: 0.55 },
+    mechanic: 'His shield turns aside the first 15 hits. Every few seconds he raises the royal standard, giving every other foe on the board 2 shield points.',
+  },
+  {
+    level: 8, name: 'Hound Master', icon: '🐾', color: '#5e5852', health: 1200, speed: 32, radius: 26,
+    summon: { enemyId: 'cap_runner', count: 3, every: 5, duration: 1, at: 0.55 },
+    mechanic: 'Every 5 seconds he blows his whistle, and Bloodhounds burst out at his side.',
+  },
 
 ];
 
@@ -228,6 +294,9 @@ function buildBosses(): Record<string, EnemyDef> {
       physicalResist: m.physicalResist,
       magicResist: m.magicResist,
       damageAura: m.damageAura,
+      shieldHits: m.shieldHits,
+      rally: m.rally,
+      summon: m.summon,
       mechanic: m.mechanic,
       lore: m.lore,
       spawnLines: m.spawnLines,

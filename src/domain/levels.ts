@@ -34,8 +34,8 @@ export interface SectionDef {
 export const SECTIONS: SectionDef[] = [
   { id: 'castle', name: 'The Castle', subtitle: 'Fight your way through the castle to get to the king.', icon: '🏰', color: '#8fa6c8' },
   { id: 'capital', name: 'The Capital', subtitle: 'Hold the halls against the usurpers.', icon: '🏘️', color: '#f86262' },
-  { id: 'forest', name: 'The Forest', subtitle: 'Beasts and old growth stir in the deep wood.', icon: '🌲', color: '#5fd38a', wip: true },
   { id: 'inn', name: 'The Inn', subtitle: 'Something foul brews beneath the tavern.', icon: '🍺', color: '#f2b23c', wip: true },
+  { id: 'forest', name: 'The Forest', subtitle: 'Beasts and old growth stir in the deep wood.', icon: '🌲', color: '#5fd38a', wip: true },
 ];
 
 export function getSection(id: SectionId): SectionDef {
@@ -78,6 +78,9 @@ export interface LaneDef {
   revealAtWave?: number;
 }
 
+/** Ending cutscenes a stage can close on (`LevelDef.ending`). */
+export type StageEnding = 'getaway';
+
 export interface LevelDef {
   id: number;
   section: SectionId;
@@ -113,6 +116,16 @@ export interface LevelDef {
    * it never ends in victory.
    */
   endless?: EndlessRules;
+  /**
+   * A cutscene the stage ends on when won, played before the result card
+   * (`ui/components/GetawayCutscene.tsx` for `getaway`). Cosmetic only.
+   */
+  ending?: StageEnding;
+  /**
+   * The stage lies in mist (`domain/mist.ts`): champions lose part of their
+   * range unless they stand close to a lantern the player has lit.
+   */
+  mist?: boolean;
 }
 
 const DEFAULT_SPACING = 0.85;
@@ -121,7 +134,8 @@ const DEFAULT_SPACING = 0.85;
 const STARTING_GOLD = 200;
 
 // Shorthand enemy ids per section.
-const CAS = { g: 'cas_grunt', g2: 'cas_grunt2', g3: 'cas_grunt3', r: 'cas_runner', b: 'cas_brute', m: 'cas_mage' };
+const CAS = { g: 'cas_grunt', g2: 'cas_grunt2', r: 'cas_runner', b: 'cas_brute', m: 'cas_mage' };
+const CAP = { g: 'cap_grunt', r: 'cap_runner' };
 // Re-enable when the Forest/Inn chapters are authored:
 // const FOR = { g: 'for_grunt', r: 'for_runner', b: 'for_brute' };
 // const INN = { g: 'inn_grunt', r: 'inn_runner', b: 'inn_brute' };
@@ -158,6 +172,10 @@ interface LevelSpec {
    * the chapter's default mood.
    */
   mood?: MoodId;
+  /** Cutscene played when the stage is won (see `LevelDef.ending`). */
+  ending?: StageEnding;
+  /** The stage lies in mist (see `LevelDef.mist`). */
+  mist?: boolean;
 }
 
 /**
@@ -399,6 +417,267 @@ const CAPITAL_SPECS: LevelSpec[] = [
       },
     ],
   },
+  {
+    id: 7,
+    name: 'Market Square',
+    subtitle: 'The royal army closes in across the town square.',
+    baseHealth: 10, gem: 150,
+    mood: 'townDusk',
+    theme: {
+      groundEven: '#ab9d84',
+      groundOdd: '#a0927c',
+      path: [['#1e1a1c', 44], ['#47403c', 36], ['#504843', 22]],
+      floor: 'flagstone',
+      pathKind: 'cobble',
+    },
+    decor: [
+      // The square: a paved rosette under the fountain, facing the guildhall.
+      { kind: 'plazaMosaic', col: 7, row: 4 },
+      { kind: 'fountain', col: 7, row: 4 },
+      { kind: 'guildhall', col: 6, row: 0 },
+      { kind: 'lamppost', col: 5, row: 2 },
+      { kind: 'lamppost', col: 10, row: 2 },
+      { kind: 'lamppost', col: 4, row: 6 },
+      { kind: 'lamppost', col: 11, row: 6 },
+      { kind: 'pigeons', col: 5, row: 4 },
+      { kind: 'pigeons', col: 10, row: 5 },
+      // The row of houses and shops along the top of the square.
+      { kind: 'townhouse', col: 0, row: 0 },
+      { kind: 'bakery', col: 2, row: 0 },
+      { kind: 'planter', col: 4, row: 1 },
+      { kind: 'tavern', col: 11, row: 0 },
+      { kind: 'townhouse', col: 13, row: 0 },
+      { kind: 'tree', col: 15, row: 1 },
+      // West side, by the road out of town.
+      { kind: 'noticeBoard', col: 1, row: 2 },
+      { kind: 'pillory', col: 1, row: 5 },
+      { kind: 'house', col: 0, row: 8 },
+      // The market along the south side.
+      { kind: 'barrel', col: 4, row: 9 },
+      { kind: 'marketStall', col: 5, row: 9 },
+      { kind: 'marketStall', col: 9, row: 9 },
+      { kind: 'crate', col: 11, row: 9 },
+      // East side, where the road comes in from the castle.
+      { kind: 'signpost', col: 13, row: 3 },
+      { kind: 'well', col: 14, row: 5 },
+      { kind: 'tree', col: 15, row: 8 },
+      { kind: 'cart', col: 13, row: 9 },
+    ],
+    lanes: [
+      {
+        // The road in from the castle wraps the square on three sides.
+        path: [{ col: 16, row: 2 }, { col: 12, row: 2 }, { col: 12, row: 7 }, { col: 3, row: 7 }, { col: 3, row: 3 }, { col: -1, row: 3 }],
+        waves: [
+          { groups: [{ enemyId: CAS.g, count: 7 }, { enemyId: CAP.g, count: 1, delay: 7 }] },
+          { groups: [{ enemyId: CAS.g2, count: 8 }] },
+          { groups: [{ enemyId: CAP.g, count: 3, spacing: 1 }, { enemyId: CAS.g2, count: 4, delay: 8 }] },
+          { groups: [{ enemyId: CAS.g2, count: 6, spacing: 0.5 }, { enemyId: CAS.m, count: 6, delay: 2 }] },
+          { groups: [{ enemyId: CAS.g, count: 30, spacing: 0.3 }] },
+          { groups: [{ enemyId: CAS.g2, count: 6, spacing: 0.5 }, { enemyId: CAS.m, count: 6, delay: 2 }, { enemyId: CAS.g2, count: 3, delay: 3 }] },
+          bossWave(7, [{ enemyId: CAP.g, count: 2, spacing: 1 }, { enemyId: CAS.g, count: 6, spacing: 0.6, delay: 2 }], 0),
+        ],
+      },
+    ],
+  },
+  {
+    id: 8,
+    name: 'The Outskirts',
+    subtitle: 'Slip into the sewers before the army catches up.',
+    baseHealth: 10, gem: 150,
+    mood: 'outskirtsMist',
+    // Thick mist cuts every champion's range; lit lanterns clear it.
+    mist: true,
+    theme: {
+      groundEven: '#4a5638',
+      groundOdd: '#424d33',
+      path: [['#241c14', 44], ['#7e6c50', 36], ['#8e7b5c', 22]],
+      floor: 'grass',
+      pathKind: 'dirt',
+    },
+    decor: [
+      // The way out: the sewer mouth the road ends in.
+      { kind: 'sewerEntrance', col: 2, row: 0 },
+      { kind: 'drainGrate', col: 4, row: 3 },
+      { kind: 'junkPile', col: 0, row: 1 },
+      { kind: 'deadTree', col: 1, row: 3 },
+      { kind: 'junkPile', col: 1, row: 5 },
+      { kind: 'laundryLine', col: 5, row: 1 },
+      { kind: 'puddle', col: 5, row: 4 },
+      // Hovels along the north edge.
+      { kind: 'shack', col: 8, row: 0 },
+      { kind: 'deadTree', col: 10, row: 1 },
+      { kind: 'shack', col: 12, row: 0 },
+      { kind: 'fence', col: 14, row: 2 },
+      { kind: 'fence', col: 15, row: 2 },
+      { kind: 'puddle', col: 10, row: 4 },
+      // The city wall: two towers flanking the road out of the Capital.
+      { kind: 'wallTower', col: 14, row: 4 },
+      { kind: 'wallTower', col: 14, row: 8 },
+      { kind: 'puddle', col: 13, row: 6 },
+      // Garden plots and odds and ends along the south.
+      { kind: 'shack', col: 0, row: 8 },
+      { kind: 'cropPatch', col: 3, row: 9 },
+      { kind: 'fence', col: 5, row: 9 },
+      { kind: 'cropPatch', col: 6, row: 9 },
+      { kind: 'fence', col: 8, row: 9 },
+      { kind: 'drainGrate', col: 9, row: 8 },
+      { kind: 'cart', col: 10, row: 9 },
+      { kind: 'barrel', col: 12, row: 9 },
+      // Lantern posts, dark until the player pays to light them: one in each
+      // loop of the road, one by the gate, one each along the north and south.
+      { kind: 'lanternPost', col: 9, row: 2, lit: true },
+      // { kind: 'lanternPost', col: 9, row: 6 },
+      { kind: 'lanternPost', col: 4, row: 5 },
+      { kind: 'lanternPost', col: 10, row: 6 },
+    ],
+    lanes: [
+      {
+        // Out through the city wall, snaking down to the sewer mouth.
+        path: [{ col: 16, row: 7 }, { col: 11, row: 7 }, { col: 11, row: 3 }, { col: 7, row: 3 }, { col: 7, row: 7 }, { col: 3, row: 7 }, { col: 3, row: 1 }],
+        waves: [
+          { groups: [{ enemyId: CAS.g2, count: 3, spacing: 4 }, { enemyId: CAS.r, count: 10, delay: 2 }] },
+          { groups: [{ enemyId: CAP.r, count: 9, spacing: 1 }] },
+          { groups: [{ enemyId: CAP.g, count: 3, spacing: 1 }, { enemyId: CAP.r, count: 5, delay: 2 }] },
+          { groups: [{ enemyId: CAS.g, count: 15, spacing: 0.45 }, { enemyId: CAS.m, count: 8, delay: 1 }] },
+          { groups: [{ enemyId: CAS.g2, count: 10, spacing: 0.5 }, { enemyId: CAP.g, count: 5, delay: 8, spacing: 1 }] },
+          { groups: [{ enemyId: CAS.r, count: 10 }, { enemyId: CAP.r, count: 8 }, { enemyId: CAS.r, count: 8, delay: 8 }, { enemyId: CAP.r, count: 6 }] },
+          bossWave(8, [{ enemyId: CAP.r, count: 4, spacing: 1 }, { enemyId: CAS.g2, count: 4, delay: 3 }], 3),
+        ],
+      },
+    ],
+  },
+  {
+    id: 9,
+    name: 'The Sewers',
+    subtitle: 'Wade through the tunnels with the army at your heels.',
+    baseHealth: 10, gem: 150,
+    mood: 'sewerDepths',
+    theme: {
+      groundEven: '#5a5a52',
+      groundOdd: '#52524b',
+      path: [['#7a7a70', 44], ['#2e3a22', 34], ['#26301c', 18]],
+      floor: 'stone',
+      pathKind: 'sewer',
+    },
+    decor: [
+      // The tunnel wall along the top: the channel comes in under the left
+      // arch and leaves under the right one; the outfall pours into a sump.
+      { kind: 'sewerWall', col: 0, row: 0 },
+      { kind: 'sewerArch', col: 2, row: 0 },
+      { kind: 'sewerWall', col: 5, row: 0 },
+      { kind: 'sewerOutfall', col: 7, row: 0 },
+      { kind: 'sewerWall', col: 9, row: 0 },
+      { kind: 'sewerWall', col: 11, row: 0 },
+      { kind: 'sewerArch', col: 13, row: 0 },
+      { kind: 'cistern', col: 7, row: 1 },
+      { kind: 'manholeLadder', col: 11, row: 1 },
+      { kind: 'pipes', col: 4, row: 1 },
+      // Piers holding up the vault.
+      { kind: 'brickPillar', col: 1, row: 4 },
+      { kind: 'brickPillar', col: 5, row: 4 },
+      { kind: 'brickPillar', col: 8, row: 6 },
+      { kind: 'brickPillar', col: 12, row: 5 },
+      // Odds and ends on the walkways.
+      { kind: 'pipes', col: 15, row: 6 },
+      { kind: 'bonePile', col: 12, row: 7 },
+      { kind: 'bonePile', col: 0, row: 9 },
+      { kind: 'crate', col: 1, row: 8 },
+      { kind: 'barrel', col: 2, row: 8 },
+      { kind: 'glowShrooms', col: 0, row: 2 },
+      { kind: 'glowShrooms', col: 6, row: 6 },
+      { kind: 'glowShrooms', col: 9, row: 8 },
+      { kind: 'glowShrooms', col: 15, row: 3 },
+      { kind: 'rats', col: 5, row: 8 },
+      { kind: 'rats', col: 12, row: 2 },
+    ],
+    lanes: [
+      {
+        // The channel winds from one tunnel to the other.
+        path: [{ col: 3, row: -1 }, { col: 3, row: 7 }, { col: 7, row: 7 }, { col: 7, row: 3 }, { col: 10, row: 3 }, { col: 10, row: 8 }, { col: 14, row: 8 }, { col: 14, row: -1 }],
+        // Placeholder waves so the stage runs (three, so the cistern lane's
+        // reveal can be seen); its real waves and boss come later.
+        waves: [
+          { groups: [{ enemyId: CAS.g, count: 6 }] },
+          { groups: [{ enemyId: CAS.g, count: 6 }] },
+          { groups: [{ enemyId: CAS.g, count: 6 }] },
+        ],
+      },
+      {
+        // The cistern lane — hidden until wave 3, when a channel opens out of
+        // the sump's bottom-right cell and joins the main one just below it.
+        // Foes spawned here climb out of the water and run the rest of the
+        // main channel. No foes on it yet.
+        revealAtWave: 2,
+        path: [{ col: 8, row: 2 }, { col: 8, row: 3 }, { col: 10, row: 3 }, { col: 10, row: 8 }, { col: 14, row: 8 }, { col: 14, row: -1 }],
+        waves: [
+          { groups: [] },
+          { groups: [] },
+          { groups: [] },
+        ],
+      },
+    ],
+  },
+  {
+    id: 10,
+    name: 'The Getaway',
+    subtitle: 'Out of the sewers at dawn — reach the wagon before they catch you.',
+    baseHealth: 10, gem: 150,
+    mood: 'escapeDawn',
+    // Won: the party piles into the wagon and rides off to the forest inn.
+    ending: 'getaway',
+    theme: {
+      groundEven: '#5a7044',
+      groundOdd: '#52683f',
+      path: [['#2a2116', 44], ['#7a6448', 36], ['#8a7454', 22]],
+      floor: 'grass',
+      pathKind: 'dirt',
+    },
+    decor: [
+      // Where you climb out: the sewer's outfall under the city, the river
+      // running from the foot of its wall.
+      { kind: 'sewerEntrance', col: 0, row: 0 },
+      { kind: 'riverCell', col: 3, row: 0 },
+      { kind: 'riverSegment', col: 4, row: 0 },
+      { kind: 'riverSegment', col: 8, row: 0 },
+      { kind: 'riverSegment', col: 12, row: 0 },
+      { kind: 'rowboat', col: 9, row: 0 },
+      { kind: 'boulder', col: 4, row: 1 },
+      { kind: 'stump', col: 7, row: 1 },
+      { kind: 'boulder', col: 3, row: 3 },
+      { kind: 'wildflowers', col: 3, row: 5 },
+      { kind: 'wildflowers', col: 7, row: 6 },
+      { kind: 'puddle', col: 6, row: 8 },
+      // The getaway crew's camp, and the wagon waiting on the road.
+      { kind: 'tent', col: 14, row: 1 },
+      { kind: 'campfire', col: 12, row: 2 },
+      { kind: 'barrel', col: 12, row: 3 },
+      { kind: 'crate', col: 15, row: 3 },
+      { kind: 'escapeWagon', col: 13, row: 4 },
+      { kind: 'signpost', col: 12, row: 6 },
+      // The edge of the wood along the south.
+      { kind: 'pineTree', col: 0, row: 9 },
+      { kind: 'pineTree', col: 4, row: 9 },
+      { kind: 'pineTree', col: 7, row: 9 },
+      { kind: 'pineTree', col: 14, row: 8 },
+      { kind: 'pineTree', col: 15, row: 7 },
+      { kind: 'wildflowers', col: 2, row: 8 },
+    ],
+    lanes: [
+      {
+        // Out of the sewer mouth and down the riverbank to the wagon's tail.
+        path: [{ col: 1, row: 1 }, { col: 1, row: 7 }, { col: 5, row: 7 }, { col: 5, row: 3 }, { col: 9, row: 3 }, { col: 9, row: 8 }, { col: 11, row: 8 }, { col: 11, row: 5 }, { col: 13, row: 5 }],
+        // Placeholder wave so the stage runs; its waves and boss come later.
+        waves: [
+          { groups: [{ enemyId: CAS.g, count: 6 }] },
+        ],
+      },
+      {
+        // Up out of the wood to the south, joining the sewer road at (5, 7).
+        path: [{ col: 5, row: 10 }, { col: 5, row: 7 }, { col: 5, row: 3 }, { col: 9, row: 3 }, { col: 9, row: 8 }, { col: 11, row: 8 }, { col: 11, row: 5 }, { col: 13, row: 5 }],
+        waves: [],
+      },
+    ],
+  },
 ]
 
 // ---------------------------------------------------------------- FOREST (6-10)
@@ -438,6 +717,8 @@ function buildLevels(specs: LevelSpec[], section: SectionId, color: string): Lev
     theme: s.theme,
     decor: s.decor,
     mood: s.mood,
+    ending: s.ending,
+    mist: s.mist,
   }));
 }
 

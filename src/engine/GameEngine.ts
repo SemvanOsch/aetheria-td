@@ -15,7 +15,8 @@ import { getEnemy, resistMultiplier, type EnemyDef } from '../domain/enemies';
 import { ENDLESS_BOSS_GEMS, generateEndlessWave, isEndlessBossWave } from '../domain/endless';
 import { isPlayerChampionId } from '../domain/playerChampion';
 import { ARMOR_RARITIES, rollArmorDrop, type ArmorRoll } from '../domain/armor';
-import { CASTLE_DECOR_CELLS, decorCellKeys } from '../domain/decor';
+import { CASTLE_DECOR_CELLS, decorCellKeys, propCells, type DecorProp } from '../domain/decor';
+import { inLanternLightAt, lightableProp, mistRangeMult } from '../domain/mist';
 import {
   cellCenter,
   cellKey,
@@ -78,6 +79,7 @@ import {
   MANA_STORM_LOWER,
   MANA_STORM_RAISE,
   isSpeaking,
+  LANTERN_GLASS,
   PIERCING_CAST_ANIM_TIME,
   specialAnimTime,
 } from './types';
@@ -354,7 +356,13 @@ export type SfxName =
   | 'manaRayTick'
   | 'manaStorm'
   | 'stormBolt'
-  | 'bardPlay';
+  | 'bardPlay'
+  | 'shieldBlock'
+  | 'shieldBreak'
+  | 'rallyCall'
+  | 'rallyShield'
+  | 'lanternLight'
+  | 'houndWhistle';
 
 // The Elf's magic arrows leap on impact: each bounce seeks the nearest living
 // enemy within BOUNCE_RANGE of the impact point that the chain hasn't hit yet.
@@ -400,6 +408,14 @@ export const DEATH_ANIM_TIME = 3.85; // fall + hold + ~1.3s shadow swallow
 // and returns it. Purely cosmetic — the dodge itself already resolved in the sim.
 export const DODGE_ANIM_TIME = 0.28;
 export const DODGE_DIST = 8;
+// A light-shy foe (the Bloodhound) skids to a slink within COWER_IN_TIME of
+// entering lantern light, and takes COWER_OUT_TIME to find the scent again once
+// out of it (see `updateCower`).
+const COWER_IN_TIME = 0.3;
+// Seconds between the foes one summon calls up, so they burst out one after
+// another rather than all at once.
+const SUMMON_STAGGER = 0.2;
+const COWER_OUT_TIME = 0.7;
 
 export class GameEngine {
   readonly level: LevelDef;
@@ -414,6 +430,12 @@ export class GameEngine {
   pathCells: Set<string>;
   /** "col,row" keys of every cell a decorative prop covers (building forbidden). */
   readonly decorCells: Set<string>;
+  /**
+   * Indices into `level.decor` of the lantern posts the player has lit this
+   * stage (see `lightLantern`); on a misty stage they clear the mist around
+   * them. Read by the renderer for the lit art, light and mist holes.
+   */
+  readonly litLanterns = new Set<number>();
 
   // --- Battle state (public: read by renderer/HUD) ---
   currency: number;
@@ -544,6 +566,10 @@ export class GameEngine {
         this.decorCells.add(cellKey(c, r));
       }
     }
+    // Lanterns the stage starts with already burning.
+    (level.decor ?? []).forEach((p, i) => {
+      if (p.lit && lightableProp(p.kind)) this.litLanterns.add(i);
+    });
     this.currency = startingCurrency;
     this.baseHealth = level.baseHealth;
     this.maxBaseHealth = level.baseHealth;
@@ -696,6 +722,7 @@ export class GameEngine {
       rangeAuraMult: masteryRangeAura(def.id, purchased),
       rangeBuffed: false,
       rangeBuffMult: 1,
+      mistMult: 1,
       knockback: masteryKnockback(def.id, purchased),
       bounces: effectiveBounces(def, 0),
       bounceDamageMult: masteryBounceDamageMult(def.id, purchased),
@@ -795,7 +822,8 @@ export class GameEngine {
   }
 
   /**
-   * Reset every ranged tower's range to its mastery-adjusted base, then buff any
+   * Reset every ranged tower's range to its mastery-adjusted base (cut by the
+   * mist where it stands on a misty stage, see `mistRangeMult`), then buff any
    * standing within an allied emitter's range (see the Wizard's Arcane
    * Resonance). An emitter never boosts itself, and the aura does not stack — the
    * first covering emitter wins, so overlapping fields grant the same flat bonus
@@ -814,7 +842,8 @@ export class GameEngine {
     // current effective reach as the sweep grows it.
     const baseRange = new Map<number, number>();
     for (const t of this.towers) {
-      const base = this.towerStats(t.def, t.upgradeTier).range;
+      t.mistMult = this.mistRangeMult(t.col, t.row);
+      const base = Math.round(this.towerStats(t.def, t.upgradeTier).range * t.mistMult);
       baseRange.set(t.uid, base);
       t.rangeBuffed = false;
       t.rangeBuffMult = 1;
@@ -868,6 +897,62 @@ export class GameEngine {
   deployBard(unitId: string) {
     const def = getUnit(unitId);
     return def ? masteryBard(def, 0, this.masteryUpgrades[def.id] ?? []) : null;
+  }
+
+  // ------------------------------------------------------- mist + lanterns
+  /**
+   * Range multiplier the mist puts on a champion standing on `col`,`row` right
+   * now (1 off a misty stage or in a lit lantern's light). The single source for
+   * the engine's ranges and the placement preview.
+   */
+  mistRangeMult(col: number, row: number): number {
+    if (!this.level.mist) return 1;
+    const decor = this.level.decor ?? [];
+    const lit: DecorProp[] = [];
+    for (const i of this.litLanterns) if (decor[i]) lit.push(decor[i]);
+    return mistRangeMult(this.level.mist, lit, col, row);
+  }
+
+  /** Index into `level.decor` of the lightable prop covering a cell, or null. */
+  lanternAt(col: number, row: number): number | null {
+    const decor = this.level.decor ?? [];
+    for (let i = 0; i < decor.length; i++) {
+      if (!lightableProp(decor[i].kind)) continue;
+      if (propCells(decor[i]).some((c) => c.col === col && c.row === row)) return i;
+    }
+    return null;
+  }
+
+  /** Whether lantern `index` (into `level.decor`) has been lit. */
+  isLanternLit(index: number): boolean {
+    return this.litLanterns.has(index);
+  }
+
+  /** Gold it costs to light lantern `index`, or null if that prop can't be lit. */
+  lanternCost(index: number): number | null {
+    const p = this.level.decor?.[index];
+    return p ? (lightableProp(p.kind)?.cost ?? null) : null;
+  }
+
+  /**
+   * Buy the light of lantern `index` (into `level.decor`): spends its cost and
+   * clears the mist around it for the rest of the stage, so every champion in
+   * its light gets its full range back at once. Returns true on success.
+   */
+  lightLantern(index: number): boolean {
+    if (this.outcome !== 'playing') return false;
+    const p = this.level.decor?.[index];
+    const light = p ? lightableProp(p.kind) : undefined;
+    if (!p || !light || this.litLanterns.has(index)) return false;
+    if (this.currency < light.cost) return false;
+    this.currency -= light.cost;
+    this.currencyEarned -= light.cost;
+    this.litLanterns.add(index);
+    this.recomputeAdjacency();
+    const c = cellCenter(p.col, p.row);
+    this.emitFx({ kind: 'lantern', x: c.x + LANTERN_GLASS.x, y: c.y + LANTERN_GLASS.y, cx: c.x, cy: c.y, radius: light.radius });
+    this.sfx.push('lanternLight');
+    return true;
   }
 
   /** Change a deployed tower's targeting mode. */
@@ -1642,31 +1727,7 @@ export class GameEngine {
     ) {
       const { enemyId, laneIndex, healthMult } = this.spawnQueue[this.spawnCursor++];
       const def = this.spawnDef(enemyId, healthMult);
-      this.enemies.push({
-        uid: this.uidCounter++,
-        def,
-        health: def.health,
-        laneIndex,
-        dist: 0,
-        pos: this.positionAtDistance(this.lanes[laneIndex], 0),
-        heading: this.headingAtDistance(this.lanes[laneIndex], 0),
-        slowFactor: 1,
-        slowTimer: 0,
-        dead: false,
-        hitFlash: 0,
-        knockbackRemaining: 0,
-        knockbackCooldown: 0,
-        // A boss on a reveal lane rises off its throne before walking.
-        rise: def.boss && this.laneRevealAt[laneIndex] !== undefined ? 1 : 0,
-        // An enemy with intro lines walks in a short way (-1) before speaking. In
-        // endless runs it starts past its last line, so it never stops to speak.
-        speechIndex: !def.spawnLines ? 0 : this.level.endless ? def.spawnLines.length : -1,
-        speechTimer: def.spawnLines && !this.level.endless ? SPEECH_LINE_TIME : 0,
-        dodge: 0,
-        wardReduction: 0,
-        dying: false,
-        deathT: 0,
-      });
+      this.enemies.push(this.createEnemy(def, laneIndex, 0));
       if (def.boss) {
         const at = this.positionAtDistance(this.lanes[laneIndex], 0);
         this.emitFx({ kind: 'bossSpawn', x: at.x, y: at.y, color: def.visual.color });
@@ -1674,6 +1735,42 @@ export class GameEngine {
         this.bossHasSpawned = true;
       }
     }
+  }
+
+  /** A fresh enemy of `def` on lane `laneIndex`, `dist` px along it. */
+  private createEnemy(def: EnemyDef, laneIndex: number, dist: number): Enemy {
+    return {
+      uid: this.uidCounter++,
+      def,
+      health: def.health,
+      laneIndex,
+      dist,
+      pos: this.positionAtDistance(this.lanes[laneIndex], dist),
+      heading: this.headingAtDistance(this.lanes[laneIndex], dist),
+      slowFactor: 1,
+      slowTimer: 0,
+      cower: 0,
+      dead: false,
+      hitFlash: 0,
+      knockbackRemaining: 0,
+      knockbackCooldown: 0,
+      // A boss on a reveal lane rises off its throne before walking.
+      rise: def.boss && this.laneRevealAt[laneIndex] !== undefined ? 1 : 0,
+      // An enemy with intro lines walks in a short way (-1) before speaking. In
+      // endless runs it starts past its last line, so it never stops to speak.
+      speechIndex: !def.spawnLines ? 0 : this.level.endless ? def.spawnLines.length : -1,
+      speechTimer: def.spawnLines && !this.level.endless ? SPEECH_LINE_TIME : 0,
+      dodge: 0,
+      wardReduction: 0,
+      shield: def.shieldHits ?? 0,
+      shieldMax: def.shieldHits ?? 0,
+      rallyTimer: def.rally?.every ?? 0,
+      rallyT: -1,
+      summonTimer: def.summon?.every ?? 0,
+      summonT: -1,
+      dying: false,
+      deathT: 0,
+    };
   }
 
   private updateEnemies(dt: number): void {
@@ -1722,7 +1819,13 @@ export class GameEngine {
         e.heading = this.headingAtDistance(lane, e.dist);
         continue;
       }
-      e.dist += e.def.speed * e.slowFactor * dt;
+      // A rallying enemy (the Sergeant-at-Arms) halts every so often to raise
+      // its standard, shielding the rest of the field partway through.
+      if (e.def.rally && this.updateRally(e, dt)) continue;
+      // A summoner (the Hound Master) halts every so often to call more foes.
+      if (e.def.summon && this.updateSummon(e, dt)) continue;
+      const lightSlow = e.def.lightSlow ? this.updateCower(e, dt) : 1;
+      e.dist += e.def.speed * e.slowFactor * lightSlow * dt;
       // Bleed off any pending knockback as a smooth slide back down the path,
       // capped per frame so it reads as a shove rather than a teleport. Runs
       // after forward motion so a well-timed shove can still deny a base hit.
@@ -3082,6 +3185,29 @@ export class GameEngine {
       });
       return false;
     }
+    // Shielded enemies (the Man-at-Arms) turn aside their first hits entirely:
+    // each hit, however big, costs one shield point and deals nothing. Counted
+    // here so every attack type (melee cuts, arrows, AoE ticks, beams) is one hit.
+    if (enemy.shield > 0) {
+      enemy.shield -= 1;
+      enemy.hitFlash = 0.12;
+      const broke = enemy.shield === 0;
+      const from = source?.pos ?? enemy.pos;
+      this.emitFx({ kind: 'block', x: enemy.pos.x, y: enemy.pos.y, fromX: from.x, fromY: from.y, broke });
+      this.sfx.push(broke ? 'shieldBreak' : 'shieldBlock');
+      // Only the break gets a popup; single blocks read from the pips and sparks.
+      if (broke) {
+        this.floaters.push({
+          pos: { x: enemy.pos.x, y: enemy.pos.y - 6 },
+          text: 'Shield broken!',
+          color: '#c9d6e6',
+          ttl: 1,
+          maxTtl: 1,
+          size: 12,
+        });
+      }
+      return false;
+    }
     // Physical/magic resistance: the attacker's damage type (if any) is softened
     // by the enemy's matching resistance. resistMultiplier is the single source
     // for turning authored resist fractions into a multiplier. A nearby
@@ -3189,6 +3315,109 @@ export class GameEngine {
       enemy.knockbackRemaining += source.knockback * (enemy.def.boss ? 0.5 : 1);
       enemy.knockbackCooldown = KNOCKBACK_COOLDOWN;
       this.spawnKnockbackPuffs(enemy);
+    }
+    return true;
+  }
+
+  /**
+   * A light-shy foe (`EnemyDef.lightSlow`, the Bloodhound) in or out of a lit
+   * lantern's light: eases its `cower` toward 1 in the light (quickly, a skid)
+   * or back to 0 out of it (it picks the scent up again more slowly), and
+   * returns the speed multiplier that blend gives. Losing the scent throws a
+   * skid of dust.
+   */
+  private updateCower(e: Enemy, dt: number): number {
+    const decor = this.level.decor ?? [];
+    let lit = false;
+    for (const i of this.litLanterns) {
+      if (decor[i] && inLanternLightAt(decor[i], e.pos.x, e.pos.y)) {
+        lit = true;
+        break;
+      }
+    }
+    const was = e.cower;
+    e.cower = lit ? Math.min(1, e.cower + dt / COWER_IN_TIME) : Math.max(0, e.cower - dt / COWER_OUT_TIME);
+    if (lit && was === 0) this.emitFx({ kind: 'skid', x: e.pos.x, y: e.pos.y, dx: e.heading.x, dy: e.heading.y });
+    return 1 + ((e.def.lightSlow ?? 1) - 1) * e.cower;
+  }
+
+  /**
+   * Advance an enemy's summon (see `EnemyDef.summon`). Counts down to the next
+   * call while it walks; once one starts it stands still for `duration`
+   * sounding it, and `at` of the way through `count` foes of `enemyId` burst
+   * out just behind it on its lane, one every `SUMMON_STAGGER` seconds. Returns
+   * whether it is summoning (holding still) this tick.
+   */
+  private updateSummon(e: Enemy, dt: number): boolean {
+    const s = e.def.summon;
+    if (!s) return false;
+    if (e.summonT < 0) {
+      e.summonTimer -= dt;
+      if (e.summonTimer > 0) return false;
+      e.summonT = 0;
+      this.sfx.push('houndWhistle');
+      return true;
+    }
+    const before = e.summonT;
+    e.summonT += dt;
+    // Each foe answers `SUMMON_STAGGER` after the one before (all within the
+    // call), out of the same spot just behind the summoner.
+    const callAt = s.duration * s.at;
+    for (let i = 0; i < s.count; i++) {
+      const at = Math.min(s.duration, callAt + i * SUMMON_STAGGER);
+      if (before >= at || e.summonT < at) continue;
+      const dist = Math.max(0, e.dist - 6);
+      this.enemies.push(this.createEnemy(this.spawnDef(s.enemyId, 1), e.laneIndex, dist));
+      const spot = this.positionAtDistance(this.lanes[e.laneIndex], dist);
+      this.emitFx({ kind: 'summon', x: e.pos.x, y: e.pos.y, spawns: [{ ...spot }] });
+    }
+    if (e.summonT >= s.duration) {
+      // The call itself counts toward the cycle, so it sounds every `every` seconds.
+      e.summonT = -1;
+      e.summonTimer = Math.max(0, s.every - s.duration);
+    }
+    return true;
+  }
+
+  /**
+   * Advance an enemy's rally (see `EnemyDef.rally`). Counts down to the next
+   * rally while it walks; once one starts it stands still for `duration`, and
+   * `at` of the way through every *other* living foe on the board gains
+   * `shield` shield points. Returns whether the enemy is rallying (holding still)
+   * this tick.
+   */
+  private updateRally(e: Enemy, dt: number): boolean {
+    const r = e.def.rally;
+    if (!r) return false;
+    if (e.rallyT < 0) {
+      e.rallyTimer -= dt;
+      if (e.rallyTimer > 0) return false;
+      // Nobody left to shield: keep walking, and rally as soon as a foe appears.
+      e.rallyTimer = 0;
+      if (!this.enemies.some((o) => o !== e && !o.dead && !o.dying && o.rise <= 0)) return false;
+      e.rallyT = 0;
+      this.sfx.push('rallyCall');
+      this.emitFx({ kind: 'rally', x: e.pos.x, y: e.pos.y, granted: false, targets: [] });
+      this.floaters.push({ pos: { x: e.pos.x, y: e.pos.y - 40 }, text: 'Rally!', color: '#ffd76a', ttl: 1.2, maxTtl: 1.2, size: 13 });
+      return true;
+    }
+    const before = e.rallyT;
+    e.rallyT += dt;
+    const grantAt = r.duration * r.at;
+    if (before < grantAt && e.rallyT >= grantAt) {
+      const targets: { x: number; y: number }[] = [];
+      for (const o of this.enemies) {
+        if (o === e || o.dead || o.dying || o.rise > 0) continue;
+        o.shield += r.shield;
+        o.shieldMax = Math.max(o.shieldMax, o.shield);
+        targets.push({ x: o.pos.x, y: o.pos.y });
+      }
+      this.sfx.push('rallyShield');
+      this.emitFx({ kind: 'rally', x: e.pos.x, y: e.pos.y, granted: true, targets });
+    }
+    if (e.rallyT >= r.duration) {
+      e.rallyT = -1;
+      e.rallyTimer = r.every;
     }
     return true;
   }

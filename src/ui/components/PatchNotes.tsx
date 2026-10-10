@@ -20,6 +20,32 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-10-10 · Flight from the Capital',
+    changes: [
+      'Four new Capital stages: Market Square, The Outskirts, The Sewers and The Getaway. The Sewers and The Getaway are still being built: for now they have placeholder waves and no boss yet.',
+      'Market Square: the royal army closes in across the town square at blue hour, with ash from the burning castle drifting over the roofs. The road wraps the square on three sides, around a fountain, a clock-towered guildhall, a bakery, a tavern and a market.',
+      'The Outskirts is drowned in mist: every champion has 30% less range unless it stands near a lit lantern. Click a dark lantern post to light it for 50 gold. It clears the mist within 2.5 tiles and shows a warm ring of its reach when you hover it. Champions whose range the mist is cutting show “Lost in the Mist” on their stats.',
+      'The Sewers: wade through brick tunnels along a channel of murky water. From wave 3 a new channel opens out of the cistern and joins the main one.',
+      'The Getaway: out of the sewers at dawn, down the riverbank to the wagon waiting for you. Winning it plays a cutscene: your champions sprint for the wagon and leap in, it gallops off the board, and a whole day passes on the ride (farmland, meadow, the old forest, the Capital burning far behind) until you stop at an inn at the forest’s edge. Skip it with the Skip button, Escape, Enter or Space. The ride has its own music, Flight from the Capital.',
+      'New foe, the Man-at-Arms, now a Capital soldier in full plate: his tower shield blocks the first 5 hits completely, however big they are, and only then does he take damage. His remaining shield shows as pips over his health bar. (He no longer appears in the Castle.)',
+      'New foe, the Bloodhound: a very fast tracking hound. Inside a lit lantern’s light it loses your scent and slows to a crawl.',
+      'New boss, the Sergeant-at-Arms (Market Square): his shield blocks the first 15 hits, and every 6 seconds he stops to raise the royal standard, giving every other foe on the board 3 more shield points.',
+      'New boss, the Hound Master (The Outskirts): every 5 seconds he blows his whistle and 3 Bloodhounds burst out at his side.',
+      'Field notes: the first time you record a new foe in a battle, a note pops up beside the board. Click it to pause and read its bestiary page. Foes are now recorded in the bestiary after 1 kill instead of 100.',
+      'Winning a stage now gives every champion in your team 5 EXP per wave of the stage, deployed or not.',
+      'Farmers now earn 1 EXP per 5 gold harvested (was 10). Better Soil and Fresh Food now cost 250 EXP (was 100).',
+      'The Kingsguard set bonus (Oath of the Crown) is now +15% range only; it no longer gives +10% damage.',
+      'Once you clear every Castle stage, the castle seen through the window on the home desk smoulders with a few small fires.',
+      'Lots of new props, all in the Level Designer too: town square buildings and street furniture, outskirts hovels, wall towers and lantern posts, sewer walls, arches and pipes, a river, an escape wagon, a camp and pine trees. There is a new sewer path material, and paths may now end at a sewer entrance or the escape wagon.',
+      'New stage moods for the Capital: dusk in town, misty outskirts, the sewer depths and a rose-gold dawn by the river.',
+      'New sounds for shield blocks and breaks, the rally, lighting a lantern and the Hound Master’s whistle.',
+      'Fixed a faint crackle in the Capital battle theme and other sounds.',
+      'The Inn chapter now comes before the Forest on the chapter list.',
+      'Garrick Vane’s and the Iron Warden’s bestiary descriptions are shorter.',
+      'Settings → Developer: a new Reset field notes button wipes all foe kills so the field notes pop up again.',
+    ],
+  },
+  {
     version: '2026-10-07 · Arcane Staff & The Capital',
     changes: [
       'Magic: Arcane Staff. A new rival style to Greater Orb (500 EXP). Your adventurer takes up a crystal-tipped staff, raises it for each cast and fires three mana bolts (9 damage each). The bolts fan out upward, then curve in on a different enemy in range each; if there are fewer enemies than bolts, the extra bolts hit again. Its in-stage levels are Arcane Tempo and Arcane Force.',

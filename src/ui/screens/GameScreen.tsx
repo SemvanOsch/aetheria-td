@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useGame } from '../../application/gameContext';
 import {
   effectiveMasteryUpgradesFor,
+  enemyUnlockKills,
   isArmorUnlocked,
   resolvedMasteryUpgrades,
   REPLAY_GEM_REWARD,
@@ -20,16 +21,18 @@ import {
   masteryStartingGoldBonus,
   masteryUpgradeCost,
   masteryUpgradeDeltas,
+  stageClearExp,
 } from '../../domain/mastery';
 import { SELECTABLE_TARGETING, targetingLabel, type TargetingType } from '../../domain/targeting';
-import { BOARD_HEIGHT, BOARD_WIDTH } from '../../domain/grid';
+import { BOARD_HEIGHT, BOARD_WIDTH, cellCenter } from '../../domain/grid';
 import { RARITIES } from '../../domain/rarity';
 import { GameEngine } from '../../engine/GameEngine';
 import { drawBoard, type RenderUiState } from '../../engine/renderer';
 import type { Outcome, Tower } from '../../engine/types';
 import { playCombatSound } from '../combatAudio';
 import { audioBus, holdAudioAwake } from '../audioBus';
-import { setMusicIntensity } from '../music';
+import { battleTrackFor, setMusicIntensity, setMusicTrack } from '../music';
+import { GetawayCutscene } from '../components/GetawayCutscene';
 import { playUiSound } from '../uiAudio';
 import { UnitSprite } from '../components/UnitSprite';
 import { Icon, type IconName } from '../components/Icon';
@@ -37,6 +40,8 @@ import { ArmorIcon } from '../components/ArmorIcon';
 import { PauseMenu } from '../components/PauseMenu';
 import { BardSoundToggle } from '../components/BardSoundToggle';
 import { ARMOR_RARITIES, armorPieceName, armorStatLines, type ArmorRoll } from '../../domain/armor';
+import { getEnemy } from '../../domain/enemies';
+import { FieldNotePage, FieldNoteTab } from '../components/FieldNote';
 
 interface Props {
   levelId: number;
@@ -94,6 +99,16 @@ interface Hud {
 const NO_DROPS: ArmorRoll[] = [];
 /** How long the "armor found" toast stays up (ms). */
 const LOOT_TOAST_MS = 4200;
+/** The beat a won stage holds on the board before its ending cutscene opens. */
+const ENDING_BEAT_MS = 1100;
+
+/** The "light this lantern?" popup: which lantern, its price, and where (as % of the board). */
+interface LanternPrompt {
+  index: number;
+  cost: number;
+  xPct: number;
+  yPct: number;
+}
 
 /** Live info for the hovered-enemy tooltip, positioned as % of the board. */
 interface EnemyTooltip {
@@ -105,6 +120,9 @@ interface EnemyTooltip {
   physicalResist: number;
   /** Magic damage reduction fraction (0-1), if any — shows a blue shield. */
   magicResist: number;
+  /** Shield points left and the foe's full shield (0 when unshielded). */
+  shield: number;
+  maxShield: number;
   xPct: number;
   yPct: number;
 }
@@ -157,6 +175,10 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   const [showBuffs, setShowBuffs] = useState(false);
   const [hud, setHud] = useState<Hud | null>(null);
   const [tooltip, setTooltip] = useState<EnemyTooltip | null>(null);
+  // The "light this lantern?" popup over a clicked dark lantern (board %).
+  const [lanternPrompt, setLanternPrompt] = useState<LanternPrompt | null>(null);
+  const lanternPromptRef = useRef<LanternPrompt | null>(null);
+  lanternPromptRef.current = lanternPrompt;
   // Fast-forward: run the simulation at 3× by sub-stepping the engine. Mirrored
   // into a ref so the rAF loop reads the current speed without re-subscribing.
   const [fastForward, setFastForward] = useState(false);
@@ -166,6 +188,13 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(false);
   pausedRef.current = paused;
+  // Foes recorded in the bestiary for the first time this battle, oldest first,
+  // waiting behind the field-note tab; `noteOpen` while one is being written up
+  // (the battle is frozen then, like the pause menu).
+  const [newFoes, setNewFoes] = useState<string[]>([]);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const noteOpenRef = useRef(false);
+  noteOpenRef.current = noteOpen;
   // Auto-start-waves preference, read by the rAF loop.
   const autoStartRef = useRef(false);
   autoStartRef.current = game.state.prefs.autoStartWaves;
@@ -192,6 +221,13 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
 
   const settledRef = useRef(false);
   const firstClearRef = useRef(false);
+  // The stage's ending cutscene (`level.ending`): playing over the screen, then done.
+  const [ending, setEnding] = useState<'pending' | 'playing' | 'done' | null>(null);
+  const endingRef = useRef<'pending' | 'playing' | 'done' | null>(null);
+  // The cutscene overlay stays mounted past `done` while it fades off the result card.
+  const [cutsceneOpen, setCutsceneOpen] = useState(false);
+  // Where the board sat on screen as the ending opened (it zooms out from there).
+  const endingFromRef = useRef<DOMRect | null>(null);
   // Only the configured team may be deployed this stage.
   const teamIds = game.state.team;
 
@@ -217,6 +253,11 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     const engine = new GameEngine(level, startingGold, activeUpgrades);
     engine.armorUnlocked = isArmorUnlocked(game.state);
     engineRef.current = engine;
+    // App picks the battle theme when the battle screen opens, but a retry
+    // remounts this screen without App noticing: claim the theme here too, so
+    // a retry after an ending (which swapped in its ride music) gets it back.
+    // Not on unmount, or leaving for the menus would blip the battle theme on.
+    setMusicTrack(battleTrackFor(level.section));
     settledRef.current = false;
 
     const canvas = canvasRef.current!;
@@ -234,6 +275,12 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     let lootUntil = 0;
     // Endless gems already banked to the save (they bank the moment they're won).
     let gemsBanked = 0;
+    // Bestiary kills banked before this battle (kills bank at settle), and the
+    // foes already recorded, so a field note pops only on a foe's first record.
+    const bankedKills = { ...game.state.enemyKills };
+    const recorded = new Set<string>();
+    // When a won stage's ending cutscene opens (`ENDING_BEAT_MS` after the win).
+    let endingAt = 0;
     // Auto-start waves: the next wave is due the moment the previous one clears.
     const autoWaveDue = () =>
       autoStartRef.current &&
@@ -293,6 +340,8 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
             boss: e.def.boss,
             physicalResist: e.def.physicalResist ?? 0,
             magicResist: e.def.magicResist ?? 0,
+            shield: e.shield,
+            maxShield: e.shieldMax,
             xPct: (e.pos.x / BOARD_WIDTH) * 100,
             yPct: (e.pos.y / BOARD_HEIGHT) * 100,
           }
@@ -321,7 +370,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
       // Fast-forward advances the sim multiple normal-sized steps per frame,
       // keeping each step's fidelity (vs. one oversized dt that skips motion).
       // Paused: nothing advances, but the board keeps drawing.
-      const steps = pausedRef.current ? 0 : speedRef.current;
+      const steps = pausedRef.current || noteOpenRef.current ? 0 : speedRef.current;
       for (let i = 0; i < steps; i++) {
         engine.update(dt);
         if (engine.outcome !== 'playing') break; // stop stepping once settled
@@ -340,6 +389,19 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
         engine.sfx.length = 0;
       }
 
+      // The ending cutscene draws the board itself while it plays. After the
+      // win the board runs on a beat first (the last kill lands, the corpse
+      // falls) before it opens, zooming out from right where the board sits.
+      if (endingRef.current === 'pending' && now >= endingAt) {
+        endingFromRef.current = canvas.getBoundingClientRect();
+        endingRef.current = 'playing';
+        setEnding('playing');
+        setCutsceneOpen(true);
+      }
+      if (endingRef.current === 'playing') {
+        raf = requestAnimationFrame(frame);
+        return;
+      }
       drawBoard(ctx, engine, uiRef.current);
       setHud(snapshot(now));
       updateTooltip();
@@ -356,13 +418,36 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
         dropsBanked = engine.armorDrops.length;
         lootUntil = now + LOOT_TOAST_MS;
       }
+      // A foe slain enough times this battle to enter the bestiary for the
+      // first time queues a field note at the board's side.
+      let fresh: string[] | null = null;
+      for (const id in engine.enemyKills) {
+        if (recorded.has(id)) continue;
+        const need = enemyUnlockKills(getEnemy(id));
+        const before = bankedKills[id] ?? 0;
+        if (before >= need) recorded.add(id);
+        else if (before + engine.enemyKills[id] >= need) {
+          recorded.add(id);
+          (fresh ??= []).push(id);
+        }
+      }
+      if (fresh) {
+        const add = fresh;
+        setNewFoes((q) => [...q, ...add]);
+      }
 
       // Settle rewards/progression exactly once when the battle ends.
       if (engine.outcome !== 'playing' && !settledRef.current) {
         settledRef.current = true;
         // Champion mastery EXP is earned from kills regardless of the outcome,
-        // so it banks on both victory and defeat.
-        game.awardMastery(engine.masteryEarned);
+        // so it banks on both victory and defeat. Winning a stage also grants
+        // every team champion a clear bonus per wave the stage had.
+        const exp = { ...engine.masteryEarned };
+        if (!endless && engine.outcome === 'won') {
+          const bonus = stageClearExp(engine.totalWaves);
+          for (const id of game.state.team) exp[id] = (exp[id] ?? 0) + bonus;
+        }
+        game.awardMastery(exp);
         // Enemy kills bank win or lose too — they feed the Enemy Index unlocks.
         game.awardEnemyKills(engine.enemyKills);
         // Gold is a per-stage resource and does not persist; only the gem
@@ -374,6 +459,12 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
         } else if (engine.outcome === 'won') {
           firstClearRef.current = !game.state.completedLevels.includes(level.id);
           game.completeLevel(level.id, level.gemReward);
+          // A stage with an ending plays it before the result card, after a beat.
+          if (level.ending) {
+            endingRef.current = 'pending';
+            endingAt = now + ENDING_BEAT_MS;
+            setEnding('pending');
+          }
         }
       }
 
@@ -392,6 +483,15 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     // Engine is created once per level mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [levelId]);
+
+  // The ending has run: hand back to the result card, leaving the board as the
+  // party left it — champions and wagon gone down the road.
+  const finishEnding = () => {
+    const wagon = (level.decor ?? []).findIndex((p) => p.kind === 'escapeWagon');
+    uiRef.current.scene = { hideTowers: true, hiddenDecor: new Set(wagon >= 0 ? [wagon] : []) };
+    endingRef.current = 'done';
+    setEnding('done');
+  };
 
   // ---- Pointer handling ---------------------------------------------------
   const pointerToBoard = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -417,6 +517,9 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     const enemy = engine.enemyAt(x, y);
     hoverEnemyRef.current = enemy ? enemy.uid : null;
     uiRef.current.hoverEnemyUid = hoverEnemyRef.current;
+    // A dark lantern under the cursor can be clicked to light it.
+    const lantern = engine.lanternAt(cell.col, cell.row);
+    e.currentTarget.style.cursor = lantern != null && !engine.isLanternLit(lantern) ? 'pointer' : '';
   };
 
   const handleLeave = () => {
@@ -431,12 +534,29 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     const engine = engineRef.current!;
     if (engine.outcome !== 'playing') return;
     const { col, row } = pointerToCell(e);
+    // Any click on the board dismisses an open lantern popup.
+    setLanternPrompt(null);
 
     // Clicking an existing tower selects it.
     const existing = engine.towerAt(col, row);
     if (existing) {
       setSelectedTowerUid(existing.uid);
       setSelectedUnitId(null);
+      return;
+    }
+
+    // Clicking a dark lantern asks whether to buy its light.
+    const lantern = engine.lanternAt(col, row);
+    const prop = lantern != null ? engine.level.decor?.[lantern] : undefined;
+    if (lantern != null && prop && !engine.isLanternLit(lantern)) {
+      // Anchored just above the lantern's head.
+      const at = cellCenter(prop.col, prop.row);
+      setLanternPrompt({
+        index: lantern,
+        cost: engine.lanternCost(lantern) ?? 0,
+        xPct: (at.x / BOARD_WIDTH) * 100,
+        yPct: ((at.y - 50) / BOARD_HEIGHT) * 100,
+      });
       return;
     }
 
@@ -487,7 +607,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   // The chapter battle theme thins out in the build phase and swells while a
   // wave is on the board; after the battle it settles back down.
   // Pausing settles it down too.
-  const musicPhase = !hud || hud.outcome !== 'playing' || paused ? 'over' : hud.phase;
+  const musicPhase = !hud || hud.outcome !== 'playing' || paused || noteOpen ? 'over' : hud.phase;
   useEffect(() => {
     setMusicIntensity(musicPhase === 'prep' ? 0.3 : musicPhase === 'over' ? 0.15 : 1);
   }, [musicPhase]);
@@ -497,6 +617,10 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (lanternPromptRef.current) {
+        setLanternPrompt(null);
+        return;
+      }
       const ui = uiRef.current;
       if (!pausedRef.current && (ui.selectedUnitId || ui.selectedTowerUid != null)) {
         clearSelection();
@@ -543,6 +667,19 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     }
   };
 
+  /** The lantern popup's "Light" button: buy the light, or say why not. */
+  const lightPromptedLantern = (prompt: LanternPrompt) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    if (engine.currency < prompt.cost) {
+      playUiSound('deny');
+      showFlash(`Not enough gold to light the lantern (${prompt.cost}).`);
+      return;
+    }
+    if (engine.lightLantern(prompt.index)) refreshDeploys();
+    setLanternPrompt(null);
+  };
+
   const setTargeting = (type: TargetingType) => {
     if (selectedTowerUid == null) return;
     engineRef.current?.setTowerTargeting(selectedTowerUid, type);
@@ -575,6 +712,13 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   const canStartWave =
     hud?.phase === 'prep' && hud.outcome === 'playing' && hud.waveIndex < hud.totalWaves;
 
+  // The oldest foe waiting for its field note, written up while the battle waits.
+  const noteFoe = newFoes.length ? getEnemy(newFoes[0]) : null;
+  const closeNote = () => {
+    setNoteOpen(false);
+    setNewFoes((q) => q.slice(1));
+  };
+
   // Leaving from the pause menu: retreat from a stage, or concede an endless run.
   const leaveFromPause = () => {
     setPaused(false);
@@ -586,6 +730,14 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     <main className="game-wrap">
       {paused && hud?.outcome === 'playing' && (
         <PauseMenu endless={!!endless} onResume={() => setPaused(false)} onLeave={leaveFromPause} />
+      )}
+      {noteOpen && noteFoe && (
+        <FieldNotePage
+          key={noteFoe.id}
+          def={noteFoe}
+          kills={(game.state.enemyKills[noteFoe.id] ?? 0) + (engineRef.current?.enemyKills[noteFoe.id] ?? 0)}
+          onClose={closeNote}
+        />
       )}
       <div className="game-hud">
         {endless && hud?.outcome === 'playing' ? (
@@ -657,6 +809,30 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
               onPointerDown={handleClick}
               onContextMenu={handleContextMenu}
             />
+            {lanternPrompt && hud?.outcome === 'playing' && (
+              <div
+                className={`lantern-prompt ${lanternPrompt.yPct < 24 ? 'below' : ''}`}
+                style={{ left: `${lanternPrompt.xPct}%`, top: `${lanternPrompt.yPct}%` }}
+                role="dialog"
+                aria-label="Light this lantern?"
+              >
+                <div className="lp-title">
+                  <Icon name="lantern" /> Light this lantern?
+                </div>
+                <div className="lp-actions">
+                  <button
+                    className={`btn primary ${hud.currency < lanternPrompt.cost ? 'unaffordable' : ''}`}
+                    onClick={() => lightPromptedLantern(lanternPrompt)}
+                  >
+                    Light <Icon name="coin" />
+                    {lanternPrompt.cost}
+                  </button>
+                  <button className="btn ghost" onClick={() => setLanternPrompt(null)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
             {tooltip && hud?.outcome === 'playing' && (
               <div
                 className={`enemy-tooltip ${tooltip.boss ? 'boss' : ''} ${tooltip.yPct < 22 ? 'below' : ''}`}
@@ -681,6 +857,17 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                 <div className="et-hp">
                   {tooltip.health} / {tooltip.maxHealth} HP
                 </div>
+                {tooltip.shield > 0 && (
+                  <div className="et-shield">
+                    <span className="et-pips">
+                      {/* A big shield (over 6) is just one pip beside the count. */}
+                      {Array.from({ length: tooltip.maxShield > 6 ? 1 : tooltip.maxShield }, (_, i) => (
+                        <i key={i} className={i < tooltip.shield ? 'on' : ''} />
+                      ))}
+                    </span>
+                    Shield {tooltip.shield} / {tooltip.maxShield} hits
+                  </div>
+                )}
               </div>
             )}
             <div className="board-overlay">
@@ -690,6 +877,17 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                 </div>
               )}
               {hud?.lootToast && hud.outcome === 'playing' && <LootToast key={hud.armorDrops.length} roll={hud.lootToast} />}
+              {noteFoe && !noteOpen && hud?.outcome === 'playing' && (
+                <FieldNoteTab
+                  key={noteFoe.id}
+                  def={noteFoe}
+                  count={newFoes.length}
+                  onOpen={() => {
+                    clearSelection();
+                    setNoteOpen(true);
+                  }}
+                />
+              )}
               {hud && hud.outcome !== 'playing' && endless && (
                 <EndlessResultCard
                   wavesCleared={hud.waveIndex}
@@ -702,7 +900,16 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                   onRetry={onRetry}
                 />
               )}
-              {hud && hud.outcome !== 'playing' && !endless && (
+              {cutsceneOpen && engineRef.current && (
+                <GetawayCutscene
+                  engine={engineRef.current}
+                  section={level.section}
+                  from={endingFromRef.current}
+                  onDone={finishEnding}
+                  onClosed={() => setCutsceneOpen(false)}
+                />
+              )}
+              {hud && hud.outcome !== 'playing' && !endless && (ending == null || ending === 'done') && (
                 <ResultCard
                   outcome={hud.outcome}
                   gemReward={level.gemReward}
@@ -764,13 +971,13 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                         </span>
                       </span>
                       <span className={`cost ${affordable ? '' : 'unaffordable'}`}>{def.cost > 0 ? (
-                          <>
-                            <Icon name="coin" />
-                            {def.cost}
-                          </>
-                        ) : (
-                          'Free'
-                        )}</span>
+                        <>
+                          <Icon name="coin" />
+                          {def.cost}
+                        </>
+                      ) : (
+                        'Free'
+                      )}</span>
                       <span className="deploy-stats-tip" role="tooltip">
                         {def.generator ? (
                           <>
@@ -834,6 +1041,15 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
             </div>
           )}
 
+          {!selectedTower && level.mist && (
+            <div className="panel panel-pad mist-note">
+              <b><Icon name="lantern" /> Mist</b>
+              <span>
+                Champions in the mist can see less far.
+              </span>
+            </div>
+          )}
+
           {selectedTower && (
             <div className="panel panel-pad selected-tower-box">
               {selectedTower.bardEvery > 0 && <BardSoundToggle compact className="t-bard-sound" />}
@@ -878,7 +1094,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                   <div className="s">Targets <b>{selectedTower.bardTargets}</b></div>
                   <div className="s">Lasts <b>{selectedTower.bardDuration}s</b></div>
                   <div className="s">Every <b>{selectedTower.bardEvery}s</b></div>
-                  <div className="s">Range <b>{selectedTower.range}</b></div>
+                  <div className={`s${selectedTower.mistMult < 1 ? ' debuff-range' : ''}`}>Range <b>{selectedTower.range}</b></div>
                 </div>
               ) : (() => {
                 // Reflect the live buffs on the exact stat each one lifts: a
@@ -901,14 +1117,14 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                 // speed → blue, damage → red, range → green, crit → yellow, DPS → its
                 // own violet.
                 return (
-                <div className="stat-row" style={{ marginTop: 4 }}>
-                  <div className={`s${dmgBuffed ? ' buff-dmg' : ''}`}>DMG <b>{selectedTower.damage}</b></div>
-                  <div className={`s${spdBuffed ? ' buff-spd' : ''}`}>SPD <b>{formatAttackSpeed(spd)}/s</b></div>
-                  <div className={`s${rangeBuffed ? ' buff-range' : ''}`}>Range <b>{selectedTower.range}</b></div>
-                  <div className={`s${dpsBuffed ? ' buff-dps' : ''}`}>DPS <b>{(selectedTower.damage * spd).toFixed(0)}{selectedTower.burstCount > 1 ? ` x${selectedTower.burstCount}` : ''}</b></div>
-                  <div className={`s${critBuffed ? ' buff-crit' : ''}`}>Crit <b>{+(selectedTower.critChance * 100).toFixed(2)}%</b></div>
-                  <div className={`s${critBuffed ? ' buff-crit' : ''}`}>Crit Dmg <b>{selectedTower.critMultiplier}×</b></div>
-                </div>
+                  <div className="stat-row" style={{ marginTop: 4 }}>
+                    <div className={`s${dmgBuffed ? ' buff-dmg' : ''}`}>DMG <b>{selectedTower.damage}</b></div>
+                    <div className={`s${spdBuffed ? ' buff-spd' : ''}`}>SPD <b>{formatAttackSpeed(spd)}/s</b></div>
+                    <div className={`s${rangeBuffed ? ' buff-range' : selectedTower.mistMult < 1 ? ' debuff-range' : ''}`}>Range <b>{selectedTower.range}</b></div>
+                    <div className={`s${dpsBuffed ? ' buff-dps' : ''}`}>DPS <b>{(selectedTower.damage * spd).toFixed(0)}{selectedTower.burstCount > 1 ? ` x${selectedTower.burstCount}` : ''}</b></div>
+                    <div className={`s${critBuffed ? ' buff-crit' : ''}`}>Crit <b>{+(selectedTower.critChance * 100).toFixed(2)}%</b></div>
+                    <div className={`s${critBuffed ? ' buff-crit' : ''}`}>Crit Dmg <b>{selectedTower.critMultiplier}×</b></div>
+                  </div>
                 );
               })()}
 
@@ -1212,9 +1428,8 @@ function activeBuffsFor(t: Tower): ActiveBuff[] {
     buffs.push({
       icon: 'swords',
       name: 'Better Morale',
-      detail: `+${Math.round(t.adjacentDamageMult * t.adjacentAllies * 100)}% damage · ${
-        t.adjacentAllies
-      } ${t.adjacentAllies === 1 ? 'ally' : 'allies'}`,
+      detail: `+${Math.round(t.adjacentDamageMult * t.adjacentAllies * 100)}% damage · ${t.adjacentAllies
+        } ${t.adjacentAllies === 1 ? 'ally' : 'allies'}`,
     });
   }
   if (t.rangeBuffed) {
@@ -1222,6 +1437,15 @@ function activeBuffsFor(t: Tower): ActiveBuff[] {
       icon: 'target',
       name: 'Guiding Gale',
       detail: `+${Math.round(((t.rangeBuffMult ?? 1) - 1) * 100)}% attack range · from a nearby Wizard`,
+    });
+  }
+  // Not a buff but the one penalty a champion carries: lost in the mist.
+  if (t.mistMult < 1) {
+    buffs.push({
+      icon: 'lantern',
+      name: 'Lost in the Mist',
+      detail: `−${Math.round((1 - t.mistMult) * 100)}% attack range · light a lantern nearby`,
+      color: '#9fb4c4',
     });
   }
   return buffs;

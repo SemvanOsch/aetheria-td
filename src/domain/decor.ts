@@ -30,12 +30,15 @@ export interface BoardTheme {
 /** Buildable-floor materials the terrain baker knows how to paint. */
 export type FloorKind = 'grass' | 'stone' | 'flagstone' | 'wood' | 'marble' | 'dirt' | 'cobble';
 
-/** Enemy-path materials (detail over the authored stroke colours). */
-export type PathKind = 'dirt' | 'carpet' | 'cobble' | 'stone';
+/**
+ * Enemy-path materials (detail over the authored stroke colours). `sewer` is a
+ * channel of murky water between stone curbs: the foes wade along it.
+ */
+export type PathKind = 'dirt' | 'carpet' | 'cobble' | 'stone' | 'sewer';
 
 /** Designer pickers: every floor / path material, in display order. */
 export const FLOOR_KINDS: FloorKind[] = ['grass', 'stone', 'flagstone', 'wood', 'marble', 'dirt', 'cobble'];
-export const PATH_KINDS: PathKind[] = ['dirt', 'carpet', 'cobble', 'stone'];
+export const PATH_KINDS: PathKind[] = ['dirt', 'carpet', 'cobble', 'stone', 'sewer'];
 
 /** Every decorative prop the renderer can draw (see `drawProp`). */
 export type PropKind =
@@ -66,7 +69,65 @@ export type PropKind =
   | 'hedge'
   | 'townhouse'
   | 'cart'
-  | 'signpost';
+  | 'signpost'
+  // Town-square dressing (the Capital's market square).
+  | 'guildhall'
+  | 'bakery'
+  | 'tavern'
+  | 'bench'
+  | 'planter'
+  | 'noticeBoard'
+  | 'pillory'
+  | 'plazaMosaic'
+  | 'pigeons'
+  // Outskirts dressing (the Capital's edge, down to the sewers).
+  | 'sewerEntrance'
+  | 'wallTower'
+  | 'shack'
+  | 'fence'
+  | 'laundryLine'
+  | 'junkPile'
+  | 'deadTree'
+  | 'cropPatch'
+  | 'drainGrate'
+  | 'puddle'
+  // A lantern post the player lights with gold (see `domain/mist.ts`).
+  | 'lanternPost'
+  // Sewer dressing (the tunnels under the Capital).
+  | 'sewerWall'
+  | 'sewerOutfall'
+  | 'sewerArch'
+  | 'cistern'
+  | 'brickPillar'
+  | 'manholeLadder'
+  | 'pipes'
+  | 'bonePile'
+  | 'glowShrooms'
+  | 'rats'
+  // Riverside dressing (out of the sewers, to the escape wagon).
+  | 'escapeWagon'
+  | 'riverSegment'
+  | 'riverCell'
+  | 'rowboat'
+  | 'campfire'
+  | 'tent'
+  | 'pineTree'
+  | 'boulder'
+  | 'stump'
+  | 'wildflowers';
+
+/**
+ * Props that may stand at a path's end as the base the foes are heading for
+ * (a castle's gate, the sewer mouth, the escape wagon). A path may end on the
+ * board only on one of these, and they don't count as obstructing the path.
+ */
+export const BASE_PROP_KINDS: ReadonlySet<PropKind> = new Set<PropKind>([
+  'castle',
+  'burningCastle',
+  'gate',
+  'sewerEntrance',
+  'escapeWagon',
+]);
 
 /**
  * Which Level Designer palette tab a prop lives under: `castle` for the keep's
@@ -85,6 +146,8 @@ export interface DecorProp {
   col: number;
   row: number;
   color?: string;
+  /** A lightable prop (`domain/mist.ts`) that starts the stage already lit. */
+  lit?: boolean;
 }
 
 /** Designer palette entry: an ordered kind with a label + optional default tint. */
@@ -134,6 +197,46 @@ export const PROP_PALETTE: PropInfo[] = [
   { kind: 'house', label: 'House', category: 'capital' },
   { kind: 'castle', label: 'Castle', category: 'capital' },
   { kind: 'burningCastle', label: 'Burning Castle', category: 'capital' },
+  { kind: 'guildhall', label: 'Guildhall', category: 'capital' },
+  { kind: 'bakery', label: 'Bakery', category: 'capital' },
+  { kind: 'tavern', label: 'Tavern', category: 'capital' },
+  { kind: 'bench', label: 'Bench', category: 'capital' },
+  { kind: 'planter', label: 'Planter', category: 'capital' },
+  { kind: 'noticeBoard', label: 'Notice Board', category: 'capital' },
+  { kind: 'pillory', label: 'Pillory', category: 'capital' },
+  { kind: 'plazaMosaic', label: 'Plaza Mosaic', category: 'capital' },
+  { kind: 'pigeons', label: 'Pigeons', category: 'capital' },
+  { kind: 'sewerEntrance', label: 'Sewer Entrance', category: 'capital' },
+  { kind: 'wallTower', label: 'Wall Tower', category: 'capital' },
+  { kind: 'shack', label: 'Shack', category: 'capital' },
+  { kind: 'fence', label: 'Fence', category: 'capital' },
+  { kind: 'laundryLine', label: 'Laundry Line', category: 'capital' },
+  { kind: 'junkPile', label: 'Junk Pile', category: 'capital' },
+  { kind: 'deadTree', label: 'Dead Tree', category: 'capital' },
+  { kind: 'cropPatch', label: 'Crop Patch', category: 'capital' },
+  { kind: 'drainGrate', label: 'Drain Grate', category: 'capital' },
+  { kind: 'puddle', label: 'Puddle', category: 'capital' },
+  { kind: 'lanternPost', label: 'Lantern Post (lightable)', category: 'capital' },
+  { kind: 'sewerWall', label: 'Sewer Wall', category: 'capital' },
+  { kind: 'sewerOutfall', label: 'Sewer Outfall', category: 'capital' },
+  { kind: 'sewerArch', label: 'Sewer Arch', category: 'capital' },
+  { kind: 'cistern', label: 'Cistern', category: 'capital' },
+  { kind: 'brickPillar', label: 'Brick Pillar', category: 'capital' },
+  { kind: 'manholeLadder', label: 'Manhole Ladder', category: 'capital' },
+  { kind: 'pipes', label: 'Pipes', category: 'capital' },
+  { kind: 'bonePile', label: 'Bone Pile', category: 'capital' },
+  { kind: 'glowShrooms', label: 'Glow Shrooms', category: 'capital' },
+  { kind: 'rats', label: 'Rats', category: 'capital' },
+  { kind: 'escapeWagon', label: 'Escape Wagon', category: 'capital' },
+  { kind: 'riverSegment', label: 'River', category: 'capital' },
+  { kind: 'riverCell', label: 'River (1 cell)', category: 'capital' },
+  { kind: 'rowboat', label: 'Rowboat', category: 'capital' },
+  { kind: 'campfire', label: 'Campfire', category: 'capital' },
+  { kind: 'tent', label: 'Tent', category: 'capital' },
+  { kind: 'pineTree', label: 'Pine Tree', category: 'capital' },
+  { kind: 'boulder', label: 'Boulder', category: 'capital' },
+  { kind: 'stump', label: 'Stump', category: 'capital' },
+  { kind: 'wildflowers', label: 'Wildflowers', category: 'capital' },
 ];
 
 /**
@@ -173,6 +276,48 @@ export const PROP_FOOTPRINTS: Partial<
   marketStall: [[0, 0], [1, 0]],
   cart: [[0, 0], [1, 0]],
   townhouse: [[0, 0], [1, 0], [0, 1], [1, 1]],
+  // Town square: the clock-towered guildhall fills a 4×3 block (an even width,
+  // so it centres on a 2×2 fountain) and the shops are 2×2 like the townhouse.
+  // The mosaic and the pigeons are floor dressing a champion may stand on, so
+  // they cover no cells.
+  guildhall: [
+    [0, 0], [1, 0], [2, 0], [3, 0],
+    [0, 1], [1, 1], [2, 1], [3, 1],
+    [0, 2], [1, 2], [2, 2], [3, 2],
+  ],
+  bakery: [[0, 0], [1, 0], [0, 1], [1, 1]],
+  tavern: [[0, 0], [1, 0], [0, 1], [1, 1]],
+  plazaMosaic: [],
+  pigeons: [],
+  // Outskirts. The sewer entrance is a 3×2 retaining wall whose bottom-centre
+  // cell is the tunnel mouth a path ends in; the wall towers and shacks are
+  // 2×2; the laundry line and crop patch 2×1. Grates and puddles are floor
+  // dressing.
+  sewerEntrance: [[0, 0], [1, 0], [2, 0], [0, 1], [1, 1], [2, 1]],
+  wallTower: [[0, 0], [1, 0], [0, 1], [1, 1]],
+  shack: [[0, 0], [1, 0], [0, 1], [1, 1]],
+  laundryLine: [[0, 0], [1, 0]],
+  cropPatch: [[0, 0], [1, 0]],
+  drainGrate: [],
+  puddle: [],
+  // Sewers. Wall sections fill the top row; the arch covers only its two side
+  // cells, leaving the middle one open for the channel to run through. The
+  // shrooms and rats are floor dressing.
+  sewerWall: [[0, 0], [1, 0]],
+  sewerOutfall: [[0, 0], [1, 0]],
+  sewerArch: [[0, 0], [2, 0]],
+  cistern: [[0, 0], [1, 0], [0, 1], [1, 1]],
+  glowShrooms: [],
+  rats: [],
+  // Riverside. The wagon (a base prop) is 3×2 with its tail on the bottom-left
+  // cell; a river stretch is 4×1 (`riverCell` is 1×1, the default) and any mix
+  // of them tiles seamlessly along a row; the tent is 2×2. The rowboat (on the
+  // river) and the wildflowers are floor dressing.
+  escapeWagon: [[0, 0], [1, 0], [2, 0], [0, 1], [1, 1], [2, 1]],
+  riverSegment: [[0, 0], [1, 0], [2, 0], [3, 0]],
+  tent: [[0, 0], [1, 0], [0, 1], [1, 1]],
+  rowboat: [],
+  wildflowers: [],
 };
 
 const SINGLE_CELL: ReadonlyArray<readonly [number, number]> = [[0, 0]];

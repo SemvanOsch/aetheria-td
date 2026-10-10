@@ -42,9 +42,10 @@ const KILLS_GRANT = 50;
  * Laid out as a grid of tool cards; the class switch and the forge span it.
  */
 export function Developer({ onClose }: Props) {
-  const { resetAccount, grantGems, awardMastery, awardEnemyKills, awardArmor, setPlayerChampionClass, state } = useGame();
+  const { resetAccount, grantGems, awardMastery, awardEnemyKills, resetEnemyKills, awardArmor, setPlayerChampionClass, state } = useGame();
   const [confirming, setConfirming] = useState(false);
   const [showDesigner, setShowDesigner] = useState(false);
+  const [notesReset, setNotesReset] = useState(false);
 
   // Armor forge selection.
   const [setId, setSetId] = useState(ARMOR_SETS[0]?.id ?? '');
@@ -125,7 +126,22 @@ export function Developer({ onClose }: Props) {
               <button className="dev-btn" onClick={grantKillsAll} title="Enemy Index kills for every foe and boss">
                 <Icon name="bestiary" /> +{KILLS_GRANT} kills to all
               </button>
+              <button
+                className="dev-btn"
+                onClick={() => {
+                  resetEnemyKills();
+                  setNotesReset(true);
+                }}
+                title="Wipe every enemy kill: the Enemy Index relocks and each foe's field note pops up again in stage"
+              >
+                <Icon name="bestiary" /> Reset field notes
+              </button>
             </div>
+            {notesReset && (
+              <p className="dev-done">
+                <Icon name="check" /> Kills wiped: field notes will pop up again as foes are recorded.
+              </p>
+            )}
           </DevCard>
 
           <DevCard icon="flag" title="Level Designer" sub="Draw paths, props and moods, then export the code for a stage.">

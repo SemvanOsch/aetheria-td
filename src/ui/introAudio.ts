@@ -33,6 +33,7 @@ function noiseSwish(ac: AudioContext, dur: number, freq: number, q: number, gain
   bp.frequency.value = freq;
   bp.Q.value = q;
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   const t = ac.currentTime;
   g.gain.setValueAtTime(0.0001, t);
   g.gain.linearRampToValueAtTime(gain, t + dur * 0.25);
@@ -71,6 +72,7 @@ function inkScratch(ac: AudioContext, delay = 0, gainScale = 1): void {
   bp.frequency.setValueAtTime(base * 1.3, t);
   bp.frequency.exponentialRampToValueAtTime(base * 0.55, t + dur);
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   const gain = (0.02 + Math.random() * 0.012) * gainScale;
   g.gain.setValueAtTime(0.0001, t);
   g.gain.linearRampToValueAtTime(gain, t + dur * 0.4);
@@ -102,6 +104,7 @@ function tone(ac: AudioContext, freq: number, dur: number, gain: number, delay =
   const osc = ac.createOscillator();
   osc.type = 'sine';
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   const t = ac.currentTime + delay;
   osc.frequency.setValueAtTime(freq, t);
   g.gain.setValueAtTime(0.0001, t);

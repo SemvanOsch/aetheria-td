@@ -42,6 +42,7 @@ function sweep(
   bp.frequency.setValueAtTime(from, t);
   bp.frequency.exponentialRampToValueAtTime(to, t + dur);
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0.0001, t);
   g.gain.linearRampToValueAtTime(gain, t + dur * 0.35);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
@@ -65,6 +66,7 @@ function glide(
   const osc = ac.createOscillator();
   osc.type = type;
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   const t = ac.currentTime + delay;
   osc.frequency.setValueAtTime(from, t);
   osc.frequency.exponentialRampToValueAtTime(to, t + dur);

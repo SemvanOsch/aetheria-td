@@ -11,6 +11,11 @@ import type { Proficiency } from '../domain/proficiency';
 import { ease, shade, withAlpha } from './palette';
 import { GREATER_ORB_APEX, GREATER_ORB_CROUCH, GREATER_ORB_LAND } from './types';
 import { arm, belt, forearm, capeSide, legFront, legSide, neck, pauldron, seg, torsoFront, torsoSide, walkLegsFront, walkLegsSide, type ArmLook, type LegLook } from './anatomy';
+import { clearFigureCache } from './figure';
+
+// Dev only: when this file's drawing code is hot-swapped, drop the cached
+// finished frames, or figures keep showing the old drawing until a reload.
+if (import.meta.hot) import.meta.hot.dispose(() => clearFigureCache());
 
 // `shade` lives in the shared palette now; re-exported for existing callers.
 export { shade };
@@ -1537,7 +1542,7 @@ function drawFlangedMaceHead(
  * A wooden round shield of radius `r` centred on the caller's local origin: a
  * plank-boarded face with a couple of seam lines and a lit edge, ringed by a steel
  * rim and capped with a steel central boss. Gives the Grunt footman a timber shield
- * distinct from the Man-at-Arms' bare steel heater. Drawn face-on; the caller
+ * distinct from the Man-at-Arms' navy tower shield. Drawn face-on; the caller
  * translates/positions it.
  */
 function drawWoodenRoundShield(
@@ -2032,15 +2037,35 @@ export function drawGrunt2(
 }
 
 /**
- * Procedural Man-at-Arms silhouette — a grizzled, road-worn veteran in the vein of
- * Darkest Dungeon's man-at-arms: lighter than the Rebel Sergeant (mail hauberk and
- * an open barbute helm rather than full plate and a visored great-helm), a bearded
- * face left bare, a small battered heater shield and a flanged war-mace instead of
- * a sword. Same three authored views ('side' mirrored on `faceLeft`, 'front',
- * 'back') and the `phase` walk cadence advanced from distance travelled. Replaces
- * the emoji token for the Castle man-at-arms (`cas_grunt3`).
+ * The Capital's eight-pointed gold star centred on `(cx, cy)` with outer radius
+ * `r`: the royal army's badge on the Man-at-Arms' tower shield and tabard.
  */
-export function drawGrunt3(
+function fillStar8(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, fill: string): void {
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2 - Math.PI / 2;
+    const rr = i % 2 === 0 ? r : r * 0.45;
+    if (i === 0) ctx.moveTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+    else ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+/**
+ * Procedural Man-at-Arms silhouette — the Capital's armoured shield-bearer, built
+ * to read apart from the Castle footmen at a glance: full plate (layered
+ * pauldrons, gorget, breastplate over a mail skirt, fauld lames, plate legs), a
+ * closed houndskull bascinet with a pointed snout visor and mail aventail (no
+ * face showing), a navy royal tabard with the gold star, and a tall navy tower
+ * shield carrying the same star — the shape that sells his shield mechanic. A
+ * flanged war-mace rides on the other side. Heavier gait than the footmen (shorter
+ * stride, less bob). Same three authored views ('side' mirrored on `faceLeft`,
+ * 'front', 'back') and the `phase` walk cadence advanced from distance travelled.
+ * Replaces the emoji token for the Capital man-at-arms (`cap_grunt`).
+ */
+export function drawManAtArms(
   ctx: CanvasRenderingContext2D,
   color: string,
   view: 'side' | 'front' | 'back',
@@ -2052,93 +2077,193 @@ export function drawGrunt3(
   ctx.lineCap = 'round';
   if (view === 'side' && faceLeft) ctx.scale(-1, 1);
 
-  const armorLit = shade(color, 0.18);
-  const armorDark = shade(color, -0.28);
+  const plate = color;
+  const plateLit = shade(color, 0.22);
+  const plateDark = shade(color, -0.3);
+  const plateDeep = shade(color, -0.48);
   const steel = '#c9d2dc';
   const steelDark = '#8b95a3';
-  const skin = '#d9ad82';
-  const beard = '#6b6156';
-  const boot = '#3a2f26';
+  const mail = '#79828f';
+  const mailDark = shade(mail, -0.32);
+  const cloth = '#25397a'; // the royal army's navy
+  const clothLit = shade(cloth, 0.18);
+  const clothDark = shade(cloth, -0.3);
+  const gold = '#e7b64a';
   const wood = '#5a4634';
-  // A road-worn veteran: a knee-length mail hauberk, a slight stoop, worn boots.
-  const legs: LegLook = { cloth: '#50463a', boot, w: 3.4, bootUp: 0.66 };
+  const leather = '#4a3020';
+  const slit = '#16121c';
+  // Plate legs: cuisses and greaves, bright knee cops, steel sabatons.
+  const legs: LegLook = { cloth: plateDark, boot: plateDeep, w: 4, bootUp: 0.85, knee: plateLit, toe: 2.6 };
 
   const bob = Math.abs(Math.sin(phase));
 
+  /** A few mail-ring dots for texture. */
+  const rings = (pts: number[][], fill: string) => {
+    ctx.fillStyle = fill;
+    for (const [mx, my] of pts) {
+      ctx.beginPath();
+      ctx.arc(mx, my, 0.45, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+
   if (view === 'side') {
     // --- Profile (walking along the row) ---
-    walkLegsSide(ctx, phase, { hipY: 4.4, footY: 12, stride: 3.5, look: legs });
+    walkLegsSide(ctx, phase, { hipY: 4, footY: 12, stride: 3.1, look: legs, lift: 1.3 });
 
     ctx.save();
-    ctx.translate(0, -bob * 1.2);
+    ctx.translate(0, -bob * 0.9);
 
     // War-mace shouldered, haft angled up and back, flanged head at the top.
     ctx.strokeStyle = wood;
-    ctx.lineWidth = 2.2;
+    ctx.lineWidth = 2.3;
     ctx.beginPath();
-    ctx.moveTo(-2.5, -3.5);
-    ctx.lineTo(-10.5, -18);
+    ctx.moveTo(-2.6, -3.4);
+    ctx.lineTo(-10.6, -18);
     ctx.stroke();
-    drawFlangedMaceHead(ctx, -11.4, -20, 2.6, steel, steelDark);
-    arm(ctx, -0.6, -6.2, -3.6, -6, { sleeve: shade(armorDark, -0.1), hand: skin, w: 2.6 }, -1.4);
+    drawFlangedMaceHead(ctx, -11.5, -20, 2.8, steel, steelDark);
+    arm(ctx, -1, -6.4, -3.8, -5.8, { sleeve: plateDark, hand: plateDeep, w: 3, cuff: plateDeep }, -1.4);
 
-    // Mail hauberk to the knee, with a scatter of rings for texture.
+    // Mail hauberk skirt to the knee under the plate.
     torsoSide(ctx, {
-      color, lit: armorLit, dark: armorDark,
-      top: -9, waistY: 0.4, hemY: 7.2, chest: 4.9, back: 4.8, waist: 3.9, hemF: 5.2, hemB: 5.6, lean: 0.6,
+      color: mail, lit: shade(mail, 0.14), dark: mailDark,
+      top: -9.4, waistY: 0.6, hemY: 7.6, chest: 6, back: 5.6, waist: 4.6, hemF: 6, hemB: 6.4,
     });
-    ctx.fillStyle = armorDark; // mail-ring speckle
-    for (const [mx, my] of [[-2, -4], [1, -2], [-1, 1], [2, 3], [-3, 3], [0.6, 5.4], [-2.4, 5.8]]) {
+    rings([[-3, 5], [-0.6, 6.2], [2, 5.4], [4, 6.4], [-4.6, 6.6]], mailDark);
+    // Tabard: a navy panel down the front, gold-edged at the hem.
+    ctx.fillStyle = cloth;
+    ctx.beginPath();
+    ctx.moveTo(1.6, -8.6);
+    ctx.quadraticCurveTo(6.6, -4, 5, 1.6);
+    ctx.lineTo(5.8, 7.6);
+    ctx.quadraticCurveTo(3.4, 8.4, 1, 7.8);
+    ctx.lineTo(1.2, 1.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(1, 7.8);
+    ctx.quadraticCurveTo(3.4, 8.4, 5.8, 7.6);
+    ctx.stroke();
+    // Backplate showing behind the tabard, then the fauld lames over the hips.
+    ctx.fillStyle = plate;
+    ctx.beginPath();
+    ctx.moveTo(-5.4, -8.4);
+    ctx.quadraticCurveTo(-6.2, -4, -4.6, 1);
+    ctx.lineTo(1.4, 1.2);
+    ctx.lineTo(1.6, -8.8);
+    ctx.quadraticCurveTo(-2, -9.8, -5.4, -8.4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = plateDark;
+    ctx.beginPath();
+    ctx.ellipse(-4.6, -3.4, 1.4, 4.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    for (const [y, c] of [[1.2, plate], [2.7, plateDark]] as const) {
+      ctx.fillStyle = c;
       ctx.beginPath();
-      ctx.arc(mx, my, 0.5, 0, Math.PI * 2);
+      ctx.moveTo(-5, y);
+      ctx.quadraticCurveTo(0, y + 0.9, 5.4, y);
+      ctx.lineTo(5.6, y + 1.6);
+      ctx.quadraticCurveTo(0, y + 2.5, -5.2, y + 1.6);
+      ctx.closePath();
       ctx.fill();
     }
-    belt(ctx, -4, 4.4, 0.9, '#4a3020', steelDark, 0.9, 1.5, 3);
+    belt(ctx, -4.8, 5.2, 0.9, leather, gold, 0.6, 1.4, 3.6);
 
-    // Head — open barbute helm with a bare, bearded veteran's face and a nasal bar.
-    ctx.fillStyle = skin;
+    // Gorget, layered pauldron, mail aventail, then the closed houndskull bascinet.
+    ctx.fillStyle = plate;
     ctx.beginPath();
-    ctx.arc(1.8, -11, 3.4, 0, Math.PI * 2);
+    ctx.ellipse(0.6, -8.8, 3.8, 1.7, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = beard; // jaw stubble
+    pauldron(ctx, 0.6, -5.2, 3.6, plateDark, -0.1);
+    pauldron(ctx, 0.4, -7.2, 4.4, plate, -0.15);
+    ctx.fillStyle = mail;
     ctx.beginPath();
-    ctx.moveTo(-0.4, -10);
-    ctx.quadraticCurveTo(1.8, -6.4, 4.4, -9.5);
-    ctx.quadraticCurveTo(2.6, -8.6, 1.6, -8.8);
+    ctx.moveTo(-3.8, -12);
+    ctx.quadraticCurveTo(-4.6, -8.4, -3, -7.8);
+    ctx.lineTo(3.4, -8.2);
+    ctx.quadraticCurveTo(4.2, -9.4, 3.8, -10.8);
     ctx.closePath();
     ctx.fill();
-    ctx.fillStyle = steel; // helm skull-cap
+    rings([[-2.6, -9.2], [-0.6, -8.8], [1.4, -9]], mailDark);
+    ctx.fillStyle = plate; // skull, rising to a point at the back of the crown
     ctx.beginPath();
-    ctx.moveTo(-2.4, -11.4);
-    ctx.quadraticCurveTo(-2.6, -16, 1.8, -16);
-    ctx.quadraticCurveTo(5.4, -16, 5, -11.4);
-    ctx.quadraticCurveTo(4.4, -12.6, 3.4, -12.4);
-    ctx.lineTo(3.4, -11.4);
+    ctx.moveTo(-3.8, -11);
+    ctx.quadraticCurveTo(-4.4, -16.4, -0.2, -17.8);
+    ctx.quadraticCurveTo(4.4, -16.8, 4.6, -12.4);
+    ctx.lineTo(4.4, -10.8);
+    ctx.lineTo(-3.6, -10.4);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = steelDark; // nasal bar
-    ctx.lineWidth = 1.2;
+    ctx.fillStyle = plateLit;
     ctx.beginPath();
-    ctx.moveTo(3.6, -12.2);
-    ctx.lineTo(3.9, -9.6);
+    ctx.ellipse(1.6, -15.2, 1.8, 1, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = steel; // the snout visor, jutting forward
+    ctx.beginPath();
+    ctx.moveTo(1.6, -14.4);
+    ctx.quadraticCurveTo(6, -14, 8.6, -11.2);
+    ctx.quadraticCurveTo(6, -9.2, 1.8, -9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = steelDark; // snout ridge
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(2.2, -11.8);
+    ctx.lineTo(8.2, -11.2);
     ctx.stroke();
-    drawProfileFace(ctx, 1.4, -11, 3.4, skin, { eyeY: 0.7, brow: null, mouth: false });
+    ctx.strokeStyle = slit; // eye slit
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(2.8, -13);
+    ctx.lineTo(6, -12.5);
+    ctx.stroke();
+    ctx.fillStyle = slit; // breaths
+    for (const bx of [4.4, 5.4, 6.4]) {
+      ctx.beginPath();
+      ctx.arc(bx, -10.3, 0.35, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = steelDark; // visor pivot
+    ctx.beginPath();
+    ctx.arc(0.6, -12.6, 0.7, 0, Math.PI * 2);
+    ctx.fill();
 
-    // Small battered heater shield on the front arm.
+    // Tall tower shield held forward on the front arm, seen three-quarter:
+    // its timber edge, then the navy face with a steel rim and the gold star.
+    ctx.fillStyle = shade(wood, -0.2);
+    ctx.beginPath();
+    ctx.moveTo(4.4, -7.4);
+    ctx.lineTo(3.2, -6.8);
+    ctx.lineTo(3.4, 8.2);
+    ctx.lineTo(4.6, 8.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(4.4, -7.4);
+    ctx.quadraticCurveTo(7.4, -9, 10.4, -7.8);
+    ctx.lineTo(10.2, 7.8);
+    ctx.quadraticCurveTo(7.4, 10.2, 4.6, 8.8);
+    ctx.closePath();
+    ctx.fillStyle = cloth;
+    ctx.fill();
     ctx.save();
-    ctx.translate(5.2, 0.8);
-    ctx.fillStyle = armorDark;
-    ctx.beginPath();
-    ctx.moveTo(-3.4, -5);
-    ctx.lineTo(3.4, -5);
-    ctx.quadraticCurveTo(3.4, 3, 0, 6.5);
-    ctx.quadraticCurveTo(-3.4, 3, -3.4, -5);
-    ctx.closePath();
-    ctx.fill();
-    ctx.lineWidth = 1.2;
-    ctx.strokeStyle = steelDark;
-    ctx.stroke();
+    ctx.clip();
+    ctx.fillStyle = clothLit;
+    ctx.fillRect(4, -9, 2.2, 20);
+    ctx.fillStyle = clothDark;
+    ctx.fillRect(9, -9, 2, 20);
     ctx.restore();
+    ctx.strokeStyle = steel;
+    ctx.lineWidth = 1.1;
+    ctx.stroke();
+    fillStar8(ctx, 7.4, 0, 2.6, gold);
+    ctx.fillStyle = steel; // boss rivet
+    ctx.beginPath();
+    ctx.arc(7.4, 0, 0.8, 0, Math.PI * 2);
+    ctx.fill();
 
     ctx.restore();
     ctx.restore();
@@ -2147,90 +2272,791 @@ export function drawGrunt3(
 
   // --- Front / back (marching toward or away from the viewer) ---
   const back = view === 'back';
-  walkLegsFront(ctx, phase, { hipY: 4.4, footY: 12, sep: 2.6, look: legs, back });
+  walkLegsFront(ctx, phase, { hipY: 4, footY: 12, sep: 3, look: legs, back, lift: 2.2 });
 
   ctx.save();
-  ctx.translate(0, -bob * 1);
+  ctx.translate(0, -bob * 0.8);
 
-  torsoFront(ctx, {
-    color: back ? armorDark : color, lit: armorLit, dark: shade(color, -0.42),
-    top: -9, waistY: 0.6, hemY: 7.4, shoulder: 6.4, waist: 4.6, hem: 6, back,
-  });
-  ctx.fillStyle = back ? shade(color, -0.5) : armorDark; // mail rings
-  for (const [mx, my] of back
-    ? [[0, -5], [-2.5, -2], [2.5, -2], [0, 1], [-2, 4], [2, 4], [0, 6.4]]
-    : [[-2.5, -3], [2.5, -3], [0, 0], [-2.5, 3], [2.5, 3], [0, 5.8]]) {
+  // Tower shield on his left arm. From behind it is the timber back with its
+  // grip straps, on the far side of the body, so it is drawn before the torso.
+  const shieldPath = (cx: number) => {
     ctx.beginPath();
-    ctx.arc(mx, my, 0.55, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  belt(ctx, -4.6, 4.6, 1, '#4a3020', back ? undefined : steelDark, 0.9, 1.5);
-
-  // Mace held upright on the far side: haft with the flanged head up top.
-  ctx.strokeStyle = wood;
-  ctx.lineWidth = 2.2;
-  ctx.beginPath();
-  ctx.moveTo(6.6, -13);
-  ctx.lineTo(6.6, 7);
-  ctx.stroke();
-  drawFlangedMaceHead(ctx, 6.6, -15.5, 2.6, steel, steelDark);
-  arm(ctx, 5.2, -6, 6.6, 0.4, { sleeve: armorDark, hand: skin, w: 2.6 }, back ? -0.6 : 0.6);
-
-  // Small heater shield: face-on when marching toward us, a slim edge from behind.
+    ctx.moveTo(cx - 4, -6.6);
+    ctx.quadraticCurveTo(cx, -8.6, cx + 4, -6.6);
+    ctx.lineTo(cx + 3.8, 8);
+    ctx.quadraticCurveTo(cx, 10.6, cx - 3.8, 8);
+    ctx.closePath();
+  };
   if (back) {
-    ctx.fillStyle = armorDark;
-    ctx.beginPath();
-    ctx.ellipse(-6.8, 1, 1.8, 6, 0, 0, Math.PI * 2);
+    shieldPath(6.8);
+    ctx.fillStyle = wood;
     ctx.fill();
-  } else {
     ctx.save();
-    ctx.translate(-5, 1);
-    ctx.fillStyle = armorDark;
+    ctx.clip();
+    ctx.strokeStyle = shade(wood, -0.3); // planks
+    ctx.lineWidth = 0.6;
     ctx.beginPath();
-    ctx.moveTo(-3, -5);
-    ctx.lineTo(3, -5);
-    ctx.quadraticCurveTo(3, 3, 0, 6);
-    ctx.quadraticCurveTo(-3, 3, -3, -5);
-    ctx.closePath();
-    ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = steelDark;
+    ctx.moveTo(5.4, -8);
+    ctx.lineTo(5.4, 10);
+    ctx.moveTo(8.2, -8);
+    ctx.lineTo(8.2, 10);
     ctx.stroke();
+    ctx.fillStyle = leather; // grip straps
+    ctx.fillRect(2.6, -3.4, 8.4, 1.3);
+    ctx.fillRect(2.6, 3.6, 8.4, 1.3);
     ctx.restore();
+    shieldPath(6.8); // the plank strokes replaced the path; rebuild it for the rim
+    ctx.strokeStyle = steelDark;
+    ctx.lineWidth = 1.1;
+    ctx.stroke();
   }
 
-  // Head — bare bearded face + open barbute toward us; a full helm from behind so
-  // the head reads clearly rather than vanishing to a thin cap.
+  // Mail hauberk (body and skirt), plate over the chest, fauld lames at the hips.
+  torsoFront(ctx, {
+    color: back ? mailDark : mail, lit: shade(mail, 0.14), dark: mailDark,
+    top: -9.4, waistY: 0.6, hemY: 7.6, shoulder: 7.4, waist: 5.2, hem: 6.8, back,
+  });
+  rings(
+    back ? [[-4, 5.6], [-1.6, 6.6], [1.6, 6.6], [4, 5.6]] : [[-4.2, 5.4], [-2.6, 6.8], [2.6, 6.8], [4.2, 5.4]],
+    back ? shade(mail, -0.5) : mailDark,
+  );
+  ctx.beginPath();
+  ctx.moveTo(-5.6, -8.8);
+  ctx.quadraticCurveTo(-6.6, -4, -4.8, 1.2);
+  ctx.quadraticCurveTo(0, 2.2, 4.8, 1.2);
+  ctx.quadraticCurveTo(6.6, -4, 5.6, -8.8);
+  ctx.quadraticCurveTo(0, -9.8, -5.6, -8.8);
+  ctx.closePath();
+  ctx.fillStyle = back ? plateDark : plate;
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = back ? plateDeep : plateLit;
+  ctx.beginPath();
   if (back) {
-    drawBackHelm(ctx, -12.2, 4.3, steel, steelDark, skin);
+    ctx.ellipse(-6, -3, 1.8, 6, 0, 0, Math.PI * 2);
+    ctx.ellipse(6, -3, 1.8, 6, 0, 0, Math.PI * 2);
   } else {
-    ctx.fillStyle = skin;
+    ctx.ellipse(-2.4, -4.4, 2, 4, 0, 0, Math.PI * 2);
+  }
+  ctx.fill();
+  ctx.restore();
+  for (const [y, c] of [[1.4, back ? plateDark : plate], [2.9, back ? plateDeep : plateDark]] as const) {
+    ctx.fillStyle = c;
     ctx.beginPath();
-    ctx.arc(0, -11, 3.6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = beard; // beard framing the jaw
-    ctx.beginPath();
-    ctx.moveTo(-3.2, -11);
-    ctx.quadraticCurveTo(0, -6.2, 3.2, -11);
-    ctx.quadraticCurveTo(0, -8.8, -3.2, -11);
+    ctx.moveTo(-5.4, y);
+    ctx.quadraticCurveTo(0, y + 1, 5.4, y);
+    ctx.lineTo(5.8, y + 1.6);
+    ctx.quadraticCurveTo(0, y + 2.6, -5.8, y + 1.6);
     ctx.closePath();
     ctx.fill();
-    ctx.fillStyle = steel; // helm skull-cap
+  }
+  // Royal tabard down the centre, gold-edged; the star on the chest in front.
+  ctx.fillStyle = back ? clothDark : cloth;
+  ctx.beginPath();
+  ctx.moveTo(-2.4, -8.6);
+  ctx.lineTo(2.4, -8.6);
+  ctx.lineTo(2.8, 7.8);
+  ctx.quadraticCurveTo(0, 8.8, -2.8, 7.8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = gold;
+  ctx.lineWidth = 0.6;
+  ctx.beginPath();
+  ctx.moveTo(-2.4, -8.6);
+  ctx.lineTo(-2.8, 7.8);
+  ctx.quadraticCurveTo(0, 8.8, 2.8, 7.8);
+  ctx.lineTo(2.4, -8.6);
+  ctx.stroke();
+  if (!back) fillStar8(ctx, 0, -3.6, 1.9, gold);
+  belt(ctx, -5, 5, 1.4, leather, back ? undefined : gold, 0.8, 1.5);
+
+  // Layered pauldrons on both shoulders, then the gorget.
+  for (const side of [-1, 1]) {
+    pauldron(ctx, side * 6.6, -5, 3.4, plateDark, side * 0.25);
+    pauldron(ctx, side * 6.4, -6.8, 4, back ? plateDark : plate, side * 0.25);
+  }
+  ctx.fillStyle = back ? plateDark : plate;
+  ctx.beginPath();
+  ctx.ellipse(0, -8.8, 4, 1.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // War-mace held upright in his right hand (our right from the front, our left
+  // from behind), a gauntlet on the haft.
+  const mx = back ? -7.4 : 7.4;
+  ctx.strokeStyle = wood;
+  ctx.lineWidth = 2.3;
+  ctx.beginPath();
+  ctx.moveTo(mx, -13);
+  ctx.lineTo(mx, 7);
+  ctx.stroke();
+  drawFlangedMaceHead(ctx, mx, -15.6, 2.8, steel, steelDark);
+  arm(ctx, Math.sign(mx) * 6, -6, mx, 0.6, { sleeve: plateDark, hand: plateDeep, w: 3, cuff: plateDeep }, back ? 0.6 : -0.6);
+
+  // Head: a mail aventail falling to the shoulders under a closed bascinet.
+  ctx.fillStyle = back ? shade(mail, -0.12) : mail;
+  ctx.beginPath();
+  if (back) {
+    // From behind the aventail drapes the whole nape.
+    ctx.moveTo(-4.6, -12.4);
+    ctx.quadraticCurveTo(-5.2, -8, -4, -7);
+    ctx.lineTo(4, -7);
+    ctx.quadraticCurveTo(5.2, -8, 4.6, -12.4);
+  } else {
+    ctx.moveTo(-4.4, -11);
+    ctx.quadraticCurveTo(-5, -7.6, -3.6, -7.2);
+    ctx.lineTo(3.6, -7.2);
+    ctx.quadraticCurveTo(5, -7.6, 4.4, -11);
+  }
+  ctx.closePath();
+  ctx.fill();
+  rings(back ? [[-2.8, -9.6], [0, -8.4], [2.8, -9.6], [-1.4, -10.8], [1.4, -10.8]] : [[-3.4, -8.6], [3.4, -8.6]], mailDark);
+  ctx.fillStyle = back ? plateDark : plate; // skull, with a point at the crown
+  ctx.beginPath();
+  ctx.moveTo(-4.4, back ? -12 : -11);
+  ctx.quadraticCurveTo(-4.6, -17.2, 0, -18);
+  ctx.quadraticCurveTo(4.6, -17.2, 4.4, back ? -12 : -11);
+  ctx.closePath();
+  ctx.fill();
+  if (back) {
+    ctx.strokeStyle = plateDeep; // centre seam down the back of the skull
+    ctx.lineWidth = 0.8;
     ctx.beginPath();
-    ctx.arc(0, -12, 4.1, Math.PI, 0);
-    ctx.fill();
-    ctx.strokeStyle = steelDark; // nasal bar
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(0, -12.4);
-    ctx.lineTo(0, -9.6);
+    ctx.moveTo(0, -17.6);
+    ctx.lineTo(0, -12.2);
     ctx.stroke();
-    ctx.fillStyle = '#2a2230'; // eyes under the brow
+    ctx.fillStyle = plate;
     ctx.beginPath();
-    ctx.arc(-1.7, -11.4, 0.7, 0, Math.PI * 2);
-    ctx.arc(1.7, -11.4, 0.7, 0, Math.PI * 2);
+    ctx.ellipse(-1.8, -15.6, 1.4, 0.9, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.fillStyle = plateLit;
+    ctx.beginPath();
+    ctx.ellipse(-1.8, -15.8, 1.6, 1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // The snout visor pointing at us: a tapering muzzle with a central ridge.
+    ctx.fillStyle = steel;
+    ctx.beginPath();
+    ctx.moveTo(-3.9, -13.8);
+    ctx.quadraticCurveTo(0, -15, 3.9, -13.8);
+    ctx.quadraticCurveTo(3.4, -10.4, 0, -8.8);
+    ctx.quadraticCurveTo(-3.4, -10.4, -3.9, -13.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = steelDark;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(0, -14.4);
+    ctx.lineTo(0, -9.2);
+    ctx.stroke();
+    ctx.strokeStyle = slit; // eye slits
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(-2.9, -12.8);
+    ctx.lineTo(-0.9, -12.4);
+    ctx.moveTo(0.9, -12.4);
+    ctx.lineTo(2.9, -12.8);
+    ctx.stroke();
+    ctx.fillStyle = slit; // breaths
+    for (const [bx, by] of [[-1.3, -10.8], [1.3, -10.8], [-0.8, -9.9], [0.8, -9.9]]) {
+      ctx.beginPath();
+      ctx.arc(bx, by, 0.32, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = steelDark; // visor pivots
+    ctx.beginPath();
+    ctx.arc(-4, -12.6, 0.6, 0, Math.PI * 2);
+    ctx.arc(4, -12.6, 0.6, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  // Tower shield face-on toward us: navy field, steel rim, the gold star boss.
+  if (!back) {
+    shieldPath(-6.8);
+    ctx.fillStyle = cloth;
+    ctx.fill();
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = clothLit;
+    ctx.fillRect(-11, -9, 2.6, 20);
+    ctx.fillStyle = clothDark;
+    ctx.fillRect(-5, -9, 2.4, 20);
+    ctx.restore();
+    ctx.strokeStyle = steel;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    fillStar8(ctx, -6.8, 0.6, 3, gold);
+    ctx.fillStyle = steel;
+    ctx.beginPath();
+    ctx.arc(-6.8, 0.6, 0.9, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+  ctx.restore();
+}
+
+/**
+ * Procedural Sergeant-at-Arms silhouette (`boss7`, the Market Square boss): the
+ * Men-at-Arms' officer, drawn 1.35× as a heavier, gilded version of them. Gold-
+ * edged plate over a navy tabard with the Capital's star, a closed armet with a
+ * dark T-visor and a tall gold horsehair crest, a navy cape (its back carrying a
+ * big gold star), a tall tower shield rimmed in gold, and the royal standard: a
+ * spear-tipped pole flying a navy swallowtail banner with the gold star.
+ *
+ * `rally` (0..1) blends into his rally pose: feet planted, the standard hoisted
+ * overhead and the shield braced, with the banner snapping in the wind. `wave`
+ * (0..1, looping) drives that flutter while he rallies; on the march the banner
+ * sways with the stride instead (so walking frames stay cacheable). Same three
+ * authored views ('side' mirrored on `faceLeft`, 'front', 'back').
+ */
+export function drawSergeantAtArms(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  view: 'side' | 'front' | 'back',
+  faceLeft: boolean,
+  phase: number,
+  rally = 0,
+  wave = 0,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (view === 'side' && faceLeft) ctx.scale(-1, 1);
+  ctx.scale(1.35, 1.35); // towers over the Men-at-Arms he commands
+
+  const r = Math.max(0, Math.min(1, rally));
+  const plate = color;
+  const plateLit = shade(color, 0.22);
+  const plateDark = shade(color, -0.3);
+  const plateDeep = shade(color, -0.48);
+  const mail = '#79828f';
+  const mailDark = shade(mail, -0.32);
+  const cloth = '#25397a'; // the royal army's navy
+  const clothLit = shade(cloth, 0.18);
+  const clothDark = shade(cloth, -0.3);
+  const gold = '#e7b64a';
+  const goldLit = '#f8dc8a';
+  const crest = '#e7c25a';
+  const crestDark = '#b98f2e';
+  const wood = '#5a4634';
+  const timber = '#6a4a2c';
+  const leather = '#4a3020';
+  const slit = '#16121c';
+  const legs: LegLook = { cloth: plateDark, boot: plateDeep, w: 4.3, bootUp: 0.85, knee: gold, toe: 2.8 };
+
+  // Planting his feet for the rally: the stride settles to a square stance.
+  const ph = phase * (1 - r);
+  const bob = Math.abs(Math.sin(ph)) * (1 - r);
+  // Banner flutter: a stride-locked sway on the march, a hard snap while rallying.
+  const flap = r > 0 ? wave : (((phase / (Math.PI * 2)) % 1) + 1) % 1;
+  const flapAmp = 0.7 + r * 1.8;
+
+  /** A swallowtail flag flying off a pole at x0 toward -x, `len` long. */
+  const flyingFlag = (x0: number, top: number, len: number, h: number) => {
+    const n = 8;
+    const edge = (t: number) => Math.sin((flap + t * 0.9) * Math.PI * 2) * flapAmp * t;
+    ctx.fillStyle = cloth;
+    ctx.beginPath();
+    ctx.moveTo(x0, top);
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      ctx.lineTo(x0 - len * t, top + edge(t));
+    }
+    ctx.lineTo(x0 - len * 0.8, top + h * 0.55 + edge(0.8)); // the swallowtail notch
+    ctx.lineTo(x0 - len, top + h + edge(1));
+    for (let i = n; i >= 0; i--) {
+      const t = i / n;
+      ctx.lineTo(x0 - len * t, top + h + edge(t));
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = clothDark; // a fold shadow riding the wave
+    ctx.beginPath();
+    ctx.ellipse(x0 - len * 0.62, top + h * 0.5 + edge(0.62), len * 0.08, h * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = gold; // gold edging along the top and hoist
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(x0, top + h);
+    ctx.lineTo(x0, top);
+    for (let i = 1; i <= n; i++) ctx.lineTo(x0 - len * (i / n), top + edge(i / n));
+    ctx.stroke();
+    fillStar8(ctx, x0 - len * 0.36, top + h * 0.5 + edge(0.36), h * 0.32, gold);
+  };
+
+  /** A banner hanging from a gold crossbar centred on x (front/back views). */
+  const hangingBanner = (x: number, top: number, w: number, h: number) => {
+    const sway = (y: number) => Math.sin((flap + y / h) * Math.PI * 2) * flapAmp * 0.7 * (y / h);
+    ctx.fillStyle = cloth;
+    ctx.beginPath();
+    ctx.moveTo(x - w / 2, top);
+    ctx.lineTo(x + w / 2, top);
+    for (let i = 1; i <= 6; i++) {
+      const y = (h * i) / 6;
+      ctx.lineTo(x + w / 2 + sway(y), top + y);
+    }
+    ctx.lineTo(x + sway(h * 0.78), top + h * 0.78); // swallowtail notch
+    for (let i = 6; i >= 1; i--) {
+      const y = (h * i) / 6;
+      ctx.lineTo(x - w / 2 + sway(y), top + y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = clothLit;
+    ctx.fillRect(x - w / 2, top, w * 0.22, h * 0.7);
+    fillStar8(ctx, x + sway(h * 0.38), top + h * 0.38, w * 0.3, gold);
+    ctx.strokeStyle = gold; // crossbar with ball ends
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(x - w / 2 - 1, top);
+    ctx.lineTo(x + w / 2 + 1, top);
+    ctx.stroke();
+    ctx.fillStyle = gold;
+    ctx.beginPath();
+    ctx.arc(x - w / 2 - 1.2, top, 0.8, 0, Math.PI * 2);
+    ctx.arc(x + w / 2 + 1.2, top, 0.8, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  /** The standard's pole from `bottom` up to `top` at x, with a gold spear finial. */
+  const pole = (x: number, top: number, bottom: number) => {
+    ctx.strokeStyle = wood;
+    ctx.lineWidth = 1.7;
+    ctx.beginPath();
+    ctx.moveTo(x, bottom);
+    ctx.lineTo(x, top);
+    ctx.stroke();
+    ctx.fillStyle = gold;
+    ctx.beginPath();
+    ctx.arc(x, top, 1.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = goldLit;
+    ctx.beginPath();
+    ctx.moveTo(x, top - 5);
+    ctx.lineTo(x + 1.4, top - 1.4);
+    ctx.lineTo(x - 1.4, top - 1.4);
+    ctx.closePath();
+    ctx.fill();
+  };
+
+  /** A tower shield outline centred on cx, `w` half-width. */
+  const shieldPath = (cx: number, cy: number, w: number) => {
+    ctx.beginPath();
+    ctx.moveTo(cx - w, cy - 7.4);
+    ctx.quadraticCurveTo(cx, cy - 9.6, cx + w, cy - 7.4);
+    ctx.lineTo(cx + w * 0.95, cy + 8.6);
+    ctx.quadraticCurveTo(cx, cy + 11.4, cx - w * 0.95, cy + 8.6);
+    ctx.closePath();
+  };
+  const shieldFace = (cx: number, cy: number, w: number) => {
+    shieldPath(cx, cy, w);
+    ctx.fillStyle = cloth;
+    ctx.fill();
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = clothLit;
+    ctx.fillRect(cx - w - 1, cy - 12, w * 0.6, 26);
+    ctx.fillStyle = clothDark;
+    ctx.fillRect(cx + w * 0.45, cy - 12, w * 0.7, 26);
+    ctx.restore();
+    shieldPath(cx, cy, w);
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+    fillStar8(ctx, cx, cy + 0.4, w * 0.75, gold);
+    ctx.fillStyle = goldLit;
+    ctx.beginPath();
+    ctx.arc(cx, cy + 0.4, w * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  if (view === 'side') {
+    // --- Profile (walking along the row) ---
+    walkLegsSide(ctx, ph, { hipY: 4, footY: 12, stride: 2.9, look: legs, lift: 1.2 });
+
+    ctx.save();
+    ctx.translate(0, -bob * 0.8);
+
+    // The cape behind him, streaming back.
+    capeSide(ctx, -0.6, -8.4, 17, 4.2, cloth, 0.3 + r * 0.4, gold);
+
+    // The royal standard in the rear hand: carried upright on the march,
+    // hoisted overhead to rally. Its flag flies back off the pole.
+    const handX = -3.4 + r * 1.2;
+    const handY = -1.5 - r * 11.5;
+    const top = handY - 26;
+    flyingFlag(handX - 0.2, top + 2.6, 13, 7.4);
+    pole(handX, top, handY + 11);
+    arm(ctx, -0.8, -6.6, handX, handY, { sleeve: plateDark, hand: plateDeep, w: 3.2, cuff: gold }, -1.2 + r * 0.4);
+
+    // Mail skirt, tabard panel, backplate, gilded faulds.
+    torsoSide(ctx, {
+      color: mail, lit: shade(mail, 0.14), dark: mailDark,
+      top: -9.6, waistY: 0.6, hemY: 7.8, chest: 6.4, back: 6, waist: 4.9, hemF: 6.4, hemB: 6.8,
+    });
+    ctx.fillStyle = cloth;
+    ctx.beginPath();
+    ctx.moveTo(1.6, -8.8);
+    ctx.quadraticCurveTo(7, -4, 5.4, 1.6);
+    ctx.lineTo(6.2, 7.8);
+    ctx.quadraticCurveTo(3.6, 8.6, 1, 8);
+    ctx.lineTo(1.2, 1.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(1, 8);
+    ctx.quadraticCurveTo(3.6, 8.6, 6.2, 7.8);
+    ctx.stroke();
+    ctx.fillStyle = plate;
+    ctx.beginPath();
+    ctx.moveTo(-5.8, -8.6);
+    ctx.quadraticCurveTo(-6.6, -4, -5, 1);
+    ctx.lineTo(1.4, 1.2);
+    ctx.lineTo(1.6, -9);
+    ctx.quadraticCurveTo(-2.2, -10, -5.8, -8.6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = plateDark;
+    ctx.beginPath();
+    ctx.ellipse(-5, -3.4, 1.4, 4.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    for (const [y, c] of [[1.2, plate], [2.8, plateDark]] as const) {
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.moveTo(-5.4, y);
+      ctx.quadraticCurveTo(0, y + 0.9, 5.8, y);
+      ctx.lineTo(6, y + 1.6);
+      ctx.quadraticCurveTo(0, y + 2.5, -5.6, y + 1.6);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.strokeStyle = gold; // gilt edge on the lower lame
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(-5.6, 4.4);
+    ctx.quadraticCurveTo(0, 5.3, 6, 4.4);
+    ctx.stroke();
+    belt(ctx, -5.2, 5.6, 0.9, leather, gold, 0.6, 1.5, 3.8);
+
+    // Gorget, gilded pauldron, then the armet with its crest.
+    ctx.fillStyle = plate;
+    ctx.beginPath();
+    ctx.ellipse(0.6, -9, 4, 1.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    pauldron(ctx, 0.6, -5.2, 3.9, plateDark, -0.1);
+    pauldron(ctx, 0.4, -7.4, 4.8, plate, -0.15);
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.ellipse(0.4, -7.4, 4.8, 3.3, -0.15, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.stroke();
+    // Crest: a tall gold horsehair fan sweeping back off the crown.
+    ctx.fillStyle = crest;
+    ctx.beginPath();
+    ctx.moveTo(2.6, -17);
+    ctx.quadraticCurveTo(1.4, -22.4, -3.4, -21.6);
+    ctx.quadraticCurveTo(-7.4, -20, -7.6, -14.4);
+    ctx.quadraticCurveTo(-5, -17.4, -2.6, -16.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = crestDark;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(1, -18.6);
+    ctx.quadraticCurveTo(-3, -20, -6.2, -16.2);
+    ctx.stroke();
+    ctx.fillStyle = plate; // armet: a rounded skull meeting a jutting chin
+    ctx.beginPath();
+    ctx.moveTo(-3.8, -10.6);
+    ctx.quadraticCurveTo(-4.6, -17.6, 0.6, -17.8);
+    ctx.quadraticCurveTo(5.4, -17.4, 5.4, -12.6);
+    ctx.lineTo(5.8, -10.4);
+    ctx.quadraticCurveTo(3.6, -9, 0, -9.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = plateLit;
+    ctx.beginPath();
+    ctx.ellipse(1.8, -15.4, 2, 1.1, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = gold; // crest socket + gilt brow band
+    ctx.beginPath();
+    ctx.arc(1.8, -17.6, 0.9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(-3.4, -13.6);
+    ctx.quadraticCurveTo(1, -14.4, 5.4, -13.4);
+    ctx.stroke();
+    ctx.strokeStyle = slit; // the T-visor: eye slit and the breath slot below
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(2.2, -12.6);
+    ctx.lineTo(5.6, -12.4);
+    ctx.moveTo(4.6, -12.4);
+    ctx.lineTo(4.9, -10.2);
+    ctx.stroke();
+    ctx.fillStyle = plateDeep; // hinge rivet
+    ctx.beginPath();
+    ctx.arc(0, -12.4, 0.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Tower shield forward on the front arm: timber edge, navy face, gold rim.
+    const sx = 7.8 + r * 0.8;
+    const sy = -r * 1.2;
+    ctx.fillStyle = shade(timber, -0.2);
+    ctx.beginPath();
+    ctx.moveTo(sx - 3.4, sy - 7.6);
+    ctx.lineTo(sx - 4.6, sy - 7);
+    ctx.lineTo(sx - 4.4, sy + 8.4);
+    ctx.lineTo(sx - 3.2, sy + 9);
+    ctx.closePath();
+    ctx.fill();
+    shieldFace(sx, sy, 3.4);
+
+    ctx.restore();
+    ctx.restore();
+    return;
+  }
+
+  // --- Front / back (marching toward or away from the viewer) ---
+  const back = view === 'back';
+  walkLegsFront(ctx, ph, { hipY: 4, footY: 12, sep: 3.2, look: legs, back, lift: 2 });
+
+  ctx.save();
+  ctx.translate(0, -bob * 0.7);
+
+  // The standard rides on his right: our right from the front, our left from
+  // behind. Hoisted overhead to rally.
+  const sideX = back ? -1 : 1;
+  const handX = sideX * (9 - r * 0.6);
+  const handY = -1 - r * 12;
+  const top = handY - 26;
+  const standard = () => {
+    pole(handX, top, handY + 11);
+    hangingBanner(handX, top + 2.4, 9.4, 11.5);
+  };
+  // From behind, the shield's timber back sits on the far side of his body.
+  const shieldX = back ? 7.6 : -7.6;
+  const shieldY = -r * 1.4;
+  if (back) {
+    shieldPath(shieldX, shieldY, 4.4);
+    ctx.fillStyle = timber;
+    ctx.fill();
+    ctx.save();
+    ctx.clip();
+    ctx.strokeStyle = shade(timber, -0.3);
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(shieldX - 1.4, -12);
+    ctx.lineTo(shieldX - 1.4, 12);
+    ctx.moveTo(shieldX + 1.6, -12);
+    ctx.lineTo(shieldX + 1.6, 12);
+    ctx.stroke();
+    ctx.fillStyle = leather;
+    ctx.fillRect(shieldX - 5, shieldY - 3.4, 10, 1.4);
+    ctx.fillRect(shieldX - 5, shieldY + 3.8, 10, 1.4);
+    ctx.restore();
+    shieldPath(shieldX, shieldY, 4.4);
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+
+  // Body: mail skirt under a breastplate (front) or backplate under the cape.
+  torsoFront(ctx, {
+    color: back ? mailDark : mail, lit: shade(mail, 0.14), dark: mailDark,
+    top: -9.6, waistY: 0.6, hemY: 7.8, shoulder: 8, waist: 5.6, hem: 7.2, back,
+  });
+  if (back) {
+    // The navy cape: shoulders to the calves, gold-hemmed, the star on its back.
+    ctx.fillStyle = cloth;
+    ctx.beginPath();
+    ctx.moveTo(-6.6, -8.6);
+    ctx.quadraticCurveTo(0, -10, 6.6, -8.6);
+    ctx.quadraticCurveTo(8.4, 0, 8.6, 9.6);
+    ctx.quadraticCurveTo(4.4, 10.8 + Math.sin(ph) * 0.6, 0, 10.2);
+    ctx.quadraticCurveTo(-4.4, 10.8 - Math.sin(ph) * 0.6, -8.6, 9.6);
+    ctx.quadraticCurveTo(-8.4, 0, -6.6, -8.6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = clothDark; // folds
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(-4, -4);
+    ctx.quadraticCurveTo(-4.6, 3, -5, 9.6);
+    ctx.moveTo(4, -4);
+    ctx.quadraticCurveTo(4.6, 3, 5, 9.6);
+    ctx.stroke();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-8.6, 9.6);
+    ctx.quadraticCurveTo(-4.4, 10.8 - Math.sin(ph) * 0.6, 0, 10.2);
+    ctx.quadraticCurveTo(4.4, 10.8 + Math.sin(ph) * 0.6, 8.6, 9.6);
+    ctx.stroke();
+    fillStar8(ctx, 0, -1, 3.6, gold);
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(-6, -9);
+    ctx.quadraticCurveTo(-7, -4, -5.2, 1.2);
+    ctx.quadraticCurveTo(0, 2.3, 5.2, 1.2);
+    ctx.quadraticCurveTo(7, -4, 6, -9);
+    ctx.quadraticCurveTo(0, -10, -6, -9);
+    ctx.closePath();
+    ctx.fillStyle = plate;
+    ctx.fill();
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = plateLit;
+    ctx.beginPath();
+    ctx.ellipse(-2.6, -4.4, 2.2, 4.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    for (const [y, c] of [[1.4, plate], [3, plateDark]] as const) {
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.moveTo(-5.8, y);
+      ctx.quadraticCurveTo(0, y + 1, 5.8, y);
+      ctx.lineTo(6.2, y + 1.6);
+      ctx.quadraticCurveTo(0, y + 2.6, -6.2, y + 1.6);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // Tabard down the centre with the star, gold-edged.
+    ctx.fillStyle = cloth;
+    ctx.beginPath();
+    ctx.moveTo(-2.6, -8.8);
+    ctx.lineTo(2.6, -8.8);
+    ctx.lineTo(3, 8);
+    ctx.quadraticCurveTo(0, 9, -3, 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.7;
+    ctx.stroke();
+    fillStar8(ctx, 0, -3.8, 2.2, gold);
+    belt(ctx, -5.4, 5.4, 1.4, leather, gold, 0.8, 1.6);
+    // Cape edges showing past the shoulders.
+    ctx.fillStyle = clothDark;
+    ctx.fillRect(-8.6, -6, 1.4, 14);
+    ctx.fillRect(7.2, -6, 1.4, 14);
+  }
+
+  // Gilded pauldrons, then the gorget.
+  for (const side of [-1, 1]) {
+    pauldron(ctx, side * 7.1, -5.2, 3.7, plateDark, side * 0.25);
+    pauldron(ctx, side * 6.9, -7.1, 4.4, back ? plateDark : plate, side * 0.25);
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.ellipse(side * 6.9, -7.1, 4.4, 3, side * 0.25, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.stroke();
+  }
+  ctx.fillStyle = back ? plateDark : plate;
+  ctx.beginPath();
+  ctx.ellipse(0, -9, 4.2, 1.7, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // The standard and the arm holding it.
+  standard();
+  arm(ctx, sideX * 6.6, -6, handX, handY, { sleeve: plateDark, hand: plateDeep, w: 3.2, cuff: gold }, sideX * (back ? 0.7 : -0.7));
+
+  // Head: crest first from the front (it rises behind the helm), the armet,
+  // then the T-visor; from behind the crest sweeps down the back of the skull.
+  const helm = () => {
+    ctx.fillStyle = back ? plateDark : plate;
+    ctx.beginPath();
+    ctx.moveTo(-4.6, -10);
+    ctx.quadraticCurveTo(-5, -18, 0, -18.2);
+    ctx.quadraticCurveTo(5, -18, 4.6, -10);
+    ctx.quadraticCurveTo(0, -8.4, -4.6, -10);
+    ctx.closePath();
+    ctx.fill();
+  };
+  if (back) {
+    helm();
+    ctx.fillStyle = plate; // lit crown
+    ctx.beginPath();
+    ctx.ellipse(-1.8, -15.8, 1.5, 1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = gold; // brow band around the back
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(-4.7, -13.2);
+    ctx.quadraticCurveTo(0, -12.4, 4.7, -13.2);
+    ctx.stroke();
+    // Neck lames under the skull (the back of the head, over the nape).
+    ctx.fillStyle = plateDeep;
+    ctx.beginPath();
+    ctx.ellipse(0, -9.8, 3.6, 1.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = crest; // crest falling down the centre to the nape
+    ctx.beginPath();
+    ctx.moveTo(-1.6, -21);
+    ctx.quadraticCurveTo(0, -22.2, 1.6, -21);
+    ctx.quadraticCurveTo(2.4, -15, 1.4, -10.6);
+    ctx.quadraticCurveTo(0, -9.8, -1.4, -10.6);
+    ctx.quadraticCurveTo(-2.4, -15, -1.6, -21);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = crestDark;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(-0.6, -20.4);
+    ctx.quadraticCurveTo(-0.9, -15, -0.6, -11);
+    ctx.moveTo(0.6, -20.4);
+    ctx.quadraticCurveTo(0.9, -15, 0.6, -11);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = crest; // the fan rising above the crown
+    ctx.beginPath();
+    ctx.moveTo(-2, -17.4);
+    ctx.quadraticCurveTo(-2.4, -22.8, 0, -23.2);
+    ctx.quadraticCurveTo(2.4, -22.8, 2, -17.4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = crestDark;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -22.6);
+    ctx.lineTo(0, -17.6);
+    ctx.stroke();
+    helm();
+    ctx.fillStyle = plateLit;
+    ctx.beginPath();
+    ctx.ellipse(-1.9, -15.6, 1.7, 1.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = gold; // crest socket
+    ctx.beginPath();
+    ctx.arc(0, -17.8, 1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = gold; // brow band
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(-4.7, -13.6);
+    ctx.quadraticCurveTo(0, -14.6, 4.7, -13.6);
+    ctx.stroke();
+    ctx.strokeStyle = slit; // T-visor
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(-3.2, -12.4);
+    ctx.lineTo(3.2, -12.4);
+    ctx.moveTo(0, -12.4);
+    ctx.lineTo(0, -9.8);
+    ctx.stroke();
+    ctx.fillStyle = plateDeep; // hinge rivets
+    ctx.beginPath();
+    ctx.arc(-4.1, -12, 0.6, 0, Math.PI * 2);
+    ctx.arc(4.1, -12, 0.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Tower shield face-on toward us, braced a little higher to rally.
+  if (!back) shieldFace(shieldX, shieldY, 4.4);
 
   ctx.restore();
   ctx.restore();
@@ -2464,6 +3290,1151 @@ export function drawOutrider(
     ctx.arc(1, -16, 0.6, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  ctx.restore();
+}
+
+/**
+ * An iron chain along a polyline: links alternate face-on (an open ring) and
+ * edge-on (a short bar), each turned along the chain's run, every `step` px.
+ * With `snapped` the last link gapes open, broken; `size` scales the links.
+ * Shared by the Bloodhound's
+ * trailing chain and the Hound Master's leashes.
+ */
+function drawIronChain(ctx: CanvasRenderingContext2D, pts: [number, number][], snapped = true, size = 1): void {
+  const step = 2 * size;
+  const iron = '#6c727c';
+  const ironLit = '#b4bcc6';
+  const ironDark = '#34383f';
+  const lens = [0];
+  for (let i = 1; i < pts.length; i++) {
+    lens.push(lens[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  }
+  const total = lens[lens.length - 1];
+  let k = 0;
+  for (let s = 0; s <= total; s += step, k++) {
+    let i = 1;
+    while (i < pts.length - 1 && lens[i] < s) i++;
+    const a0 = pts[i - 1];
+    const a1 = pts[i];
+    const t = (s - lens[i - 1]) / Math.max(0.001, lens[i] - lens[i - 1]);
+    const x = a0[0] + (a1[0] - a0[0]) * t;
+    const y = a0[1] + (a1[1] - a0[1]) * t;
+    const ang = Math.atan2(a1[1] - a0[1], a1[0] - a0[0]);
+    const last = s + step > total;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(ang);
+    ctx.scale(size, size);
+    if (k % 2 === 0) {
+      ctx.strokeStyle = ironDark;
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      if (last && snapped) ctx.ellipse(0, 0, 1.3, 0.85, 0, 0.5, Math.PI * 2 - 0.5);
+      else ctx.ellipse(0, 0, 1.3, 0.85, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = ironLit;
+      ctx.lineWidth = 0.45;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 1.3, 0.85, 0, Math.PI * 1.1, Math.PI * 1.7);
+      ctx.stroke();
+    } else {
+      ctx.strokeStyle = iron;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-1.3, 0);
+      ctx.lineTo(1.3, 0);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+/** Points along a sagging run from (x0,y0) via (cx,cy) to (x1,y1). */
+function sagRun(x0: number, y0: number, cx: number, cy: number, x1: number, y1: number, n = 8): [number, number][] {
+  const pts: [number, number][] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    pts.push([
+      (1 - t) * (1 - t) * x0 + 2 * (1 - t) * t * cx + t * t * x1,
+      (1 - t) * (1 - t) * y0 + 2 * (1 - t) * t * cy + t * t * y1,
+    ]);
+  }
+  return pts;
+}
+
+/**
+ * Procedural Hound Master silhouette (`boss8`, the Outskirts boss): the royal
+ * army's kennel master, drawn 1.3× as a broad, bearded brute. He wears a whole
+ * wolf's pelt as a hooded cloak (the wolf's head over his own, its fangs over
+ * his brow, its hide down his back to the calves with the tail hanging), a
+ * dark leather jerkin crossed by the royal army's navy sash with the gold star,
+ * and a coiled whip at his hip. One fist drags the snapped chain leashes of his
+ * pack along the ground. A brass dog whistle hangs on a leather cord on his chest.
+ *
+ * `whistle` (0..1) blends into his summon pose: feet planted, the whistle
+ * pinched to his lips and his chin up to blow it (`summonPose`). Three authored views
+ * ('side' mirrored on `faceLeft`, 'front', 'back').
+ */
+export function drawHoundMaster(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  view: 'side' | 'front' | 'back',
+  faceLeft: boolean,
+  phase: number,
+  whistle = 0,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (view === 'side' && faceLeft) ctx.scale(-1, 1);
+  ctx.scale(1.3, 1.3); // a big man, head and shoulders over his own soldiers
+
+  const h = Math.max(0, Math.min(1, whistle));
+  const pelt = color;
+  const peltLit = shade(color, 0.24);
+  const peltDark = shade(color, -0.32);
+  const leather = '#3e2c20';
+  const leatherLit = shade(leather, 0.2);
+  const leatherDark = shade(leather, -0.32);
+  const skin = '#c49274';
+  const beard = '#2a1f18';
+  const cloth = '#25397a'; // the royal army's navy
+  const gold = '#e7b64a';
+  const brass = '#c9a24a';
+  const cord = '#2a1c14';
+  const fang = '#efe6d2';
+  const scar = '#8a5a50';
+  const legs: LegLook = { cloth: '#2e2620', boot: '#1a1410', w: 4.4, bootUp: 0.78, toe: 2.8 };
+
+  // Planting his feet to blow: the stride settles to a square stance.
+  const ph = phase * (1 - h);
+  const bob = Math.abs(Math.sin(ph)) * (1 - h);
+  const lerp = (a: number, b: number) => a + (b - a) * h;
+
+  /**
+   * The dog whistle: a short brass tube from its mouthpiece at (x,y) out along
+   * `ang` (radians), with the sound notch near its far end and a ring for the
+   * cord; the cord runs up to his neck at (nx,ny).
+   */
+  const dogWhistle = (x: number, y: number, ang: number, nx: number, ny: number) => {
+    const ux = Math.cos(ang);
+    const uy = Math.sin(ang);
+    const ex = x + ux * 3;
+    const ey = y + uy * 3;
+    ctx.strokeStyle = cord;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(nx, ny);
+    ctx.quadraticCurveTo((nx + ex) / 2, Math.max(ny, ey) + 0.8, ex + ux * 0.6, ey + uy * 0.6);
+    ctx.stroke();
+    seg(ctx, x, y, ex, ey, 0.55, 0.72, brass);
+    ctx.fillStyle = '#1a120c'; // the sound notch
+    ctx.beginPath();
+    ctx.ellipse(x + ux * 2.1 - uy * 0.45, y + uy * 2.1 + ux * 0.45, 0.42, 0.22, ang, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = shade(brass, -0.3); // the ring at its end
+    ctx.lineWidth = 0.35;
+    ctx.beginPath();
+    ctx.arc(ex + ux * 0.6, ey + uy * 0.6, 0.45, 0, Math.PI * 2);
+    ctx.stroke();
+  };
+
+  /** A shaggy fur edge: tufts hanging along y from x0 to x1. */
+  const furHem = (x0: number, x1: number, y: number, depth: number, col: string) => {
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(x0, y - depth);
+    const n = Math.max(3, Math.round(Math.abs(x1 - x0) / 1.6));
+    for (let i = 0; i <= n; i++) {
+      const x = x0 + ((x1 - x0) * i) / n;
+      ctx.lineTo(x, y + (i % 2 ? depth : -depth * 0.2));
+    }
+    ctx.lineTo(x1, y - depth);
+    ctx.closePath();
+    ctx.fill();
+  };
+
+  if (view === 'side') {
+    walkLegsSide(ctx, ph, { hipY: 4, footY: 12, stride: 2.7, look: legs, lift: 1.3 });
+
+    ctx.save();
+    ctx.translate(0, -bob * 0.8);
+
+    // The wolf's hide hanging down his back to the calves, ragged at the hem,
+    // the tail swinging behind.
+    const sway = Math.sin(ph) * 0.8;
+    ctx.fillStyle = peltDark;
+    ctx.beginPath();
+    ctx.moveTo(0.6, -10);
+    ctx.quadraticCurveTo(-6.4, -6, -7.4 - sway, 8.4);
+    ctx.lineTo(-1.4, 8);
+    ctx.quadraticCurveTo(-1.6, -2, 0.6, -10);
+    ctx.closePath();
+    ctx.fill();
+    furHem(-7.6 - sway, -1.2, 8.2, 1.2, peltDark);
+    seg(ctx, -6.6 - sway, 6, -9 - sway * 1.4, 10.4, 1.5, 0.8, pelt); // the wolf's tail
+
+    // Far arm: the leash chains dragging from his fist along the ground ahead.
+    const leashX = 6.8;
+    const leashY = -0.4;
+    // One drops to the ground and drags out ahead of him; the other hangs snapped.
+    drawIronChain(ctx, [...sagRun(leashX, leashY + 1, leashX + 1.6, 7, leashX + 2.6, 11.9), [leashX + 9, 11.9]], true, 0.75);
+    drawIronChain(ctx, sagRun(leashX - 0.6, leashY + 1.2, leashX - 0.2, 4, leashX + 0.6, 7.4, 5), true, 0.75);
+    arm(ctx, -0.4, -6.6, leashX, leashY, { sleeve: leatherDark, hand: shade(skin, -0.2), w: 3.4, cuff: '#1a1410' }, 1.2);
+
+    // Leather jerkin, the navy sash across it, belt and the coiled whip.
+    torsoSide(ctx, {
+      color: leather, lit: leatherLit, dark: leatherDark,
+      top: -9.8, waistY: 0.8, hemY: 7.6, chest: 6.8, back: 6.2, waist: 5.2, hemF: 6.6, hemB: 6.6,
+    });
+    ctx.strokeStyle = cloth;
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(-1.6, -9.2);
+    ctx.lineTo(5.6, 1.8);
+    ctx.stroke();
+    fillStar8(ctx, 2.6, -3.4, 1.7, gold);
+    belt(ctx, -5.4, 5.6, 1.4, '#1a1410', gold, 0.6, 1.7, 3.8);
+    ctx.strokeStyle = '#4a3020';
+    ctx.lineWidth = 0.8;
+    for (const r of [2, 1.4]) {
+      ctx.beginPath();
+      ctx.ellipse(-4.6, 3.6, r, r * 1.2, 0.3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // The fur mantle bunched over his shoulders.
+    ctx.fillStyle = pelt;
+    ctx.beginPath();
+    ctx.ellipse(-0.6, -8.6, 5.6, 3.2, -0.1, 0, Math.PI * 2);
+    ctx.fill();
+    furHem(-6, 4.6, -6.2, 1.1, pelt);
+    ctx.fillStyle = peltLit;
+    ctx.beginPath();
+    ctx.ellipse(-1.2, -10, 3.4, 1, -0.1, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Head: bearded and scarred under the wolf's head; chin up to blow.
+    ctx.save();
+    ctx.translate(1, -10);
+    ctx.rotate(-0.12 * h);
+    ctx.translate(-1, 10);
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.arc(1.2, -13.6, 3.4, 0, Math.PI * 2);
+    ctx.fill();
+    drawProfileFace(ctx, 1.2, -13.6, 3.4, skin, { brow: '#1a1410', mouth: false, cheek: false });
+    ctx.fillStyle = beard; // a heavy beard over the jaw
+    ctx.beginPath();
+    ctx.moveTo(-0.8, -13.2);
+    ctx.quadraticCurveTo(2.6, -11.6, 4.6, -12.2);
+    ctx.quadraticCurveTo(4.4, -9.2, 1.8, -8.8);
+    ctx.quadraticCurveTo(-0.6, -9.4, -0.8, -13.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = scar;
+    ctx.lineWidth = 0.45;
+    ctx.beginPath();
+    ctx.moveTo(2.4, -15.4);
+    ctx.lineTo(3.6, -12.8);
+    ctx.stroke();
+    // The wolf's head worn as a hood: crown, ear, the snout jutting over his
+    // brow with its fangs hanging, and the hide falling to the mantle.
+    ctx.fillStyle = pelt;
+    ctx.beginPath();
+    ctx.moveTo(-3.8, -10.4);
+    ctx.quadraticCurveTo(-4.6, -18, 1, -18.4);
+    ctx.lineTo(4.6, -17.6);
+    ctx.lineTo(8, -16.6);
+    ctx.quadraticCurveTo(8.2, -15.2, 6.6, -15);
+    ctx.lineTo(3.4, -15.2);
+    ctx.quadraticCurveTo(0.4, -15.6, -1.4, -13.4);
+    ctx.lineTo(-2.4, -9.6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = peltLit;
+    ctx.beginPath();
+    ctx.ellipse(-0.4, -17, 2.8, 0.9, -0.15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = peltDark; // the ear
+    ctx.beginPath();
+    ctx.moveTo(-1, -17.8);
+    ctx.lineTo(0.2, -21.6);
+    ctx.lineTo(1.9, -17.9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#0c0808'; // nose and the empty eye
+    ctx.beginPath();
+    ctx.ellipse(7.9, -16.3, 0.8, 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(4, -16.6, 0.8, 0.35, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = fang;
+    for (const fx of [5.2, 6.6]) {
+      ctx.beginPath();
+      ctx.moveTo(fx - 0.35, -15.1);
+      ctx.lineTo(fx, -13.9);
+      ctx.lineTo(fx + 0.35, -15.1);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Near arm swinging at his side on the march; to blow, it pinches the
+    // whistle up off his chest to his lips.
+    const hx = lerp(2.4 + Math.sin(ph) * 1.2, 4.2);
+    const hy = lerp(2, -11.2);
+    arm(ctx, 0.4, -6.8, hx, hy, { sleeve: leather, hand: skin, w: 3.4, cuff: '#1a1410' }, lerp(1, -1.6));
+    dogWhistle(lerp(3.6, 4.6), lerp(-6.6, -12.3), lerp(Math.PI / 2, -0.12), 2.2, -9.8);
+
+    ctx.restore();
+    ctx.restore();
+    return;
+  }
+
+  // --- Front / back (marching toward or away from the viewer) ---
+  const back = view === 'back';
+  walkLegsFront(ctx, ph, { hipY: 4, footY: 12, sep: 2.7, look: legs, back, lift: 2 });
+
+  ctx.save();
+  ctx.translate(0, -bob * 0.7);
+
+  // His leash hand and free hand: the leashes on his right (our left from the
+  // front, our right from behind); the free hand lifts the whistle to blow.
+  const side = back ? 1 : -1;
+  const leashX = side * 8.4;
+  const hx = lerp(-side * 8, -side * 1.6);
+  const hy = lerp(2, -10.4);
+  const leashes = () => {
+    drawIronChain(ctx, [...sagRun(leashX, 3, leashX + side * 0.6, 8, leashX + side * 0.8, 12.2), [leashX + side * 4.4, 12.4]], true, 0.75);
+    drawIronChain(ctx, sagRun(leashX - side * 0.6, 3.2, leashX - side * 0.6, 6, leashX - side * 0.2, 8.4, 5), true, 0.75);
+  };
+  const leashArm = () =>
+    arm(ctx, side * 6.8, -6.4, leashX, 2.4, { sleeve: leatherDark, hand: shade(skin, -0.2), w: 3.4, cuff: '#1a1410' }, side * -0.8);
+  const freeArm = () =>
+    arm(ctx, -side * 6.8, -6.4, hx, hy, { sleeve: leather, hand: skin, w: 3.4, cuff: '#1a1410' }, -side * lerp(0.8, 2));
+
+  if (back) {
+    // From behind: arms at his sides, then the wolf's hide covering his back
+    // to the calves with the tail down its middle, the mantle, and the hood.
+    leashes();
+    leashArm();
+    freeArm();
+    ctx.fillStyle = pelt;
+    ctx.beginPath();
+    ctx.moveTo(-6.4, -9);
+    ctx.quadraticCurveTo(0, -10.6, 6.4, -9);
+    ctx.quadraticCurveTo(8.4, 0, 8.4, 8.6);
+    ctx.lineTo(-8.4, 8.6);
+    ctx.quadraticCurveTo(-8.4, 0, -6.4, -9);
+    ctx.closePath();
+    ctx.fill();
+    furHem(-8.6, 8.6, 8.6, 1.3, pelt);
+    ctx.fillStyle = peltDark; // the hide's darker spine stripe and tail
+    ctx.beginPath();
+    ctx.ellipse(0, -1, 2.2, 8.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    seg(ctx, 0, 4, Math.sin(ph) * 0.6, 11.4, 1.6, 0.8, peltDark);
+    ctx.fillStyle = peltLit;
+    ctx.beginPath();
+    ctx.ellipse(-3.6, -5, 1.6, 3.6, 0.15, 0, Math.PI * 2);
+    ctx.fill();
+    // Mantle, then the back of the hood: the wolf's skull over his own, ears up.
+    ctx.fillStyle = pelt;
+    ctx.beginPath();
+    ctx.ellipse(0, -8.6, 8, 3.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    furHem(-7.8, 7.8, -6.2, 1.1, pelt);
+    for (const ex of [-1, 1]) {
+      ctx.fillStyle = peltDark;
+      ctx.beginPath();
+      ctx.moveTo(ex * 1.4, -16.8);
+      ctx.lineTo(ex * 2.8, -20.8);
+      ctx.lineTo(ex * 3.8, -16);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = pelt;
+    ctx.beginPath();
+    ctx.ellipse(0, -14, 4, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = peltLit;
+    ctx.beginPath();
+    ctx.ellipse(-1.2, -16, 2, 1.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = peltDark; // the hide gathering at the nape
+    ctx.beginPath();
+    ctx.ellipse(0, -10.6, 3.4, 1.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    ctx.restore();
+    return;
+  }
+
+  // Front: the hide's edges behind him, the jerkin and the sash, the leash arm,
+  // the mantle, the head under the wolf's, then the whistle and the hand on it.
+  ctx.fillStyle = peltDark;
+  ctx.beginPath();
+  ctx.moveTo(-6.8, -8.6);
+  ctx.quadraticCurveTo(-8.8, 0, -8.8, 8.6);
+  ctx.lineTo(8.8, 8.6);
+  ctx.quadraticCurveTo(8.8, 0, 6.8, -8.6);
+  ctx.closePath();
+  ctx.fill();
+  furHem(-9, 9, 8.6, 1.2, peltDark);
+  torsoFront(ctx, {
+    color: leather, lit: leatherLit, dark: leatherDark,
+    top: -9.8, waistY: 0.8, hemY: 7.6, shoulder: 7.6, waist: 5.6, hem: 7,
+  });
+  ctx.strokeStyle = cloth;
+  ctx.lineWidth = 2.6;
+  ctx.beginPath();
+  ctx.moveTo(-5, -9);
+  ctx.lineTo(5.4, 2);
+  ctx.stroke();
+  fillStar8(ctx, 0.2, -3.4, 1.8, gold);
+  belt(ctx, -5.6, 5.6, 1.4, '#1a1410', gold, 0.8, 1.7);
+  ctx.strokeStyle = '#4a3020'; // the coiled whip at his hip
+  ctx.lineWidth = 0.8;
+  for (const r of [1.8, 1.2]) {
+    ctx.beginPath();
+    ctx.ellipse(4.8, 4.4, r, r * 1.2, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  leashes();
+  leashArm();
+
+  ctx.fillStyle = pelt; // fur mantle across the shoulders
+  ctx.beginPath();
+  ctx.ellipse(0, -8.6, 8.6, 3.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  furHem(-8.4, 8.4, -6, 1.2, pelt);
+  ctx.fillStyle = peltLit;
+  ctx.beginPath();
+  ctx.ellipse(-3.6, -9.8, 2.6, 1, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // The hood's sides framing his face, then the face: hard eyes under a
+  // scowl, a scar, and the beard.
+  ctx.fillStyle = peltDark;
+  ctx.beginPath();
+  ctx.ellipse(0, -13.6, 4.8, 4.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.ellipse(0, -13.2, 3.3, 3.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#16100c';
+  for (const ex of [-1.3, 1.3]) {
+    ctx.beginPath();
+    ctx.ellipse(ex, -13.6, 0.55, 0.45, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.strokeStyle = '#1a1410'; // brows crushed into a scowl
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(-2.4, -15);
+  ctx.lineTo(-0.4, -14.3);
+  ctx.moveTo(2.4, -15);
+  ctx.lineTo(0.4, -14.3);
+  ctx.stroke();
+  ctx.strokeStyle = scar;
+  ctx.lineWidth = 0.45;
+  ctx.beginPath();
+  ctx.moveTo(1.2, -15.8);
+  ctx.lineTo(2.2, -12.4);
+  ctx.stroke();
+  ctx.fillStyle = beard;
+  ctx.beginPath();
+  ctx.moveTo(-3.2, -13);
+  ctx.quadraticCurveTo(-3.4, -9.4, 0, -8.8);
+  ctx.quadraticCurveTo(3.4, -9.4, 3.2, -13);
+  ctx.quadraticCurveTo(1.6, -11.4, 0, -11.8);
+  ctx.quadraticCurveTo(-1.6, -11.4, -3.2, -13);
+  ctx.closePath();
+  ctx.fill();
+  // The wolf's head over his brow: crown, ears, the muzzle toward us with its
+  // nose, empty eyes and fangs hanging over his forehead.
+  for (const ex of [-1, 1]) {
+    ctx.fillStyle = peltDark;
+    ctx.beginPath();
+    ctx.moveTo(ex * 1.6, -17.6);
+    ctx.lineTo(ex * 3.4, -21.4);
+    ctx.lineTo(ex * 4.2, -16.6);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.fillStyle = pelt;
+  ctx.beginPath();
+  ctx.ellipse(0, -17.2, 4.4, 2.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = peltLit;
+  ctx.beginPath();
+  ctx.ellipse(0, -16.2, 2.2, 1.7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#0c0808';
+  ctx.beginPath();
+  ctx.ellipse(0, -16.6, 0.9, 0.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  for (const ex of [-2.5, 2.5]) {
+    ctx.beginPath();
+    ctx.ellipse(ex, -17.8, 0.8, 0.35, ex > 0 ? -0.3 : 0.3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = fang;
+  for (const fx of [-1.3, 1.3]) {
+    ctx.beginPath();
+    ctx.moveTo(fx - 0.35, -15.2);
+    ctx.lineTo(fx, -14.1);
+    ctx.lineTo(fx + 0.35, -15.2);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // The whistle on its cord: hanging on his chest, or held to his lips.
+  if (h < 0.5) dogWhistle(1.6, -5.6, Math.PI / 2, 0.6, -8.4);
+  freeArm();
+  if (h >= 0.5) dogWhistle(-0.6, -10.9, -0.2, 0.6, -8.4);
+
+  ctx.restore();
+  ctx.restore();
+}
+
+/**
+ * Procedural Bloodhound silhouette: the royal army's tracking hound, bred to
+ * run fugitives down. A big, near-black scent hound with rust-tan points
+ * (brows, muzzle, lower legs), a heavy muscled chest and shoulders over a
+ * gaunt, tucked waist, raised hackles, a scarred brow over feral amber eyes and
+ * a snarl bared to the fangs. Over its back the navy royal cloth with the gold
+ * star; round its neck a spiked iron collar trailing a snapped iron chain.
+ * Origin at the figure's centre, paws near y=+12; three authored views like
+ * the other foes. `phase` drives the stride from distance travelled.
+ *
+ * `cower` (0..1) blends the hunt into the light-shy slink (`Enemy.cower`): a
+ * rotary gallop, head low and jaws open, ears pinned back and tail stiff,
+ * becomes a crouched diagonal trot with the head raised casting for the lost
+ * scent, jaws shut, ears hanging and the tail tucked.
+ *
+ * Legs are jointed like a dog's (two-bone IK): the foreleg's elbow folds back
+ * and its wrist flicks the paw up behind it as it lifts; the hind leg is the
+ * dog's Z of a forward stifle and a backward hock. A planted paw slides back
+ * under the body and a lifted one swings forward, so it pulls itself along.
+ * Replaces the emoji token for the Capital runner (`cap_runner`).
+ */
+export function drawBloodhound(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  view: 'side' | 'front' | 'back',
+  faceLeft: boolean,
+  phase: number,
+  cower = 0,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (view === 'side' && faceLeft) ctx.scale(-1, 1);
+
+  const c = Math.max(0, Math.min(1, cower));
+  const run = 1 - c;
+  const coat = color;
+  const coatLit = shade(color, 0.3);
+  const coatDark = shade(color, -0.35);
+  const farCoat = shade(color, -0.5);
+  const tan = '#7a4220'; // rust points
+  const tanDark = shade(tan, -0.35);
+  const gum = '#4a1216';
+  const fang = '#efe6d2';
+  const eyeCol = '#ffae2e';
+  const scar = '#9a6a62';
+  const claw = '#140f0d';
+  const cloth = '#25397a'; // the royal army's navy
+  const clothDark = shade(cloth, -0.3);
+  const gold = '#e7b64a';
+  const leather = '#1c1614';
+  const iron = '#6c727c';
+  const ironLit = '#b4bcc6';
+
+  // Gait: a long rotary gallop eases into a short, crouched trot.
+  const reach = 4.6 * run + 1.8 * c;
+  const lift = 2.6 * run + 1 * c;
+  const by = -1.4 + c * 2.6 - Math.max(0, -Math.cos(phase)) * 1.3 * run;
+
+  /** Joint of a two-bone limb from (rx,ry) to (tx,ty); `bend` +1 folds it back (−x), −1 forward. */
+  const ik = (rx: number, ry: number, tx: number, ty: number, a: number, b: number, bend: number): [number, number] => {
+    const d = Math.max(Math.abs(a - b) + 0.01, Math.min(Math.hypot(tx - rx, ty - ry), a + b - 0.01));
+    const ang = Math.atan2(ty - ry, tx - rx);
+    const k = Math.acos(Math.max(-1, Math.min(1, (a * a + d * d - b * b) / (2 * a * d))));
+    const j = ang + bend * k;
+    return [rx + Math.cos(j) * a, ry + Math.sin(j) * a];
+  };
+
+  /** A paw with dark claws, tipped `tilt` radians (curled up when lifted). */
+  const paw = (x: number, y: number, col: string, tilt = 0) => {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(tilt);
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.ellipse(0.5, 0, 1.7, 1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = claw;
+    for (const dx of [1.5, 2.1]) {
+      ctx.beginPath();
+      ctx.moveTo(dx, -0.4);
+      ctx.lineTo(dx + 1, 0.5);
+      ctx.lineTo(dx, 0.6);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  };
+
+  /** The snapped chain (see `drawIronChain`). */
+  const ironChain = (pts: [number, number][]) => drawIronChain(ctx, pts);
+
+  /** Points along a sagging run from (x0,y0) down to the ground at (gx,gy), then lying along it to (ex,gy). */
+  const chainRun = (x0: number, y0: number, cx: number, cy: number, gx: number, gy: number, ex: number): [number, number][] => {
+    const pts: [number, number][] = [];
+    for (let i = 0; i <= 8; i++) {
+      const t = i / 8;
+      pts.push([
+        (1 - t) * (1 - t) * x0 + 2 * (1 - t) * t * cx + t * t * gx,
+        (1 - t) * (1 - t) * y0 + 2 * (1 - t) * t * cy + t * t * gy,
+      ]);
+    }
+    if (ex !== gx) pts.push([ex, gy]);
+    return pts;
+  };
+
+  /** A spiked iron-studded leather collar band from (x0,y0) to (x1,y1), spikes pointing `out`. */
+  const spikes = (pts: [number, number, number][]) => {
+    ctx.fillStyle = ironLit;
+    for (const [x, y, a] of pts) {
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(a + 1.57) * 0.7, y + Math.sin(a + 1.57) * 0.7);
+      ctx.lineTo(x + Math.cos(a) * 2, y + Math.sin(a) * 2);
+      ctx.lineTo(x + Math.cos(a - 1.57) * 0.7, y + Math.sin(a - 1.57) * 0.7);
+      ctx.closePath();
+      ctx.fill();
+    }
+  };
+
+  if (view === 'side') {
+    // Footfall offsets: a rotary gallop (each pair close together, fore and
+    // hind half a stride apart) blending into a trot (diagonal pairs).
+    const pFF = 0;
+    const pFB = 0.55 * run + Math.PI * c;
+    const pHF = Math.PI;
+    const pHB = (Math.PI + 0.55) * run;
+
+    const foreleg = (x0: number, ph: number, col: string, low: string, near: boolean) => {
+      const sx = x0;
+      const sy = by + 1.4;
+      const up = Math.max(0, Math.sin(ph)) * lift;
+      const px = x0 + 1.2 - Math.cos(ph) * reach;
+      const py = 12 - up;
+      // The wrist sits over the planted paw; lifting, it flicks the paw back.
+      const wx = px + up * 0.7;
+      const wy = py - 2.4 + up * 0.25;
+      const [ex, ey] = ik(sx, sy, wx, wy, 5, 4.6, 1);
+      seg(ctx, sx, sy, ex, ey, near ? 2.9 : 2.5, 1.7, col);
+      seg(ctx, ex, ey, wx, wy, 1.6, 1.1, col);
+      seg(ctx, wx, wy, px, py - 0.5, 1.1, 1, low);
+      paw(px, py - 0.4, low, up > 0.3 ? 0.5 : 0);
+    };
+    const hindleg = (x0: number, ph: number, col: string, low: string, near: boolean) => {
+      const hx = x0;
+      const hy = by + 0.6;
+      const up = Math.max(0, Math.sin(ph)) * lift;
+      const px = x0 - 1 - Math.cos(ph) * reach;
+      const py = 12 - up;
+      // The hock rides behind and above the paw; it kicks back as the foot lifts.
+      const kx = px - 1.7 - up * 0.5;
+      const ky = py - 3.9 + up * 0.3;
+      const [sx2, sy2] = ik(hx, hy, kx, ky, 4.9, 4.7, -1);
+      seg(ctx, hx, hy, sx2, sy2, near ? 3.4 : 2.9, 1.8, col);
+      seg(ctx, sx2, sy2, kx, ky, 1.8, 1.1, col);
+      seg(ctx, kx, ky, px, py - 0.5, 1.1, 1, low);
+      paw(px, py - 0.4, low, up > 0.3 ? 0.4 : 0);
+    };
+
+    // Far legs first, in shadow.
+    hindleg(-6.2, phase + pHB, farCoat, shade(tanDark, -0.3), false);
+    foreleg(6.6, phase + pFB, farCoat, shade(tanDark, -0.3), false);
+
+    // Tail: held stiff and straight out behind at a run, tucked under at a slink.
+    ctx.strokeStyle = coat;
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(-10.6, by - 1.4);
+    ctx.quadraticCurveTo(-14.5 + c * 3, by - 2.6 * run + 3 * c, -18 * run - 11.5 * c, by - 4.2 * run + 8 * c);
+    ctx.stroke();
+
+    // The snapped chain: from the collar ring down under the chest, and
+    // dragging along the ground behind it.
+    const ringX = 10.6 - c * 0.8;
+    const ringY = by - 1.6 - c * 1.6;
+    ironChain(chainRun(ringX, ringY, 7, 9.5, 2, 11.8, -9 - run * 5));
+
+    // Body: deep, heavy chest and shoulders, a gaunt tucked waist, a powerful
+    // hindquarter; lit along the back, with the ribs showing.
+    ctx.fillStyle = coat;
+    ctx.beginPath();
+    ctx.moveTo(-11, by - 2.2);
+    ctx.quadraticCurveTo(-3, by - 4.4, 5, by - 4.6);
+    ctx.quadraticCurveTo(11.6, by - 4, 11.6, by + 0.8);
+    ctx.quadraticCurveTo(10.8, by + 6, 5.4, by + 5.8);
+    ctx.quadraticCurveTo(0.6, by + 3.4, -3.4, by + 2.4);
+    ctx.quadraticCurveTo(-8.4, by + 5, -11.4, by + 2.4);
+    ctx.quadraticCurveTo(-13, by - 0.2, -11, by - 2.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = coatLit;
+    ctx.beginPath();
+    ctx.ellipse(-1.5, by - 3, 8.4, 1.2, -0.02, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = coatDark; // shoulder blade, thigh and the ribs
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(4.4, by - 3.2);
+    ctx.quadraticCurveTo(7.6, by + 0.4, 6.4, by + 3.8);
+    ctx.moveTo(-6.6, by - 2.4);
+    ctx.quadraticCurveTo(-4.2, by + 0.4, -7.2, by + 3.4);
+    for (const rx of [0.6, 2.2, 3.8]) {
+      ctx.moveTo(rx, by - 0.6);
+      ctx.quadraticCurveTo(rx + 0.9, by + 1.6, rx + 0.2, by + 3.6);
+    }
+    ctx.stroke();
+    ctx.fillStyle = tan; // tan on the chest
+    ctx.beginPath();
+    ctx.ellipse(10, by + 2.6, 1.4, 2.6, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // The royal cloth over its back: navy, gold-hemmed, with the star.
+    ctx.fillStyle = cloth;
+    ctx.beginPath();
+    ctx.moveTo(-6.4, by - 4.1);
+    ctx.quadraticCurveTo(-0.6, by - 5.5, 4.8, by - 4.6);
+    ctx.lineTo(4.2, by + 1.4);
+    ctx.quadraticCurveTo(-0.8, by + 2.6, -5.8, by + 1.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(4.2, by + 1.4);
+    ctx.quadraticCurveTo(-0.8, by + 2.6, -5.8, by + 1.2);
+    ctx.stroke();
+    fillStar8(ctx, -0.8, by - 1.6, 1.9, gold);
+
+    // Near legs over the body.
+    hindleg(-7.6, phase + pHF, coat, tan, true);
+    foreleg(5.2, phase + pFF, coat, tan, true);
+
+    // Neck: thick and low, the hackles bristling along its crest.
+    const hx = 13 - c * 1.8;
+    const hy = by - 3.8 - c * 4.6;
+    seg(ctx, 7.4, by - 1, hx - 1.6, hy + 1, 4, 3, coat);
+    ctx.fillStyle = coatDark;
+    ctx.beginPath();
+    ctx.moveTo(3.4, by - 4.4);
+    const crest = 7;
+    for (let i = 0; i <= crest; i++) {
+      const t = i / crest;
+      const x = 3.4 + (hx - 2.6 - 3.4) * t;
+      const y = by - 4.4 + (hy - 2.4 - (by - 4.4)) * t;
+      ctx.lineTo(x - 0.4, y - (i % 2 ? 2 : 0.4) * (0.7 + 0.5 * run));
+    }
+    ctx.lineTo(hx - 2.2, hy - 0.6);
+    ctx.lineTo(3.8, by - 3.4);
+    ctx.closePath();
+    ctx.fill();
+
+    // Spiked collar with the ring the chain hangs from.
+    ctx.strokeStyle = leather;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(ringX - 2.2, hy + (by - hy) * 0.15 - 2.6);
+    ctx.lineTo(ringX, ringY);
+    ctx.stroke();
+    spikes([
+      [ringX - 1.9, hy + (by - hy) * 0.15 - 2.2, -2.2],
+      [ringX - 1, by - 3.4 - c * 1.8, -1.2],
+    ]);
+    ctx.strokeStyle = iron;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.arc(ringX, ringY + 0.3, 0.7, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Head: low and driving, jaws open, at a run; raised to cast for the
+    // scent, jaws shut, at a slink.
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(0.18 * run - 0.45 * c);
+    const jaw = 0.36 * run + 0.06 * c;
+    // Ear: pinned back flat at a run, hanging at a slink.
+    ctx.fillStyle = coatDark;
+    ctx.beginPath();
+    ctx.moveTo(-1.2, -2.2);
+    ctx.quadraticCurveTo(-4 - 2.4 * run, -1.6 * run + 1.6 * c, -3 - 4.4 * run, 6 * c + 0.6 * run);
+    ctx.quadraticCurveTo(-1 - 2.6 * run, 5.4 * c + 1.4 * run, 0.8, -0.2);
+    ctx.closePath();
+    ctx.fill();
+    // Open mouth behind the jaws: dark gums.
+    ctx.fillStyle = gum;
+    ctx.beginPath();
+    ctx.moveTo(1.4, 0.8);
+    ctx.lineTo(7.8, 0.6);
+    ctx.lineTo(1.6 + Math.cos(jaw) * 6, 1.2 + Math.sin(jaw) * 6);
+    ctx.closePath();
+    ctx.fill();
+    // Lower jaw, hinged under the ear, with its fang.
+    ctx.save();
+    ctx.translate(1.6, 1.2);
+    ctx.rotate(jaw);
+    ctx.fillStyle = fang;
+    ctx.beginPath();
+    ctx.moveTo(5.2, -0.2);
+    ctx.lineTo(5.6, -1.7);
+    ctx.lineTo(6.1, -0.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = tanDark;
+    ctx.beginPath();
+    ctx.moveTo(0, -0.2);
+    ctx.lineTo(6.4, -0.2);
+    ctx.quadraticCurveTo(6.4, 1.4, 5, 1.6);
+    ctx.lineTo(0.4, 1.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    // Skull and the long upper muzzle, wrinkled in a snarl.
+    ctx.fillStyle = coat;
+    ctx.beginPath();
+    ctx.ellipse(0, -0.6, 3.8, 3.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(1, -3.1);
+    ctx.quadraticCurveTo(5.4, -2.8, 7.9, -1.8);
+    ctx.lineTo(8.2, 0.6);
+    ctx.lineTo(1.4, 1.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = tan; // rust muzzle and the brow spot
+    ctx.beginPath();
+    ctx.moveTo(3.4, -1.2);
+    ctx.quadraticCurveTo(6, -1, 8.2, 0.2);
+    ctx.lineTo(8.2, 0.6);
+    ctx.lineTo(3, 1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(1.6, -3.2, 1.1, 0.6, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    // Upper fangs and teeth bared along the lip.
+    ctx.fillStyle = fang;
+    ctx.beginPath();
+    ctx.moveTo(6.4, 0.5);
+    ctx.lineTo(6.8, 2.2 - c * 0.8);
+    ctx.lineTo(7.3, 0.5);
+    ctx.closePath();
+    ctx.moveTo(4.2, 0.8);
+    ctx.lineTo(4.5, 1.6);
+    ctx.lineTo(4.9, 0.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = coatDark; // snarl wrinkles
+    ctx.lineWidth = 0.55;
+    ctx.beginPath();
+    ctx.moveTo(4, -2.6);
+    ctx.quadraticCurveTo(4.6, -1.8, 4.2, -1.2);
+    ctx.moveTo(5.4, -2.3);
+    ctx.quadraticCurveTo(6, -1.6, 5.6, -1);
+    ctx.stroke();
+    ctx.fillStyle = '#0c0808'; // nose
+    ctx.beginPath();
+    ctx.ellipse(8.1, -1.4, 1.1, 1.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // A heavy brow crushed down over a feral eye, an old scar across it.
+    ctx.fillStyle = '#0c0808';
+    ctx.beginPath();
+    ctx.ellipse(2.2, -1.5, 1, 0.7, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = eyeCol;
+    ctx.beginPath();
+    ctx.ellipse(2.4, -1.5, 0.55, 0.42, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = coatDark;
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(0.4, -3);
+    ctx.lineTo(3.6, -1.9);
+    ctx.stroke();
+    ctx.strokeStyle = scar;
+    ctx.lineWidth = 0.45;
+    ctx.beginPath();
+    ctx.moveTo(1.2, -4);
+    ctx.lineTo(3.2, -0.2);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.restore();
+    return;
+  }
+
+  // --- Front / back (charging at the viewer, or running away) ---
+  const back = view === 'back';
+  const step = Math.sin(phase);
+  const headY = by - 4.4 * run - 7.4 * c;
+
+  /** A foreleg seen end-on: a thick muscled forearm, a rust pastern and a clawed paw. */
+  const foreEnd = (lx: number, lf: number, col: string, low: string) => {
+    const wy = 8.8 - lf * 0.6;
+    seg(ctx, lx, by + 2.6, lx * 1.06, wy, 2.7, 1.5, col);
+    seg(ctx, lx * 1.06, wy, lx, 11.4 - lf, 1.4, 1.2, low);
+    ctx.fillStyle = low;
+    ctx.beginPath();
+    ctx.ellipse(lx, 11.8 - lf, 1.7, 1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = claw;
+    for (const dx of [-1, 0, 1]) {
+      ctx.beginPath();
+      ctx.arc(lx + dx * 0.8, 12.6 - lf, 0.42, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+  /** A hind leg from behind: a broad thigh, the jutting hock, and the foot. */
+  const hindEnd = (lx: number, lf: number, col: string, low: string) => {
+    const hk = 8 - lf * 0.5;
+    seg(ctx, lx, by + 1.6, lx * 1.12, hk, 3.4, 1.4, col);
+    ctx.fillStyle = col; // the hock's point
+    ctx.beginPath();
+    ctx.arc(lx * 1.12, hk, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+    seg(ctx, lx * 1.12, hk, lx, 11.4 - lf, 1.3, 1.1, low);
+    ctx.fillStyle = low;
+    ctx.beginPath();
+    ctx.ellipse(lx, 11.8 - lf, 1.6, 0.9, 0, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  /** Long ears either side of the skull: flared out at a run, hanging at a slink. */
+  const ear = (side: number) => {
+    ctx.save();
+    ctx.translate(side * 3.2, headY - 1.4);
+    ctx.rotate(side * (0.45 * run + 0.08 + Math.abs(step) * 0.15 * run));
+    ctx.fillStyle = coatDark;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(side * 2.8, 2.2, side * 1.8, 7 - 1.6 * run);
+    ctx.quadraticCurveTo(side * 0.3, 7.4 - 1.6 * run, -side * 0.6, 1.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  };
+  /** The hackles bristling along the neck, between the shoulders and the head. */
+  const hackles = (y0: number, y1: number) => {
+    ctx.fillStyle = coatDark;
+    ctx.beginPath();
+    ctx.moveTo(-2.4, y0);
+    for (let i = 0; i <= 6; i++) {
+      const t = i / 6;
+      ctx.lineTo(-2.4 + 4.8 * t, y0 + (y1 - y0) * Math.sin(Math.PI * t) - (i % 2 ? 1.8 : 0.2) * (0.6 + 0.6 * run));
+    }
+    ctx.lineTo(2.4, y0 + 1.6);
+    ctx.lineTo(-2.4, y0 + 1.6);
+    ctx.closePath();
+    ctx.fill();
+  };
+
+  if (back) {
+    // Beyond the body: the back of the head between its ears over the
+    // bristling neck and the spiked collar round the nape.
+    ear(-1);
+    ear(1);
+    ctx.fillStyle = coat;
+    ctx.beginPath();
+    ctx.ellipse(0, headY, 3.8, 3.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = coatLit;
+    ctx.beginPath();
+    ctx.ellipse(-1, headY - 1.5, 1.8, 1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = leather;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-3.2, headY + 3);
+    ctx.quadraticCurveTo(0, headY + 4.4, 3.2, headY + 3);
+    ctx.stroke();
+    spikes([[-2.2, headY + 3.4, -1.9], [0, headY + 4, -1.57], [2.2, headY + 3.4, -1.24]]);
+    hackles(by - 4.2, headY + 3.6 - (by - 4.2));
+
+    // Front paws glimpsed past the body.
+    foreEnd(-3.6, Math.max(0, -step) * lift, farCoat, shade(tanDark, -0.3));
+    foreEnd(3.6, Math.max(0, step) * lift, farCoat, shade(tanDark, -0.3));
+
+    // Rump: two heavy haunches under the royal cloth with its star.
+    ctx.fillStyle = coat;
+    ctx.beginPath();
+    ctx.ellipse(-2.8, by + 2, 4.2, 5, 0, 0, Math.PI * 2);
+    ctx.ellipse(2.8, by + 2, 4.2, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = coatLit;
+    ctx.beginPath();
+    ctx.ellipse(-3.4, by + 0.4, 1.4, 2.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = cloth;
+    ctx.beginPath();
+    ctx.moveTo(-6, by - 2.8);
+    ctx.quadraticCurveTo(0, by - 5, 6, by - 2.8);
+    ctx.lineTo(5.6, by + 2.2);
+    ctx.quadraticCurveTo(0, by + 3.6, -5.6, by + 2.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(5.6, by + 2.2);
+    ctx.quadraticCurveTo(0, by + 3.6, -5.6, by + 2.2);
+    ctx.stroke();
+    fillStar8(ctx, 0, by - 0.6, 2.1, gold);
+    ctx.fillStyle = clothDark;
+    ctx.fillRect(-6.4, by - 1.8, 1, 3.6);
+    ctx.fillRect(5.4, by - 1.8, 1, 3.6);
+
+    // The chain drags out from under it toward us, between the hind legs.
+    ironChain(chainRun(0.6, by + 5, 1.6, 9, 1.2, 12.2, 1.2));
+    hindEnd(-3.6, Math.max(0, step) * lift, coat, tan);
+    hindEnd(3.6, Math.max(0, -step) * lift, coat, tan);
+
+    // Tail: stiff and straight up-back at a run, clamped down at a slink.
+    ctx.strokeStyle = coat;
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(0, by + 0.6);
+    ctx.quadraticCurveTo(0.4, by - 3.4 * run + 3 * c, 0.6 * run, by - 8 * run + 6.4 * c);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  // Front: charging head-down at the viewer. The chain hangs behind the chest;
+  // hind paws glimpsed under it; the broad chest and forelegs; then the head:
+  // furrowed brows over glaring eyes, and a snarl bared to the fangs.
+  ironChain(chainRun(1.8, headY + 4, 4, by + 6, 3.4, 10.6, 3.4));
+  foreEnd(-4.4, Math.max(0, step) * lift * 0.6, farCoat, shade(tanDark, -0.3));
+  foreEnd(4.4, Math.max(0, -step) * lift * 0.6, farCoat, shade(tanDark, -0.3));
+  ctx.fillStyle = coat;
+  ctx.beginPath();
+  ctx.ellipse(0, by + 2, 6.8, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = tan; // tan chest marks
+  ctx.beginPath();
+  ctx.ellipse(-2, by + 3.4, 1.3, 2, 0.3, 0, Math.PI * 2);
+  ctx.ellipse(2, by + 3.4, 1.3, 2, -0.3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = clothDark; // the royal cloth's edges past the shoulders
+  ctx.fillRect(-7.4, by - 1.4, 1.2, 4.4);
+  ctx.fillRect(6.2, by - 1.4, 1.2, 4.4);
+  foreEnd(-3, Math.max(0, -step) * lift, coat, tan);
+  foreEnd(3, Math.max(0, step) * lift, coat, tan);
+
+  ear(-1);
+  ear(1);
+  // Spiked collar under the jaw.
+  ctx.strokeStyle = leather;
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(-3.8, headY + 3.2);
+  ctx.quadraticCurveTo(0, headY + 5, 3.8, headY + 3.2);
+  ctx.stroke();
+  spikes([[-3, headY + 4, 2.4], [0, headY + 4.8, 1.57], [3, headY + 4, 0.74]]);
+  ctx.strokeStyle = ironLit;
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.arc(1.8, headY + 4.6, 0.9, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.fillStyle = coat;
+  ctx.beginPath();
+  ctx.ellipse(0, headY, 4.2, 3.7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = tan; // brow spots
+  for (const ex of [-1.9, 1.9]) {
+    ctx.beginPath();
+    ctx.ellipse(ex, headY - 2, 0.9, 0.55, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Glaring eyes under brows crushed into a V.
+  for (const side of [-1, 1]) {
+    ctx.fillStyle = '#0c0808';
+    ctx.beginPath();
+    ctx.ellipse(side * 1.8, headY - 0.5, 1, 0.65, side * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = eyeCol;
+    ctx.beginPath();
+    ctx.ellipse(side * 1.75, headY - 0.45, 0.55, 0.38, side * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.strokeStyle = coatDark;
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.moveTo(-3.2, headY - 1.9);
+  ctx.lineTo(-0.5, headY - 0.9);
+  ctx.moveTo(3.2, headY - 1.9);
+  ctx.lineTo(0.5, headY - 0.9);
+  ctx.stroke();
+  ctx.strokeStyle = scar; // the old scar across the left brow
+  ctx.lineWidth = 0.45;
+  ctx.beginPath();
+  ctx.moveTo(-3, headY - 2.8);
+  ctx.lineTo(-1, headY + 0.4);
+  ctx.stroke();
+  // Muzzle: rust sides with hanging flews, the nose, and the snarl: an open
+  // dark mouth with the fangs bared (shut tight at a slink).
+  const my = headY + 2.4 - c * 0.6;
+  const open = 1.6 * run + 0.5 * c;
+  ctx.fillStyle = tanDark;
+  ctx.beginPath();
+  ctx.ellipse(-2.1, my + 0.8, 1.7, 2.1, 0.25, 0, Math.PI * 2);
+  ctx.ellipse(2.1, my + 0.8, 1.7, 2.1, -0.25, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = tan;
+  ctx.beginPath();
+  ctx.ellipse(0, my - 0.2, 2.7, 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = gum;
+  ctx.beginPath();
+  ctx.ellipse(0, my + 1.4, 2.2, open * 0.9 + 0.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = fang;
+  for (const side of [-1, 1]) {
+    ctx.beginPath(); // upper fang
+    ctx.moveTo(side * 1.7, my + 0.8);
+    ctx.lineTo(side * 1.4, my + 1.4 + open * 0.7);
+    ctx.lineTo(side * 1.05, my + 0.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath(); // lower fang
+    ctx.moveTo(side * 1.5, my + 1.6 + open * 1.2);
+    ctx.lineTo(side * 1.2, my + 1 + open * 0.5);
+    ctx.lineTo(side * 0.9, my + 1.6 + open * 1.2);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.fillStyle = '#0c0808';
+  ctx.beginPath();
+  ctx.ellipse(0, my - 1.1, 1.4, 0.95, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = coatDark; // snarl wrinkles up the bridge
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(-0.8, headY + 0.8);
+  ctx.lineTo(0.8, headY + 0.8);
+  ctx.moveTo(-0.6, headY + 1.4);
+  ctx.lineTo(0.6, headY + 1.4);
+  ctx.stroke();
 
   ctx.restore();
 }
@@ -5243,7 +7214,8 @@ export function hasEnemySprite(id: string): boolean {
   return (
     id === 'cas_grunt' ||
     id === 'cas_grunt2' ||
-    id === 'cas_grunt3' ||
+    id === 'cap_grunt' ||
+    id === 'cap_runner' ||
     id === 'cas_runner' ||
     id === 'cas_mage' ||
     id === 'cas_brute' ||
@@ -5252,7 +7224,9 @@ export function hasEnemySprite(id: string): boolean {
     id === 'boss3' ||
     id === 'boss4' ||
     id === 'boss5' ||
-    id === 'boss6'
+    id === 'boss6' ||
+    id === 'boss7' ||
+    id === 'boss8'
   );
 }
 
@@ -5262,8 +7236,9 @@ export function hasEnemySprite(id: string): boolean {
  * walked along its path; each sprite scales it into its own motion cadence (the
  * grunt's stride, the horse's gallop, the ram's wheel-roll) so movement drives
  * the animation. `sit` is a per-sprite pose blend (the king's seated → standing,
- * Gowzer's intro taunt) and `flourish` (0..1) a looping in-pose gesture (Gowzer's
- * dagger twirl). No-op for ids without a sprite; callers gate on `hasEnemySprite`.
+ * Gowzer's intro taunt, the Sergeant-at-Arms' rally) and `flourish` (0..1) a looping in-pose gesture (Gowzer's
+ * dagger twirl, the rallying banner's snap). No-op for ids without a sprite;
+ * callers gate on `hasEnemySprite`.
  */
 export function drawEnemySprite(
   ctx: CanvasRenderingContext2D,
@@ -5282,12 +7257,15 @@ export function drawEnemySprite(
   else if (id === 'boss4') drawGowzer(ctx, color, view, faceLeft, p, sit, flourish);
   else if (id === 'cas_grunt') drawGrunt(ctx, color, view, faceLeft, p);
   else if (id === 'cas_grunt2') drawGrunt2(ctx, color, view, faceLeft, p);
-  else if (id === 'cas_grunt3') drawGrunt3(ctx, color, view, faceLeft, p);
+  else if (id === 'cap_grunt') drawManAtArms(ctx, color, view, faceLeft, p);
+  else if (id === 'cap_runner') drawBloodhound(ctx, color, view, faceLeft, p, sit);
   else if (id === 'cas_runner') drawOutrider(ctx, color, view, faceLeft, p);
   else if (id === 'cas_mage') drawRoyalMage(ctx, color, view, faceLeft, p);
   else if (id === 'cas_brute') drawSiegeRam(ctx, color, view, faceLeft, p);
   else if (id === 'boss5') drawKing(ctx, color, view, faceLeft, p, sit);
   else if (id === 'boss6') drawRoland(ctx, color, view, faceLeft, p);
+  else if (id === 'boss7') drawSergeantAtArms(ctx, color, view, faceLeft, p, sit, flourish);
+  else if (id === 'boss8') drawHoundMaster(ctx, color, view, faceLeft, p, sit);
 }
 
 /**
@@ -5301,9 +7279,12 @@ const ENEMY_CADENCE: Record<string, number> = {
   boss4: 0.22,
   boss5: 0.16,
   boss6: 0.2,
+  boss7: 0.17,
+  boss8: 0.17,
   cas_grunt: 0.22,
   cas_grunt2: 0.2,
-  cas_grunt3: 0.21,
+  cap_grunt: 0.19,
+  cap_runner: 0.24,
   cas_runner: 0.28,
   cas_mage: 0.2,
   cas_brute: 0.2,

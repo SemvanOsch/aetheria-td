@@ -8,7 +8,7 @@ declare const process: { env: Record<string, string | undefined> };
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => {
   // Honor a port assigned via the PORT env var (used by the preview harness /
-  // autoPort). Fall back to Vite's default when running `npm run dev` manually.
+  // autoPort). Fall back to 5174 when running `npm run dev` manually.
   const envPort = process.env.PORT ? Number(process.env.PORT) : undefined;
   return {
     // GitHub Pages serves a project site under /<repo>/, so production assets
@@ -17,6 +17,6 @@ export default defineConfig(({ command }) => {
     plugins: [react()],
     server: envPort
       ? { port: envPort, strictPort: true }
-      : { port: 5173 },
+      : { port: 5174 },
   };
 });

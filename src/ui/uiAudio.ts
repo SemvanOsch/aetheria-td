@@ -28,6 +28,7 @@ function tone(
   osc.frequency.setValueAtTime(from, t);
   osc.frequency.exponentialRampToValueAtTime(Math.max(30, to), t + dur);
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0.0001, t);
   g.gain.linearRampToValueAtTime(gain, t + Math.min(0.006, dur * 0.3));
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
@@ -59,6 +60,7 @@ function swish(
   bp.frequency.setValueAtTime(from, t);
   bp.frequency.exponentialRampToValueAtTime(to, t + dur);
   const g = ac.createGain();
+  g.gain.value = 0; // silent until its envelope starts
   g.gain.setValueAtTime(0.0001, t);
   g.gain.linearRampToValueAtTime(gain, t + Math.min(0.012, dur * 0.3));
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
