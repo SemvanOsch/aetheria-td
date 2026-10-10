@@ -291,7 +291,7 @@ const BOSS_META: BossMeta[] = [
   },
   {
     // The Sewers: he is never meant to fall to the player.
-    level: 9, name: 'Captain Draven', icon: '🏳️', color: '#c9d4e4', health: 10000, speed: 70, radius: 26, unkillable: true,
+    level: 9, name: 'Captain Draven', icon: '🏳️', color: '#c9d4e4', health: 10000, speed: 45, radius: 26, unkillable: true,
   },
 
 ];
