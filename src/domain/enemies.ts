@@ -83,6 +83,15 @@ export interface EnemyDef {
    */
   unkillable?: boolean;
   /**
+   * A set-piece entrance. `'sewerBurst'` (the Sludge Father on The Getaway):
+   * spawning on a lane that starts in a sewer entrance's mouth, it bursts out
+   * of the tunnel as a giant, the daylight scorches it and it shrinks to its
+   * walking size, held and untargetable throughout (`Enemy.riseFrom: 'sewer'`,
+   * timeline in `engine/sewerBurst.ts`). The wave before the one it arrives in,
+   * the sewer stirs (`GameEngine.sewerStirring`). Omitted for a plain spawn.
+   */
+  entrance?: EnemyEntrance;
+  /**
    * Rally (the Sergeant-at-Arms): every `every` seconds this enemy halts for
    * `duration` seconds and raises its standard; `at` (0-1) of the way in, every
    * *other* living enemy on the board gains `shield` shield points (see
@@ -97,6 +106,21 @@ export interface EnemyDef {
    * Omitted for enemies that never summon.
    */
   summon?: SummonDef;
+  /**
+   * Spit (the Sludge Father): every `every` seconds this enemy halts for
+   * `duration` seconds and hurls a glob of sludge at each of the `targets`
+   * champions nearest it within `range` px (`at` of the way in). A glob that
+   * lands stuns its champion for `stun` seconds: it can't attack, harvest,
+   * play or cast. It waits to spit until a champion is in range.
+   */
+  spit?: SpitDef;
+  /**
+   * Heal (the Paladin): every `every` seconds, once another foe is within
+   * `radius` px, this enemy halts for `duration` seconds and raises its sword
+   * in a golden aura; `at` (0-1) of the way in, every *other* living foe within
+   * `radius` heals `amount` of its max health. Omitted for foes that never heal.
+   */
+  heal?: HealDef;
   /**
    * Light-shy (the Bloodhound): while it is inside a lit lantern's light (see
    * `domain/mist.ts`) its speed is multiplied by this, blended in and out over
@@ -146,6 +170,26 @@ export interface SummonDef {
   at: number;
 }
 
+/** A periodic sludge spit that stuns champions (see `EnemyDef.spit`). */
+export interface SpitDef {
+  every: number;
+  targets: number;
+  stun: number;
+  range: number;
+  duration: number;
+  at: number;
+}
+
+/** A periodic heal of the foes around it (see `EnemyDef.heal`). */
+export interface HealDef {
+  every: number;
+  duration: number;
+  at: number;
+  radius: number;
+  /** Fraction of each healed foe's max health restored. */
+  amount: number;
+}
+
 export interface RallyDef {
   every: number;
   duration: number;
@@ -155,6 +199,9 @@ export interface RallyDef {
 
 /** Named special death sequences (see `EnemyDef.deathAnimation`). */
 export type DeathAnimation = 'shadowSwallow';
+
+/** Named set-piece entrances (see `EnemyDef.entrance`). */
+export type EnemyEntrance = 'sewerBurst';
 
 /** Kills of a normal enemy required before its Enemy Index entry unlocks. */
 export const ENEMY_KILLS_TO_UNLOCK = 1;
@@ -195,6 +242,12 @@ const REGULAR: Record<string, EnemyDef> = {
   cap_grunt: { id: 'cap_grunt', name: 'Man-at-Arms', health: 185, speed: 40, reward: 6, mana: 3, damageToBase: 2, visual: { color: '#a3adbb', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2, shieldHits: 5, mechanic: 'His shield turns aside the first 5 hits completely, only once it breaks does he take damage.' },
   cap_grunt2: { id: 'cap_grunt2', name: 'Sludgeborn', health: 280, speed: 38, reward: 8, mana: 3, damageToBase: 2, visual: { color: '#6f9a2e', icon: '🫠' }, boss: false, radius: 15, regen: 0.04, mechanic: 'Its sludge knits back together regenerating health every moment its alive.' },
   cap_brute: { id: 'cap_brute', name: 'Sludge Behemoth', health: 860, speed: 26, reward: 12, mana: 5, damageToBase: 3, visual: { color: '#56742a', icon: '👹' }, boss: false, radius: 18, regen: 0.03, mechanic: 'Its sludge knits back together regenerating health every moment its alive.' },
+  cap_brute2: {
+    id: 'cap_brute2', name: 'Paladin', health: 680, speed: 46, reward: 9, mana: 4, damageToBase: 3, visual: { color: '#d9ad45', icon: '⚜️' }, boss: false, radius: 16,
+    physicalResist: 0.2, magicResist: 0.2,
+    heal: { every: 6, duration: 1.6, at: 0.55, radius: 140, amount: 0.35 },
+    mechanic: 'Every few seconds she raises her sword in a golden aura and heals her allies for some of their health.',
+  },
   cap_runner: { id: 'cap_runner', name: 'Bloodhound', health: 115, speed: 120, reward: 3, mana: 2, damageToBase: 1, visual: { color: '#2e2624', icon: '🐕' }, boss: false, radius: 13, lightSlow: 0.4, mechanic: 'Runs you down fast in the mist, a lit lantern\'s burning smell makes it lose your scent and slows down.' },
 
   // Forest
@@ -248,8 +301,12 @@ interface BossMeta {
   rally?: RallyDef;
   /** Periodic summon of more foes beside it (see `EnemyDef.summon`). */
   summon?: SummonDef;
+  /** Periodic sludge spit stunning champions (see `EnemyDef.spit`). */
+  spit?: SpitDef;
   /** Never drops below 1 HP (see `EnemyDef.unkillable`). */
   unkillable?: boolean;
+  /** A set-piece entrance (see `EnemyDef.entrance`). */
+  entrance?: EnemyEntrance;
   /** Short description of a special mechanic, shown in the Enemy Index. */
   mechanic?: string;
   /** Flavour text for the Enemy Index (authored later). */
@@ -293,6 +350,14 @@ const BOSS_META: BossMeta[] = [
     // The Sewers: he is never meant to fall to the player.
     level: 9, name: 'Captain Draven', icon: '🏳️', color: '#c9d4e4', health: 10000, speed: 45, radius: 26, unkillable: true,
   },
+  {
+    // The Getaway: he follows the party up out of the sewers, and the dawn
+    // burns him down to a fraction of his size. Placeholder stats.
+    level: 10, name: 'The Sludge Father', icon: '🦠', color: '#435a22', health: 4500, speed: 24, radius: 30,
+    entrance: 'sewerBurst',
+    spit: { every: 7, targets: 2, stun: 5, range: 300, duration: 1.1, at: 0.55 },
+    mechanic: 'The daylight scorches him and leaves him severly weakened. Every few seconds he spits sludge at the nearest champions, stunning them for a little.',
+  },
 
 ];
 
@@ -319,7 +384,9 @@ function buildBosses(): Record<string, EnemyDef> {
       shieldHits: m.shieldHits,
       rally: m.rally,
       summon: m.summon,
+      spit: m.spit,
       unkillable: m.unkillable,
+      entrance: m.entrance,
       mechanic: m.mechanic,
       lore: m.lore,
       spawnLines: m.spawnLines,

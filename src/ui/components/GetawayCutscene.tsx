@@ -60,6 +60,8 @@ const BOARD_CUES: Partial<Record<GetawayCue, CutsceneSound>> = {
   shout: 'whinny',
   whip: 'whip',
   depart: 'creak',
+  warCry: 'warCry',
+  march: 'march',
 };
 
 const JOURNEY_CUES: Partial<Record<JourneyCue, CutsceneSound>> = {
@@ -98,12 +100,15 @@ export function GetawayCutscene({
   const [phase, setPhase] = useState<Phase>('board');
   const [caption, setCaption] = useState<number>(-1);
   const finishedRef = useRef(false);
+  const boardRef = useRef<GetawayBoardScene | null>(null);
 
   // Over (or skipped): hand back at once, so the result card comes up beneath,
   // and fade the whole overlay, letterbox and all, off it.
   const finish = () => {
     if (finishedRef.current) return;
     finishedRef.current = true;
+    // The army that stormed the field goes with the scene, not onto the board beneath.
+    boardRef.current?.dispose();
     setLeaving(true);
     doneRef.current();
     window.setTimeout(() => closedRef.current(), LEAVE_MS);
@@ -123,6 +128,7 @@ export function GetawayCutscene({
     // The party, captured before the board scene takes them off the board.
     const party = engine.towers.map((t) => t.def);
     const board = new GetawayBoardScene(engine);
+    boardRef.current = board;
     let journey: JourneyScene | null = null;
     const ride = new RideAudio();
     // The fight is won but the army is coming: the battle theme back at full chase.
@@ -232,6 +238,7 @@ export function GetawayCutscene({
       cancelAnimationFrame(raf);
       window.removeEventListener('keydown', onKey);
       ride.stop();
+      board.dispose();
     };
     // One run per mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps

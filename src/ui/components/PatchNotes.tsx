@@ -20,6 +20,19 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-10-11 · The Getaway',
+    changes: [
+      'The Getaway is open again, now with its real waves: seven waves of the royal army along the riverbank, and something nasty following you up out of the sewers for the last one.',
+      'New boss, the Sludge Father (The Getaway): he bursts out of the sewer entrance as a giant, wrecking the arch, and the daylight scorches him down to a fraction of his size. Every few seconds he spits sludge at the 2 nearest champions, stunning them for 5 seconds. A stunned champion can’t attack, harvest, play or use its ability. The wave before he arrives, the sewer starts to stir.',
+      'New foe, the Paladin: an armoured knight who resists physical and magic damage, and every few seconds raises her sword in a golden aura to heal the foes around her for 35% of their health.',
+      'The bestiary now shows a foe’s Sludge spit and Healing on its page.',
+      'The Getaway’s cutscene: the royal army now storms the field behind your champions as they run for the wagon, with a war cry and the march of armoured boots.',
+      'The escape wagon’s horse has been redrawn, with a proper walking stride and harness.',
+      'Winning The Sewers now shows its own victory line on the result card.',
+      'New sounds for the Paladin’s heal, the Sludge Father’s spit, the sewer stirring and the Sludge Father bursting out and burning in the sun.',
+    ],
+  },
+  {
     version: '2026-10-10 · Into the Sewers',
     changes: [
       'The Sewers is finished: seven waves of the royal army, with things crawling out of the cistern from wave 3, and a new boss, Captain Draven, at the end. Winning it plays a cutscene. Skip it with the Skip button, Escape, Enter or Space.',

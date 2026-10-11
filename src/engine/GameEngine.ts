@@ -83,6 +83,19 @@ import {
   PIERCING_CAST_ANIM_TIME,
   specialAnimTime,
 } from './types';
+import {
+  SEWER_BURST_BURN,
+  SEWER_BURST_CUES,
+  SEWER_BURST_FEET,
+  SEWER_BURST_FORWARD,
+  SEWER_BURST_PLANT,
+  SEWER_BURST_TICK,
+  SEWER_BURST_TIME,
+  SEWER_MOUTH,
+  sewerBurstHp,
+  sewerBurstPose,
+  type SewerBurstCue,
+} from './sewerBurst';
 import type {
   Burst,
   Cyclone,
@@ -96,6 +109,7 @@ import type {
   Puff,
   Shot,
   Slice,
+  SludgeGlob,
   Tower,
 } from './types';
 
@@ -371,7 +385,22 @@ export type SfxName =
   | 'rallyShield'
   | 'lanternLight'
   | 'houndWhistle'
-  | 'emergeSplash';
+  // The Paladin raising her sword, and her golden aura healing the foes near her.
+  | 'paladinRaise'
+  | 'paladinHeal'
+  | 'emergeSplash'
+  // The Sludge Father bursting out of the sewer on The Getaway (`sewerBurst.ts`).
+  | 'sewerStir'
+  | 'sewerRumble'
+  | 'sludgeSlam'
+  | 'sewerBurst'
+  | 'sludgeRoar'
+  | 'sunSear'
+  | 'sludgeShed'
+  | 'sludgeGrowl'
+  // Its spit (`EnemyDef.spit`): hurled, and splatting onto a champion.
+  | 'sludgeSpit'
+  | 'sludgeSplat';
 
 // The Elf's magic arrows leap on impact: each bounce seeks the nearest living
 // enemy within BOUNCE_RANGE of the impact point that the chain hasn't hit yet.
@@ -496,6 +525,22 @@ export class GameEngine {
    */
   haltedBoss: Enemy | null = null;
   /**
+   * The lane a `'sewerBurst'` foe (the Sludge Father) bursts out of the sewer
+   * on, and the 0-based wave it does so in; -1 on stages without one. The wave
+   * before that one, the sewer stirs (`sewerStirring`).
+   */
+  readonly burstLane: number = -1;
+  readonly burstWave: number = -1;
+  /** Sludge globs in flight from a spitting foe (the Sludge Father) toward the champions they will stun. */
+  readonly globs: SludgeGlob[] = [];
+  /** Latches true once the sewer-burst foe has come out. */
+  burstSpawned = false;
+  /** Latches true once it has burst through the sewer's arch, breaking it (cosmetic). */
+  sewerBroken = false;
+  /** Seconds to the sewer's next tremor while it stirs (cosmetic). */
+  private stirTimer = 2.5;
+  private stirCount = 0;
+  /**
    * Cosmetic sound cues emitted this frame (semantic names only — the engine
    * knows nothing about audio, like `Shot`/`Burst` markers). The UI bridge
    * drains and plays them each frame, then clears the queue. Throttling/mixing
@@ -556,6 +601,8 @@ export class GameEngine {
   private readonly laneCells: Set<string>[];
   /** Per lane, the distance at which its boss halts and wins the stage (`bossHaltAt`). */
   private readonly bossHaltDist: (number | null)[];
+  /** Per lane, whether it starts in a sewer entrance's mouth (a `'sewerBurst'` foe can burst out). */
+  private readonly sewerMouthLane: boolean[];
 
   constructor(
     level: LevelDef,
@@ -600,6 +647,24 @@ export class GameEngine {
     // for lanes that pass through that cell.
     const halt = level.bossHaltAt ? cellCenter(level.bossHaltAt.col, level.bossHaltAt.row) : null;
     this.bossHaltDist = this.lanes.map((_, i) => (halt ? this.laneDistanceTo(i, halt) : null));
+
+    // Lanes that start in a sewer entrance's mouth, and the first authored
+    // wave a `'sewerBurst'` foe bursts out of one in (the Getaway's Sludge Father).
+    const sewers = (level.decor ?? []).filter((p) => p.kind === 'sewerEntrance');
+    this.sewerMouthLane = level.lanes.map((l) => {
+      const s = l.pathTurns[0];
+      return !!s && sewers.some((p) => propCells(p).some((c) => c.col === s.col && c.row === s.row));
+    });
+    if (!level.endless) {
+      for (let i = 0; i < level.lanes.length; i++) {
+        if (!this.sewerMouthLane[i]) continue;
+        const w = level.lanes[i].waves.findIndex((wave) => wave.groups.some((g) => getEnemy(g.enemyId).entrance === 'sewerBurst'));
+        if (w >= 0 && (this.burstWave < 0 || w < this.burstWave)) {
+          this.burstLane = i;
+          this.burstWave = w;
+        }
+      }
+    }
 
     // The exit (last waypoint) of each lane is a base; dedupe so converging
     // lanes that share an exit yield a single castle.
@@ -650,6 +715,33 @@ export class GameEngine {
   /** The direction of travel `dist` px along lane `index`. */
   headingOnLane(index: number, dist: number): Vec2 {
     return this.headingAtDistance(this.lanes[index], dist);
+  }
+
+  /**
+   * Cosmetic: a foe of `enemyId` a cutscene adds to the finished board, `dist`
+   * px along lane `index`, with no shield pips or spawn lines. The engine is no
+   * longer stepped, so the scene moves it itself (and marks it `dead` when done).
+   */
+  addSceneFoe(enemyId: string, index: number, dist = 0): Enemy {
+    const e = this.createEnemy(getEnemy(enemyId), index, dist);
+    e.shield = 0;
+    e.shieldMax = 0;
+    e.speechIndex = e.def.spawnLines?.length ?? 0;
+    this.enemies.push(e);
+    return e;
+  }
+
+  /**
+   * How hard the sewer a `'sewerBurst'` foe will come out of is stirring, 0..1:
+   * from the start of the wave before its own (0.65), through the break after
+   * it and its own wave until it bursts out (1). 0 otherwise (cosmetic: the
+   * renderer's ooze and eyes in the mouth, the tremors in `updateSewerStir`).
+   */
+  sewerStirring(): number {
+    if (this.burstWave < 0 || this.burstSpawned || this.outcome !== 'playing') return 0;
+    const before = this.burstWave - 1;
+    if (this.waveIndex < before || (this.waveIndex === before && this.phase !== 'wave')) return 0;
+    return this.waveIndex === before ? 0.65 : 1;
   }
 
   /** Number of waves in the stage — `Infinity` for an endless run. */
@@ -820,6 +912,8 @@ export class GameEngine {
       specialAnim: 0,
       slam: null,
       storm: null,
+      stun: 0,
+      stunMax: 0,
       ability,
       abilityCooldown: 0,
       abilityCooldownMax: ability?.cooldown ?? 0,
@@ -1024,6 +1118,7 @@ export class GameEngine {
     const t = this.towers.find((x) => x.uid === uid);
     if (!t || !t.ability) return false;
     if (t.abilityCooldown > 0) return false;
+    if (t.stun > 0) return false; // stuck in sludge
     // Abilities are paid for in mana; can't cast without enough in the pool.
     const manaCost = t.ability.manaCost ?? 0;
     if (t.mana < manaCost) return false;
@@ -1629,7 +1724,8 @@ export class GameEngine {
     let best: Enemy | undefined;
     let bestDist = Infinity;
     for (const e of this.enemies) {
-      if (e.dead) continue;
+      // Still bursting out of the sewer, it isn't where its position says yet.
+      if (e.dead || (e.riseFrom === 'sewer' && e.rise > 0)) continue;
       const d = Math.hypot(e.pos.x - x, e.pos.y - y);
       if (d <= e.def.radius + 5 && d < bestDist) {
         best = e;
@@ -1761,10 +1857,12 @@ export class GameEngine {
     }
 
     this.advanceLaneReveals(dt);
+    this.updateSewerStir(dt);
 
     this.updateEnemies(dt);
     this.recomputeWards();
     this.updateTowers(dt);
+    this.updateGlobs(dt);
     this.updateProjectiles(dt);
     this.updateSlices();
     this.decayVisuals(dt);
@@ -1779,27 +1877,40 @@ export class GameEngine {
       const { enemyId, laneIndex, healthMult } = this.spawnQueue[this.spawnCursor++];
       const def = this.spawnDef(enemyId, healthMult);
       const fromWater = !!this.level.lanes[laneIndex].emerge;
-      const spawned = this.createEnemy(def, laneIndex, fromWater ? -EMERGE_BACK : 0);
+      // A sewer-burst foe stands where its burst will land it (see `sewerBurst.ts`).
+      const burst = def.entrance === 'sewerBurst' && this.sewerMouthLane[laneIndex];
+      const spawned = this.createEnemy(def, laneIndex, burst ? SEWER_BURST_FORWARD : fromWater ? -EMERGE_BACK : 0, burst);
       this.enemies.push(spawned);
       if (spawned.riseFrom === 'water') {
         this.emitFx({ kind: 'emerge', x: spawned.pos.x, y: spawned.pos.y, radius: def.radius });
         this.sfx.push('emergeSplash');
       }
+      if (burst) {
+        // The sewer heaves as it comes: a rumble, and sludge spewing out of the mouth.
+        const at = this.positionAtDistance(this.lanes[laneIndex], 0);
+        this.emitFx({ kind: 'sludgeSplash', x: at.x, y: at.y + SEWER_MOUTH.floor, radius: 16, shake: 0.3, stain: 22 });
+        this.sfx.push('sewerRumble');
+        this.burstSpawned = true;
+      }
       if (def.boss) {
         const at = this.positionAtDistance(this.lanes[laneIndex], 0);
-        this.emitFx({ kind: 'bossSpawn', x: at.x, y: at.y, color: def.visual.color });
+        // A burst is its own entrance; anything else gets the boss's flare.
+        if (!burst) this.emitFx({ kind: 'bossSpawn', x: at.x, y: at.y, color: def.visual.color });
         this.bossJustAppeared = true;
         this.bossHasSpawned = true;
       }
     }
   }
 
-  /** A fresh enemy of `def` on lane `laneIndex`, `dist` px along it. */
-  private createEnemy(def: EnemyDef, laneIndex: number, dist: number): Enemy {
+  /**
+   * A fresh enemy of `def` on lane `laneIndex`, `dist` px along it; `burst`
+   * makes it burst out of the sewer mouth there first (see `sewerBurst.ts`).
+   */
+  private createEnemy(def: EnemyDef, laneIndex: number, dist: number, burst = false): Enemy {
     // Spawned right at the start of an `emerge` lane, a foe surfaces out of the
     // water first; a boss on a reveal lane rises off its throne.
-    const fromWater = dist <= 0 && !!this.level.lanes[laneIndex].emerge;
-    const fromThrone = !fromWater && def.boss && this.laneRevealAt[laneIndex] !== undefined;
+    const fromWater = !burst && dist <= 0 && !!this.level.lanes[laneIndex].emerge;
+    const fromThrone = !burst && !fromWater && def.boss && this.laneRevealAt[laneIndex] !== undefined;
     return {
       uid: this.uidCounter++,
       def,
@@ -1815,8 +1926,8 @@ export class GameEngine {
       hitFlash: 0,
       knockbackRemaining: 0,
       knockbackCooldown: 0,
-      rise: fromWater || fromThrone ? 1 : 0,
-      riseFrom: fromWater ? 'water' : 'throne',
+      rise: burst || fromWater || fromThrone ? 1 : 0,
+      riseFrom: burst ? 'sewer' : fromWater ? 'water' : 'throne',
       // An enemy with intro lines walks in a short way (-1) before speaking. In
       // endless runs it starts past its last line, so it never stops to speak.
       speechIndex: !def.spawnLines ? 0 : this.level.endless ? def.spawnLines.length : -1,
@@ -1829,6 +1940,10 @@ export class GameEngine {
       rallyT: -1,
       summonTimer: def.summon?.every ?? 0,
       summonT: -1,
+      spitTimer: def.spit?.every ?? 0,
+      spitT: -1,
+      healTimer: def.heal?.every ?? 0,
+      healT: -1,
       dying: false,
       deathT: 0,
     };
@@ -1860,7 +1975,10 @@ export class GameEngine {
       const lane = this.lanes[e.laneIndex];
       // A boss rising off its throne stays put (and untargetable) until fully up.
       if (e.rise > 0) {
-        e.rise = Math.max(0, e.rise - dt / (e.riseFrom === 'water' ? EMERGE_TIME : RISE_TIME));
+        const time = e.riseFrom === 'sewer' ? SEWER_BURST_TIME : e.riseFrom === 'water' ? EMERGE_TIME : RISE_TIME;
+        const from = e.rise;
+        e.rise = Math.max(0, e.rise - dt / time);
+        if (e.riseFrom === 'sewer') this.sewerBurstCues(e, (1 - from) * time, (1 - e.rise) * time);
         // Held where it spawned: the lane start, or a little back in the pool.
         e.pos = this.positionAtDistance(lane, e.dist);
         e.heading = this.headingAtDistance(lane, e.dist);
@@ -1891,6 +2009,10 @@ export class GameEngine {
       if (e.def.rally && this.updateRally(e, dt)) continue;
       // A summoner (the Hound Master) halts every so often to call more foes.
       if (e.def.summon && this.updateSummon(e, dt)) continue;
+      // A spitter (the Sludge Father) halts every so often to spit sludge.
+      if (e.def.spit && this.updateSpit(e, dt)) continue;
+      // A healer (the Paladin) halts every so often to heal the foes around it.
+      if (e.def.heal && this.updateHeal(e, dt)) continue;
       const lightSlow = e.def.lightSlow ? this.updateCower(e, dt) : 1;
       e.dist += e.def.speed * e.slowFactor * lightSlow * dt;
       // Bleed off any pending knockback as a smooth slide back down the path,
@@ -2013,6 +2135,14 @@ export class GameEngine {
       if (t.abilitySpeedBuffTimer > 0) {
         t.abilitySpeedBuffTimer -= dt;
         if (t.abilitySpeedBuffTimer <= 0) t.abilitySpeedBuffMult = 1;
+      }
+
+      // Stunned (a Sludge Father's spit): stuck fast in the sludge, it does
+      // nothing at all until it wears off.
+      if (t.stun > 0) {
+        t.stun = Math.max(0, t.stun - dt);
+        t.targetUid = null;
+        continue;
       }
 
       // Channelling a Mana Ray (the Mage's beam): fire only the beam and suppress
@@ -3461,6 +3591,95 @@ export class GameEngine {
   }
 
   /**
+   * Advance an enemy's spit (see `EnemyDef.spit`). Counts down to the next
+   * spit while it walks, waiting there until a champion is in range; once one
+   * starts it stands still for `duration`, and `at` of the way through it
+   * hurls a glob at each of the `targets` champions nearest it (unstunned ones
+   * first). Returns whether it is spitting (holding still) this tick.
+   */
+  private updateSpit(e: Enemy, dt: number): boolean {
+    const s = e.def.spit;
+    if (!s) return false;
+    if (e.spitT < 0) {
+      e.spitTimer -= dt;
+      if (e.spitTimer > 0) return false;
+      if (this.spitTargets(e).length === 0) {
+        e.spitTimer = 0; // ready: spits as soon as someone comes in range
+        return false;
+      }
+      e.spitT = 0;
+      return true;
+    }
+    const before = e.spitT;
+    e.spitT += dt;
+    const at = s.duration * s.at;
+    if (before < at && e.spitT >= at) {
+      const mouth = { x: e.pos.x + e.heading.x * e.def.radius * 0.4, y: e.pos.y - e.def.radius * 0.6 };
+      for (const t of this.spitTargets(e)) {
+        const d = Math.hypot(t.pos.x - mouth.x, t.pos.y - mouth.y);
+        this.globs.push({
+          from: { ...mouth },
+          to: { x: t.pos.x, y: t.pos.y - 6 },
+          towerUid: t.uid,
+          t: 0,
+          time: 0.35 + d / 320,
+          arc: 26 + d * 0.22,
+          stun: s.stun,
+        });
+      }
+      this.emitFx({ kind: 'sludgeSpit', x: mouth.x, y: mouth.y });
+      this.sfx.push('sludgeSpit');
+    }
+    if (e.spitT >= s.duration) {
+      // The spit itself counts toward the cycle, so it comes every `every` seconds.
+      e.spitT = -1;
+      e.spitTimer = Math.max(0, s.every - s.duration);
+    }
+    return true;
+  }
+
+  /** The champions a spitter would hit now: the nearest in range, those not yet stunned first. */
+  private spitTargets(e: Enemy): Tower[] {
+    const s = e.def.spit;
+    if (!s) return [];
+    return this.towers
+      .map((t) => ({ t, d: Math.hypot(t.pos.x - e.pos.x, t.pos.y - e.pos.y) }))
+      .filter((c) => c.d <= s.range)
+      .sort((a, b) => (a.t.stun > 0 ? 1 : 0) - (b.t.stun > 0 ? 1 : 0) || a.d - b.d)
+      .slice(0, s.targets)
+      .map((c) => c.t);
+  }
+
+  /**
+   * Fly the sludge globs; one that lands stuns its champion (if it is still
+   * deployed), cutting short whatever it was doing: a charge, a channel, a slam.
+   */
+  private updateGlobs(dt: number): void {
+    for (let i = this.globs.length - 1; i >= 0; i--) {
+      const g = this.globs[i];
+      g.t += dt;
+      if (g.t < g.time) continue;
+      this.globs.splice(i, 1);
+      const t = this.towers.find((x) => x.uid === g.towerUid);
+      this.emitFx({ kind: 'sludgeSplash', x: g.to.x, y: g.to.y + 6, radius: 10, stain: 12 });
+      this.sfx.push('sludgeSplat');
+      if (!t) continue;
+      // A fresh glob restarts the stun (never shortens a longer one left).
+      if (g.stun >= t.stun) {
+        t.stun = g.stun;
+        t.stunMax = g.stun;
+      }
+      t.charge = 0;
+      t.beamTimer = 0;
+      t.storm = null;
+      t.slam = null;
+      t.burstLeft = 0;
+      t.targetUid = null;
+      this.floaters.push({ pos: { x: t.pos.x, y: t.pos.y - 26 }, text: 'Stunned!', color: '#b8e05a', ttl: 1.1, maxTtl: 1.1, size: 12 });
+    }
+  }
+
+  /**
    * Advance an enemy's rally (see `EnemyDef.rally`). Counts down to the next
    * rally while it walks; once one starts it stands still for `duration`, and
    * `at` of the way through every *other* living foe on the board gains
@@ -3501,6 +3720,61 @@ export class GameEngine {
       e.rallyTimer = r.every;
     }
     return true;
+  }
+
+  /**
+   * Advance an enemy's heal (see `EnemyDef.heal`). Counts down to the next heal
+   * while it walks, waiting there until another foe is within `radius`; once
+   * one starts it stands still for `duration`, and `at` of the way through every
+   * *other* living foe within `radius` heals `amount` of its max health. Returns
+   * whether it is healing (holding still) this tick.
+   */
+  private updateHeal(e: Enemy, dt: number): boolean {
+    const h = e.def.heal;
+    if (!h) return false;
+    if (e.healT < 0) {
+      e.healTimer -= dt;
+      if (e.healTimer > 0) return false;
+      if (this.healTargets(e).length === 0) {
+        e.healTimer = 0; // ready: heals as soon as a foe comes near
+        return false;
+      }
+      e.healT = 0;
+      this.sfx.push('paladinRaise');
+      this.emitFx({ kind: 'heal', x: e.pos.x, y: e.pos.y, radius: h.radius, granted: false, targets: [] });
+      return true;
+    }
+    const before = e.healT;
+    e.healT += dt;
+    const at = h.duration * h.at;
+    if (before < at && e.healT >= at) {
+      const targets: { x: number; y: number }[] = [];
+      for (const o of this.healTargets(e)) {
+        const gained = Math.min(o.def.health - o.health, o.def.health * h.amount);
+        o.health += gained;
+        targets.push({ x: o.pos.x, y: o.pos.y });
+        if (gained >= 1) {
+          this.floaters.push({ pos: { x: o.pos.x, y: o.pos.y - 18 }, text: `+${Math.round(gained)}`, color: '#9be86a', ttl: 0.9, maxTtl: 0.9, size: 11 });
+        }
+      }
+      this.sfx.push('paladinHeal');
+      this.emitFx({ kind: 'heal', x: e.pos.x, y: e.pos.y, radius: h.radius, granted: true, targets });
+    }
+    if (e.healT >= h.duration) {
+      // The heal itself counts toward the cycle, so it comes every `every` seconds.
+      e.healT = -1;
+      e.healTimer = Math.max(0, h.every - h.duration);
+    }
+    return true;
+  }
+
+  /** The other living foes within a healer's reach (see `EnemyDef.heal`). */
+  private healTargets(e: Enemy): Enemy[] {
+    const h = e.def.heal;
+    if (!h) return [];
+    return this.enemies.filter(
+      (o) => o !== e && !o.dead && !o.dying && o.rise <= 0 && Math.hypot(o.pos.x - e.pos.x, o.pos.y - e.pos.y) <= h.radius,
+    );
   }
 
   /** Kick up a few wind-puff motes blown back along an enemy's push direction. */
@@ -3616,6 +3890,91 @@ export class GameEngine {
     this.haltedBoss = e;
     this.enemyKills[e.def.id] = (this.enemyKills[e.def.id] ?? 0) + 1;
     this.win();
+  }
+
+  /**
+   * Voice the beats a sewer-burst entrance passed between `t0` and `t1`
+   * (seconds into it): its sounds, and splashes, a roar and the sun's strike
+   * where the renderer draws them (positions as in `sewerBurst.ts`).
+   */
+  private sewerBurstCues(e: Enemy, t0: number, t1: number): void {
+    const lane = this.lanes[e.laneIndex];
+    const start = this.positionAtDistance(lane, 0);
+    const land = this.positionAtDistance(lane, SEWER_BURST_FORWARD);
+    const feetY = land.y + SEWER_BURST_FEET;
+    const R = e.def.radius;
+    const cue = (c: SewerBurstCue): void => {
+      switch (c.kind) {
+        case 'slam':
+          // A hand slapping down on the bank in front of the mouth.
+          this.emitFx({ kind: 'sludgeSplash', x: start.x + c.side * SEWER_BURST_PLANT.dx, y: start.y + SEWER_BURST_PLANT.dy, radius: 12, shake: 0.3, stain: 14 });
+          this.sfx.push('sludgeSlam');
+          break;
+        case 'out':
+          // Bursting through the arch, it takes the crown of it with it.
+          this.emitFx({ kind: 'sludgeSplash', x: start.x, y: start.y + SEWER_MOUTH.floor, radius: 30, shake: 0.5, stain: 26 });
+          this.emitFx({ kind: 'archBreak', x: start.x, y: start.y + SEWER_MOUTH.spring - SEWER_MOUTH.r });
+          this.sfx.push('sewerBurst');
+          this.sewerBroken = true;
+          break;
+        case 'land':
+          this.emitFx({ kind: 'sludgeSplash', x: land.x, y: feetY, radius: 40, shake: 0.7, stain: 44 });
+          this.sfx.push('sludgeSlam');
+          break;
+        case 'roar':
+          this.emitFx({ kind: 'sludgeRoar', x: land.x, y: feetY - R * 2.8, radius: R * 1.6 });
+          this.sfx.push('sludgeRoar');
+          break;
+        case 'sun':
+          this.emitFx({ kind: 'sunScorch', x: land.x, y: feetY - R * 1.8, radius: R * 2.4 });
+          this.sfx.push('sunSear');
+          break;
+        case 'shed':
+          // A slab of its sludge sloughing off and slapping down beside it.
+          this.emitFx({ kind: 'sludgeSplash', x: land.x + c.dx, y: feetY + c.dy, radius: 18, shake: 0.22, stain: 20 });
+          this.sfx.push('sludgeShed');
+          break;
+        case 'growl':
+          this.sfx.push('sludgeGrowl');
+          break;
+      }
+    };
+    for (const c of SEWER_BURST_CUES) if (c.at > t0 && c.at <= t1) cue(c);
+    // The sun's damage popping off it as it burns (what its boss bar loses).
+    const [burnFrom, burnTo] = SEWER_BURST_BURN;
+    const first = Math.max(1, Math.floor((t0 - burnFrom) / SEWER_BURST_TICK) + 1);
+    for (let k = first; burnFrom + k * SEWER_BURST_TICK <= Math.min(t1, burnTo + SEWER_BURST_TICK); k++) {
+      const at = burnFrom + k * SEWER_BURST_TICK;
+      const dealt = (sewerBurstHp(at - SEWER_BURST_TICK, e.def.health) ?? 0) - (sewerBurstHp(at, e.def.health) ?? 0);
+      if (dealt < 1) continue;
+      const scale = sewerBurstPose(at).scale;
+      this.floaters.push({
+        pos: { x: land.x + ((k * 37) % 44) - 22, y: feetY - 30 * scale - ((k * 13) % 16) },
+        text: `-${Math.round(dealt)}`,
+        color: dealt > e.def.health * 0.8 ? '#ffd27a' : '#ff9a4a',
+        ttl: 0.9,
+        maxTtl: 0.9,
+        size: dealt > e.def.health * 0.8 ? 16 : 12,
+      });
+    }
+  }
+
+  /**
+   * While the sewer stirs (`sewerStirring`), a tremor every several seconds:
+   * grit shaken down off the arch and a slop of sludge over the sill, with a
+   * rumble from deep inside. Cosmetic; a fixed cycle of gaps (no rng draws, so
+   * crit rolls stay deterministic), coming quicker once the wave is cleared.
+   */
+  private updateSewerStir(dt: number): void {
+    const stir = this.sewerStirring();
+    if (stir <= 0) return;
+    this.stirTimer -= dt;
+    if (this.stirTimer > 0) return;
+    const gaps = [7, 5.5, 8, 6.2];
+    this.stirTimer = gaps[this.stirCount++ % gaps.length] * (stir < 1 ? 1.2 : 0.8);
+    const at = this.positionAtDistance(this.lanes[this.burstLane], 0);
+    this.emitFx({ kind: 'sewerStir', x: at.x, y: at.y });
+    this.sfx.push('sewerStir');
   }
 
   /** Concede the battle — how the player ends an endless run on their own terms. */

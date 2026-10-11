@@ -57,11 +57,15 @@ export interface Enemy {
    * it onto the path. 0 for every normal enemy.
    *
    * A foe spawning on an `emerge` lane (the Sewers' cistern) uses the same
-   * hold: it surfaces out of the water over `EMERGE_TIME` (see `riseFrom`).
+   * hold: it surfaces out of the water over `EMERGE_TIME` (see `riseFrom`), and
+   * so does a `'sewerBurst'` entrance (the Sludge Father) over `SEWER_BURST_TIME`.
    */
   rise: number;
-  /** What a `rise` lifts the foe out of: the king's throne, or a pool of water. */
-  riseFrom: 'throne' | 'water';
+  /**
+   * What a `rise` lifts the foe out of: the king's throne, a pool of water, or
+   * a sewer mouth it bursts out of (`engine/sewerBurst.ts`).
+   */
+  riseFrom: 'throne' | 'water' | 'sewer';
   /**
    * Spawn-speech state. `speechIndex` starts at -1 ("walking in, not yet spoken")
    * so the enemy first advances onto the board; once it has walked in it flips to
@@ -112,6 +116,20 @@ export interface Enemy {
    */
   summonTimer: number;
   summonT: number;
+  /**
+   * Spit state (see `EnemyDef.spit`), like the summon's: `spitTimer` counts
+   * down to the next spit while walking; `spitT` counts up through one, -1
+   * when not spitting. It stands still while it spits.
+   */
+  spitTimer: number;
+  spitT: number;
+  /**
+   * Heal state (see `EnemyDef.heal`), like the rally's: `healTimer` counts
+   * down to the next heal while walking; `healT` counts up through one, -1
+   * when not healing. It stands still, sword raised, while it heals.
+   */
+  healTimer: number;
+  healT: number;
   /**
    * Death-animation state. When an enemy with a `def.deathAnimation` takes a
    * lethal hit it doesn't vanish immediately: `dying` flips true and `deathT`
@@ -241,6 +259,32 @@ export function summonPose(e: Enemy): number {
 }
 /** Fraction of a summon spent raising (and again lowering) the whistle. */
 export const SUMMON_POSE_EASE = 0.25;
+
+/**
+ * How far into its spit pose an enemy is, 0..1 (the Sludge Father rearing up
+ * and spewing): heaves up to the spit at `at`, then sinks back down. 0 when
+ * not spitting.
+ */
+export function spitPose(e: Enemy): number {
+  const s = e.def.spit;
+  if (!s || e.spitT < 0) return 0;
+  const k = e.spitT / s.duration;
+  return k < s.at ? Math.sin((k / s.at) * Math.PI * 0.5) : Math.max(0, 1 - (k - s.at) / (1 - s.at));
+}
+
+/**
+ * How far into its heal pose an enemy is, 0..1 (the Paladin raising her sword
+ * to the sky): eases up over the first `HEAL_POSE_EASE` of the heal, holds
+ * while the aura blazes, and eases back down. 0 when not healing.
+ */
+export function healPose(e: Enemy): number {
+  const h = e.def.heal;
+  if (!h || e.healT < 0) return 0;
+  const k = e.healT / h.duration;
+  return Math.max(0, Math.min(1, k / HEAL_POSE_EASE, (1 - k) / HEAL_POSE_EASE));
+}
+/** Fraction of a heal spent raising (and again lowering) the sword. */
+export const HEAL_POSE_EASE = 0.22;
 
 export function isSpeaking(e: Enemy): boolean {
   return (
@@ -505,6 +549,13 @@ export interface Tower {
    */
   storm: { timer: number; duration: number; next: number; every: number } | null;
   /**
+   * Seconds of stun left (a Sludge Father's spit, see `EnemyDef.spit`): while
+   * > 0 the champion can't attack, harvest, play or cast, and is drawn covered
+   * in sludge. `stunMax` is the stun's full length, for its countdown ring.
+   */
+  stun: number;
+  stunMax: number;
+  /**
    * Player-activated ability this tower has unlocked (the Blade's Cyclone Slash),
    * or null. Set from the unit's upgrade tiers (see `effectiveAbility`) on deploy
    * and refolded on every tier bump, so a hero auto-levelling into the ability's
@@ -629,6 +680,22 @@ export interface Cyclone {
  * its pending hit and applies the damage on impact — it homes onto its target
  * and deals `damage` when it lands, or is dropped if the target is gone.
  */
+/**
+ * A glob of sludge in flight (the Sludge Father's spit): it arcs from `from`
+ * to the champion `towerUid` stood at, landing after `time` seconds (`t`
+ * counts up), and stuns it for `stun` seconds if it is still there.
+ */
+export interface SludgeGlob {
+  from: Vec2;
+  to: Vec2;
+  towerUid: number;
+  t: number;
+  time: number;
+  /** Peak height of the arc (px). */
+  arc: number;
+  stun: number;
+}
+
 export interface Projectile {
   /** Current position, advanced each frame toward the target. */
   pos: Vec2;
@@ -850,6 +917,19 @@ export type FxEvent =
       granted: boolean;
       targets: { x: number; y: number }[];
     }
+  | {
+      /**
+       * A heal (the Paladin, at `x`,`y`): `granted: false` as the sword goes
+       * up, `granted: true` as the aura pours out over `radius`; `targets` are
+       * the foes it just healed.
+       */
+      kind: 'heal';
+      x: number;
+      y: number;
+      radius: number;
+      granted: boolean;
+      targets: { x: number; y: number }[];
+    }
   | { kind: 'breach'; x: number; y: number; boss: boolean }
   | { kind: 'deploy'; x: number; y: number; color: string }
   | {
@@ -879,8 +959,21 @@ export type FxEvent =
   | { kind: 'bossSpawn'; x: number; y: number; color: string }
   /** A foe breaking the surface of a pool it climbs out of (`x`,`y` its feet). */
   | { kind: 'emerge'; x: number; y: number; radius: number }
-  /** A mass of sludge striking or bursting (the Sludge Father's cutscene); `shake` jolts the board. */
-  | { kind: 'sludgeSplash'; x: number; y: number; radius: number; shake?: number };
+  /**
+   * A mass of sludge striking or bursting (the Sludge Father); `shake` jolts the
+   * board, and `stain` leaves a puddle that radius on the ground, drying away.
+   */
+  | { kind: 'sludgeSplash'; x: number; y: number; radius: number; shake?: number; stain?: number }
+  /** The sewer the Sludge Father will burst from stirring (`x`,`y` its lane start, mid-mouth). */
+  | { kind: 'sewerStir'; x: number; y: number }
+  /** The Sludge Father bursting through the sewer's arch, breaking it (`x`,`y` the arch's crown). */
+  | { kind: 'archBreak'; x: number; y: number }
+  /** The Sludge Father hurling its spit (`x`,`y` its mouth). */
+  | { kind: 'sludgeSpit'; x: number; y: number }
+  /** The Sludge Father's roar (`x`,`y` its head, `radius` its size). */
+  | { kind: 'sludgeRoar'; x: number; y: number; radius: number }
+  /** The daylight striking the Sludge Father (`x`,`y` its body, `radius` its size). */
+  | { kind: 'sunScorch'; x: number; y: number; radius: number };
 
 export type Outcome = 'playing' | 'won' | 'lost';
 

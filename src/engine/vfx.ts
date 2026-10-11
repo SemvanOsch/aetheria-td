@@ -20,7 +20,7 @@
 import type { Weather } from '../domain/atmosphere';
 import { BOARD_HEIGHT, BOARD_WIDTH } from '../domain/grid';
 import type { Enemy, FxElement, FxEvent } from './types';
-import { MAGIC, ease, shade, tintRamp, withAlpha, type LightFamily, type MagicFamily } from './palette';
+import { MAGIC, ease, hash2, shade, tintRamp, withAlpha, type LightFamily, type MagicFamily } from './palette';
 import type { Light } from './lighting';
 
 // ---------------------------------------------------------------------------
@@ -176,6 +176,23 @@ interface Fissure {
   max: number;
 }
 
+/** A puddle of sludge left on the ground by a splash, drying away. */
+interface Stain {
+  x: number;
+  y: number;
+  r: number;
+  /** Seed for its ragged edge and its spatters. */
+  seed: number;
+  t: number;
+  max: number;
+}
+
+/** How long a sludge stain lasts (it dries and fades over the last part). */
+const STAIN_LIFE = 24;
+/** The time a stain takes to spread out to full size. */
+const STAIN_SPREAD = 0.45;
+const MAX_STAINS = 16;
+
 interface LightPulse {
   x: number;
   y: number;
@@ -280,6 +297,7 @@ export class Vfx {
   crosses: CrossMark[] = [];
   cleaves: CleaveArc[] = [];
   fissures: Fissure[] = [];
+  stains: Stain[] = [];
   pulses: LightPulse[] = [];
   corpses: Corpse[] = [];
   private recoil = new Map<number, Recoil>();
@@ -384,6 +402,12 @@ export class Vfx {
     this.pulses.push({ x, y, radius, family, intensity, t: 0, max, tint });
   }
 
+  /** Leave a puddle of sludge `r` px across on the ground at (x, y). */
+  stain(x: number, y: number, r: number): void {
+    if (this.stains.length >= MAX_STAINS) this.stains.shift();
+    this.stains.push({ x, y, r, seed: Math.floor(this.rand() * 1e6), t: 0, max: STAIN_LIFE });
+  }
+
   shake(amount: number): void {
     if (reducedMotion) return;
     this.trauma = Math.min(1, this.trauma + amount);
@@ -461,6 +485,26 @@ export class Vfx {
             }
           }
           break;
+        case 'heal':
+          if (!e.granted) {
+            // The sword goes up: a white-gold flare at its tip and a soft lift.
+            this.flash(e.x, e.y - 30, 26, 0.35, '#fff3c4');
+            this.burst('mote', e.x, e.y - 30, 8, 22, { life: 0.7, size: 1.4, color: '#ffe6a0', vy: -18, drag: 1.5 });
+            this.pulse(e.x, e.y - 20, 90, 'holy', 0.5, 0.7);
+          } else {
+            // The aura pours out over the ground to her reach, and every foe it
+            // touches lights up with motes of green-gold rising off it.
+            this.ring(e.x, e.y + 8, 8, e.radius, 0.75, '#ffd76a', 2.4, 0.5);
+            this.ring(e.x, e.y + 8, 4, e.radius * 0.6, 0.55, '#fff1c4', 1.4, 0.5);
+            this.flash(e.x, e.y - 26, 50, 0.3, '#fff1c4');
+            this.pulse(e.x, e.y, e.radius * 1.3, 'holy', 0.7, 0.8);
+            for (const t of e.targets) {
+              this.ring(t.x, t.y + 6, 3, 16, 0.45, '#b8f07a', 1.4, 0.5);
+              this.burst('mote', t.x, t.y, 7, 20, { life: 0.8, size: 1.5, color: '#c8f58a', vy: -30, drag: 1.5 });
+              this.burst('mote', t.x, t.y - 4, 3, 14, { life: 0.7, size: 1.2, color: '#ffe6a0', vy: -24, drag: 1.5 });
+            }
+          }
+          break;
         case 'breach':
           this.flash(e.x, e.y, e.boss ? 90 : 40, 0.4, '#ff5a5a');
           this.ring(e.x, e.y, 6, e.boss ? 110 : 46, 0.5, '#ff6a5a', 3, 0.6);
@@ -510,8 +554,50 @@ export class Vfx {
           this.burst('smoke', e.x, e.y, 5, 18, { life: 1.1, size: 5 + e.radius * 0.1, grow: 10 + e.radius * 0.3, color: '#26331a', drag: 3 });
           this.ring(e.x, e.y, e.radius * 0.3, e.radius * 1.6, 0.8, '#7f9a4a', 2, 0.35);
           if (e.shake) this.shake(e.shake);
+          if (e.stain) this.stain(e.x, e.y, e.stain);
           break;
         }
+        case 'sewerStir':
+          // A tremor in the tunnel: grit shaken off the arch's crown, a slop of
+          // sludge over the sill and a puff of foul air out of the mouth.
+          this.burst('dust', e.x, e.y - 32, 9, 14, { life: 0.9, size: 1.3, color: '#8a8a78', grav: 220, vy: 10, drag: 1 });
+          this.burst('debris', e.x, e.y - 30, 3, 12, { life: 0.8, size: 1.2, color: '#6a6a5c', grav: 260, spin: 6 });
+          this.burst('dust', e.x, e.y + 19, 8, 26, { life: 0.6, size: 1.5, color: '#6e8a36', grav: 200, vy: -30, drag: 1 });
+          this.burst('smoke', e.x, e.y + 8, 4, 10, { life: 1.4, size: 5, grow: 9, color: '#2e3a22', vy: 6, drag: 2 });
+          this.shake(0.14);
+          break;
+        case 'archBreak':
+          // The crown of the arch bursting outward: stone blocks and chips flung
+          // off it and tumbling down, grit, and a cloud of mortar dust.
+          this.burst('debris', e.x, e.y, 10, 120, { life: 0.9, size: 2.6, color: '#7a7c74', grav: 360, vy: -40, spin: 9, drag: 0.4 });
+          this.burst('debris', e.x, e.y, 14, 90, { life: 0.8, size: 1.4, color: '#5f6159', grav: 340, vy: -30, spin: 12, drag: 0.4 });
+          this.burst('dust', e.x, e.y + 6, 22, 70, { life: 0.9, size: 1.4, color: '#a8a898', grav: 160, vy: -10, drag: 1.5 });
+          this.burst('smoke', e.x, e.y + 10, 10, 34, { life: 1.6, size: 6, grow: 12, color: '#9a9888', vy: 8, drag: 2 });
+          this.shake(0.35);
+          break;
+        case 'sludgeSpit':
+          // Spewing: a spray of ooze out of its jaws and a murky puff.
+          this.burst('dust', e.x, e.y, 14, 70, { life: 0.5, size: 1.6, color: '#a6dc3c', grav: 220, vy: -30, drag: 1.2 });
+          this.burst('dust', e.x, e.y, 8, 50, { life: 0.5, size: 1.9, color: '#435a22', grav: 240, vy: -20, drag: 1.2 });
+          this.burst('smoke', e.x, e.y, 4, 14, { life: 0.8, size: 4, grow: 7, color: '#2e3a22', drag: 2.5 });
+          break;
+        case 'sludgeRoar':
+          // The roar: spittle and ooze sprayed out of its jaws, a shock ring
+          // and dust kicked up off the ground around it.
+          this.burst('dust', e.x, e.y, 22, 110, { life: 0.8, size: 1.6, color: '#a6dc3c', grav: 260, vy: -40, drag: 1.2 });
+          this.ring(e.x, e.y, e.radius * 0.3, e.radius * 2.2, 0.6, '#c8e070', 2, 0.6);
+          this.burst('dust', e.x, e.y + e.radius * 1.6, 16, 70, { life: 0.7, size: 1.5, color: '#b8a888', drag: 4, vy: -12 });
+          this.shake(0.55);
+          break;
+        case 'sunScorch':
+          // The daylight striking raw sludge: a white-gold flare, a burst of
+          // steam rolling up off it, sizzling sparks and the light swelling.
+          this.flash(e.x, e.y, e.radius * 0.8, 0.35, '#fff3c4');
+          this.burst('smoke', e.x, e.y - e.radius * 0.4, 10, 46, { life: 1.6, size: 5, grow: 10, color: '#d9d6c4', vy: -34, drag: 1.6 });
+          this.burst('spark', e.x, e.y, 26, 90, { life: 0.5, size: 1.2, color: '#fff1c4', vy: -20 });
+          this.ring(e.x, e.y + e.radius * 0.6, e.radius * 0.4, e.radius * 1.8, 0.6, '#ffe6a0', 2.2, 0.5);
+          this.shake(0.3);
+          break;
         case 'bossSpawn':
           this.ring(e.x, e.y + 8, 10, 120, 0.9, '#ff3a3a', 3, 0.5);
           this.ring(e.x, e.y + 8, 6, 80, 0.7, '#ffd77a', 2, 0.5);
@@ -1165,6 +1251,8 @@ export class Vfx {
     this.cleaves = this.cleaves.filter((c) => c.t < c.max);
     for (const f of this.fissures) f.t += dt;
     this.fissures = this.fissures.filter((f) => f.t < f.max);
+    for (const s of this.stains) s.t += dt;
+    this.stains = this.stains.filter((s) => s.t < s.max);
     for (const l of this.pulses) l.t += dt;
     this.pulses = this.pulses.filter((l) => l.t < l.max);
     for (const c of this.corpses) c.t += dt;
@@ -1199,6 +1287,7 @@ export class Vfx {
    * a dark tapered channel with a pale broken lip, fading late in its life.
    */
   drawDecals(ctx: CanvasRenderingContext2D): void {
+    if (this.stains.length) this.drawStains(ctx);
     if (this.fissures.length === 0) return;
     ctx.save();
     ctx.lineCap = 'round';
@@ -1215,6 +1304,55 @@ export class Vfx {
         if (grow <= b.at) continue;
         const bg = Math.min(1, (grow - b.at) / 0.25);
         this.strokeCrack(ctx, b.pts, bg, `rgba(20,12,8,${0.75 * alpha})`, 1, 0);
+      }
+    }
+    ctx.restore();
+  }
+
+  /**
+   * The sludge stains: each a flattened puddle with a ragged edge and a few
+   * spatters around it, wet (a dark rim and a glint) while fresh, spreading out
+   * over `STAIN_SPREAD` and then drying to a dull crust that fades away.
+   */
+  private drawStains(ctx: CanvasRenderingContext2D): void {
+    ctx.save();
+    for (const s of this.stains) {
+      const spread = ease.outCubic(Math.min(1, s.t / STAIN_SPREAD));
+      const k = s.t / s.max;
+      const alpha = (k < 0.55 ? 1 : 1 - (k - 0.55) / 0.45) * 0.85;
+      const dry = Math.min(1, s.t / (s.max * 0.6));
+      const r = s.r * spread;
+      const lobes = 9;
+      const edge = (i: number) => 0.78 + 0.32 * hash2(s.seed, i, 7);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = dry < 0.5 ? '#2e3d16' : '#3a3f22';
+      ctx.beginPath();
+      for (let i = 0; i <= lobes; i++) {
+        const a = (i / lobes) * Math.PI * 2;
+        const rr = r * edge(i % lobes);
+        const x = s.x + Math.cos(a) * rr;
+        const y = s.y + Math.sin(a) * rr * 0.42;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.quadraticCurveTo(s.x + Math.cos(a - Math.PI / lobes) * rr * 1.08, s.y + Math.sin(a - Math.PI / lobes) * rr * 0.45, x, y);
+      }
+      ctx.fill();
+      ctx.fillStyle = dry < 0.5 ? '#4a6420' : '#55583a';
+      ctx.beginPath();
+      ctx.ellipse(s.x - r * 0.06, s.y - r * 0.03, r * 0.66, r * 0.26, 0, 0, Math.PI * 2);
+      ctx.fill();
+      for (let i = 0; i < 5; i++) {
+        const a = hash2(s.seed, i, 11) * Math.PI * 2;
+        const d = r * (1.1 + 0.4 * hash2(s.seed, i, 13));
+        ctx.beginPath();
+        ctx.ellipse(s.x + Math.cos(a) * d, s.y + Math.sin(a) * d * 0.42, 1.2 + r * 0.05, (1.2 + r * 0.05) * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (dry < 1) {
+        ctx.globalAlpha = alpha * (1 - dry) * 0.7;
+        ctx.fillStyle = '#c8e070';
+        ctx.beginPath();
+        ctx.ellipse(s.x - r * 0.25, s.y - r * 0.1, r * 0.18, r * 0.05, -0.2, 0, Math.PI * 2);
+        ctx.fill();
       }
     }
     ctx.restore();

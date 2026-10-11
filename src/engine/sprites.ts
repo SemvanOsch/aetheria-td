@@ -10,6 +10,7 @@ import type { PlayerSpriteConfig } from '../domain/playerSprite';
 import type { Proficiency } from '../domain/proficiency';
 import { ease, shade, withAlpha } from './palette';
 import { GREATER_ORB_APEX, GREATER_ORB_CROUCH, GREATER_ORB_LAND } from './types';
+import { SLUDGE_FATHER_SCORCH } from './sewerBurst';
 import { arm, belt, forearm, capeSide, legFront, legSide, neck, pauldron, seg, torsoFront, torsoSide, walkLegsFront, walkLegsSide, type ArmLook, type LegLook } from './anatomy';
 import { clearFigureCache } from './figure';
 
@@ -2496,6 +2497,569 @@ export function drawManAtArms(
   ctx.restore();
 }
 
+/**
+ * Where the Paladin's sword hand is and which way the blade points (radians),
+ * for a view and a `raise` (0 carried at her side → 1 held up to the sky).
+ * Side view is authored facing +x. The sprite and the renderer's tip flare
+ * (`paladinBladeTip`) both read it, so they stay together.
+ */
+function paladinSwordPose(view: 'side' | 'front' | 'back', raise: number): { hx: number; hy: number; ang: number } {
+  const r = Math.max(0, Math.min(1, raise));
+  const k = ease.inOutSine(r);
+  const mix = (a: number, b: number) => a + (b - a) * k;
+  if (view === 'side') return { hx: mix(3.8, 8.6), hy: mix(1.4, -14), ang: mix(1.0, -1.38) };
+  // Her sword hand: our left from the front, our right from behind.
+  const s = view === 'front' ? -1 : 1;
+  // Point-down and a little out from her side, swinging out and up overhead.
+  return { hx: s * mix(7, 7.4), hy: mix(1.4, -19), ang: Math.PI / 2 - s * mix(0.25, Math.PI - 0.08) };
+}
+const PALADIN_BLADE = 13;
+
+/** The tip of the Paladin's raised sword in her local space (side view facing +x). */
+export function paladinBladeTip(view: 'side' | 'front' | 'back', raise: number): { x: number; y: number } {
+  const p = paladinSwordPose(view, raise);
+  return { x: p.hx + Math.cos(p.ang) * PALADIN_BLADE, y: p.hy + Math.sin(p.ang) * PALADIN_BLADE };
+}
+
+/**
+ * Procedural Paladin (`cap_brute2`): a holy knight of the crown in shining gilded
+ * plate. A fitted gold cuirass over an ivory surcoat with a gilt hem, layered
+ * gold pauldrons, faulds and tassets, plate legs with bright knee cops, an
+ * ivory cape (a big gold star on its back), and an open-faced gold sallet with
+ * a small white wing sweeping up from each side, her face showing under the brow
+ * and a long copper braid falling down her back. She carries a longsword point-
+ * down at her side. `raise` (0..1) is her heal: feet planted, the sword lifted
+ * high to the sky in her right hand. Same three authored views ('side' mirrored
+ * on `faceLeft`, 'front', 'back'); her faint motes and the heal's golden aura
+ * are drawn round her by the renderer.
+ */
+export function drawPaladin(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  view: 'side' | 'front' | 'back',
+  faceLeft: boolean,
+  phase: number,
+  raise = 0,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (view === 'side' && faceLeft) ctx.scale(-1, 1);
+
+  const TAU = Math.PI * 2;
+  const r = Math.max(0, Math.min(1, raise));
+  const plate = color;
+  const plateLit = shade(color, 0.3);
+  const plateDark = shade(color, -0.28);
+  const plateDeep = shade(color, -0.48);
+  const gleam = '#fff4cc';
+  const cloth = '#ece3cc'; // ivory surcoat and cape
+  const clothLit = shade(cloth, 0.12);
+  const clothDark = shade(cloth, -0.2);
+  const gold = '#f0c75a';
+  const hair = '#b8582a'; // copper
+  const hairDark = shade(hair, -0.32);
+  const hairLit = shade(hair, 0.22);
+  const skin = '#f0c8a6';
+  const leather = '#5a3a24';
+  const steel = '#e2e8ef';
+  const steelDark = '#9aa6b4';
+  const feather = '#f6f2e8';
+  const featherDark = '#cfc6b4';
+  const legs: LegLook = { cloth: plateDark, boot: plateDeep, w: 3.7, bootUp: 0.85, knee: plateLit, toe: 2.4 };
+  const gauntlet: ArmLook = { sleeve: plateDark, hand: plateDeep, w: 2.8, cuff: plate };
+
+  // Planting her feet to raise the sword: the stride settles to a stance.
+  const ph = phase * (1 - r);
+  const bob = Math.abs(Math.sin(ph)) * (1 - r);
+  const sword = paladinSwordPose(view, r);
+  // On the march the blade swings a touch with the stride.
+  const swordAng = sword.ang + Math.sin(ph) * 0.06 * (1 - r);
+
+  /** Her longsword from the hand along `ang`: pommel and grip behind, guard, blade. */
+  const drawSword = (hx: number, hy: number, ang: number) => {
+    const c = Math.cos(ang);
+    const s = Math.sin(ang);
+    ctx.strokeStyle = leather; // grip
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.moveTo(hx - c * 2.4, hy - s * 2.4);
+    ctx.lineTo(hx + c * 1.4, hy + s * 1.4);
+    ctx.stroke();
+    ctx.fillStyle = gold; // pommel
+    ctx.beginPath();
+    ctx.arc(hx - c * 2.9, hy - s * 2.9, 1, 0, TAU);
+    ctx.fill();
+    const gx = hx + c * 1.7;
+    const gy = hy + s * 1.7;
+    ctx.strokeStyle = gold; // crossguard, its quillons curling toward the blade
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(gx + s * 3 + c * 0.6, gy - c * 3 + s * 0.6);
+    ctx.lineTo(gx + s * 2.6, gy - c * 2.6);
+    ctx.lineTo(gx - s * 2.6, gy + c * 2.6);
+    ctx.lineTo(gx - s * 3 + c * 0.6, gy + c * 3 + s * 0.6);
+    ctx.stroke();
+    const bx = gx + c * 0.5;
+    const by = gy + s * 0.5;
+    const tx = hx + c * PALADIN_BLADE;
+    const ty = hy + s * PALADIN_BLADE;
+    const nx = tx - c * 2.2;
+    const ny = ty - s * 2.2;
+    ctx.fillStyle = steel;
+    ctx.beginPath();
+    ctx.moveTo(bx + s * 1.05, by - c * 1.05);
+    ctx.lineTo(nx + s * 0.85, ny - c * 0.85);
+    ctx.lineTo(tx, ty);
+    ctx.lineTo(nx - s * 0.85, ny + c * 0.85);
+    ctx.lineTo(bx - s * 1.05, by + c * 1.05);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = steelDark; // the shaded half of the blade
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(tx, ty);
+    ctx.lineTo(nx - s * 0.85, ny + c * 0.85);
+    ctx.lineTo(bx - s * 1.05, by + c * 1.05);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = shade(steelDark, -0.2); // fuller
+    ctx.lineWidth = 0.4;
+    ctx.beginPath();
+    ctx.moveTo(bx + c * 0.6, by + s * 0.6);
+    ctx.lineTo(bx + c * 6.5, by + s * 6.5);
+    ctx.stroke();
+    ctx.fillStyle = gold; // ricasso collar
+    ctx.beginPath();
+    ctx.arc(bx, by, 0.7, 0, TAU);
+    ctx.fill();
+  };
+
+  /** A small four-point glint on polished gold. */
+  const glint = (x: number, y: number, s: number) => {
+    ctx.fillStyle = gleam;
+    ctx.beginPath();
+    ctx.moveTo(x, y - s);
+    ctx.lineTo(x + s * 0.28, y - s * 0.28);
+    ctx.lineTo(x + s, y);
+    ctx.lineTo(x + s * 0.28, y + s * 0.28);
+    ctx.lineTo(x, y + s);
+    ctx.lineTo(x - s * 0.28, y + s * 0.28);
+    ctx.lineTo(x - s, y);
+    ctx.lineTo(x - s * 0.28, y - s * 0.28);
+    ctx.closePath();
+    ctx.fill();
+  };
+
+  /** A white feathered wing on her helm, rooted at (x, y), sweeping up and out to `dir`. */
+  const wing = (x: number, y: number, dir: number, len: number, lift: number) => {
+    for (let i = 2; i >= 0; i--) {
+      // Three feathers fanning from the root, the longest on top.
+      const l = len * (1 - i * 0.2);
+      const tx = x + dir * l;
+      const ty = y - lift * (1 - i * 0.28);
+      ctx.fillStyle = i === 0 ? feather : shade(feather, -0.06 * i);
+      ctx.beginPath();
+      ctx.moveTo(x, y + i * 0.9);
+      ctx.quadraticCurveTo(x + dir * l * 0.35, ty - 0.6, tx, ty);
+      ctx.quadraticCurveTo(x + dir * l * 0.55, ty + 2.2, x, y + 1.4 + i * 0.9);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.strokeStyle = featherDark; // the quill of the top feather
+    ctx.lineWidth = 0.4;
+    ctx.beginPath();
+    ctx.moveTo(x, y + 0.6);
+    ctx.quadraticCurveTo(x + dir * len * 0.4, y - lift * 0.8, x + dir * len * 0.85, y - lift * 0.95);
+    ctx.stroke();
+    ctx.fillStyle = gold; // the gilt socket it rises from
+    ctx.beginPath();
+    ctx.arc(x, y + 0.8, 0.8, 0, TAU);
+    ctx.fill();
+  };
+
+  /** Her copper braid hanging from (x0, y0) down to (x1, y1), bowing out by `bow`. */
+  const braid = (x0: number, y0: number, x1: number, y1: number, bow: number) => {
+    const n = 6;
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1);
+      const x = x0 + (x1 - x0) * t + bow * 4 * t * (1 - t);
+      const y = y0 + (y1 - y0) * t;
+      const w = 1.4 - t * 0.45;
+      ctx.fillStyle = i % 2 ? hairDark : hair;
+      ctx.beginPath();
+      ctx.ellipse(x, y, w, 1.25, 0, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = hairLit;
+      ctx.beginPath();
+      ctx.ellipse(x - w * 0.3, y - 0.3, w * 0.4, 0.4, 0, 0, TAU);
+      ctx.fill();
+    }
+    const ex = x1;
+    const ey = y1 + 1;
+    ctx.fillStyle = gold; // the tie
+    ctx.fillRect(ex - 0.9, ey - 0.4, 1.8, 0.9);
+    ctx.fillStyle = hair; // the tuft below it
+    ctx.beginPath();
+    ctx.moveTo(ex - 0.9, ey + 0.4);
+    ctx.quadraticCurveTo(ex, ey + 3.4, ex + 0.9, ey + 0.4);
+    ctx.closePath();
+    ctx.fill();
+  };
+
+  if (view === 'side') {
+    // --- Profile (walking along the row) ---
+    const swing = Math.sin(ph);
+    walkLegsSide(ctx, ph, { hipY: 4, footY: 12, stride: 3, look: legs, lift: 1.3 });
+
+    ctx.save();
+    ctx.translate(0, -bob * 0.8);
+
+    // The ivory cape and the braid down her back over it.
+    capeSide(ctx, -0.4, -8.6, 17.5, 4.4, cloth, 0.25 + r * 0.35, gold);
+    braid(-3.4, -10.8, -5 - swing * 0.4 * (1 - r), -1.8, -0.6);
+
+    // Far arm, hanging behind the body and swinging against the stride.
+    arm(ctx, -1, -6.6, -2.2 - swing * 1.6 * (1 - r), 0.8, { ...gauntlet, sleeve: plateDeep }, 1.2);
+
+    // Ivory surcoat to the knee with a gilt hem, then the gold cuirass over it.
+    torsoSide(ctx, {
+      color: cloth, lit: clothLit, dark: clothDark,
+      top: -9.2, waistY: 0.4, hemY: 8.4, chest: 5.4, back: 4.8, waist: 3.8, hemF: 6, hemB: 6.6,
+    });
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-6.5, 8.4);
+    ctx.quadraticCurveTo(0, 9.7, 5.9, 8.2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-4.8, -8.6);
+    ctx.quadraticCurveTo(-5.6, -4, -4, 0.8);
+    ctx.lineTo(3.6, 1);
+    ctx.quadraticCurveTo(4.6, -1, 5.6, -3.8);
+    ctx.quadraticCurveTo(6.2, -6.4, 3.8, -8.6);
+    ctx.quadraticCurveTo(-0.6, -9.6, -4.8, -8.6);
+    ctx.closePath();
+    ctx.fillStyle = plate;
+    ctx.fill();
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = plateLit;
+    ctx.beginPath();
+    ctx.ellipse(3.4, -4.8, 2.2, 3.2, -0.2, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = plateDark;
+    ctx.beginPath();
+    ctx.ellipse(-4.6, -3.6, 1.4, 4.6, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+    glint(4.2, -5.6, 1.4);
+    // Faulds over the hips, the belt, and a tasset hanging over the thigh.
+    for (const [y, c] of [[0.8, plate], [2.2, plateDark]] as const) {
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.moveTo(-4.4, y);
+      ctx.quadraticCurveTo(0, y + 0.9, 4.6, y);
+      ctx.lineTo(4.8, y + 1.5);
+      ctx.quadraticCurveTo(0, y + 2.4, -4.6, y + 1.5);
+      ctx.closePath();
+      ctx.fill();
+    }
+    belt(ctx, -4.4, 4.6, 4.1, leather, gold, 0.6, 1.1, 3.4);
+    ctx.fillStyle = plate;
+    ctx.beginPath();
+    ctx.moveTo(0.4, 4.6);
+    ctx.lineTo(4.4, 4.4);
+    ctx.lineTo(4.8, 7.6);
+    ctx.quadraticCurveTo(2.6, 8.4, 0.6, 7.6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = plateLit;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(0.6, 6.1);
+    ctx.lineTo(4.6, 6);
+    ctx.stroke();
+
+    // Sword arm: the blade carried point-down at her side, or held to the sky.
+    drawSword(sword.hx, sword.hy, swordAng);
+    arm(ctx, 0.8, -6.6, sword.hx, sword.hy, gauntlet, 1);
+
+    // Gorget and layered pauldron over the shoulder.
+    ctx.fillStyle = plate;
+    ctx.beginPath();
+    ctx.ellipse(0.4, -8.8, 3.4, 1.5, 0, 0, TAU);
+    ctx.fill();
+    pauldron(ctx, 0.2, -5.4, 3.3, plateDark, -0.1);
+    pauldron(ctx, 0, -7.3, 4, plate, -0.15);
+    glint(-0.6, -8.6, 1.1);
+
+    // Head: her face in the open front of a winged gold sallet.
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.ellipse(1.8, -12, 2.9, 3, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = hair; // a lock of copper at the temple under the brow
+    ctx.beginPath();
+    ctx.ellipse(0.6, -12.6, 1, 1.8, 0.2, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = plate; // the shell: domed crown, cheek guard, a tail flared over the nape
+    ctx.beginPath();
+    ctx.moveTo(4.4, -13.6);
+    ctx.quadraticCurveTo(4, -17.8, -0.2, -17.9);
+    ctx.quadraticCurveTo(-4.6, -17.6, -4.6, -12.8);
+    ctx.lineTo(-6.6, -9.8);
+    ctx.quadraticCurveTo(-4.6, -9.1, -2.4, -10.4);
+    ctx.lineTo(-0.4, -10.2);
+    ctx.quadraticCurveTo(0.2, -12, -0.2, -13.4);
+    ctx.lineTo(4.4, -13.6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = plateLit;
+    ctx.beginPath();
+    ctx.ellipse(0.8, -16.2, 2.3, 1, -0.15, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = plateLit; // the brow edge
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(-0.2, -13.5);
+    ctx.lineTo(4.4, -13.7);
+    ctx.stroke();
+    ctx.strokeStyle = plateDark; // the tail's lame line
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(-4.6, -12);
+    ctx.quadraticCurveTo(-3.2, -11.4, -1.4, -11.8);
+    ctx.stroke();
+    glint(1.6, -16.6, 1.2);
+    wing(-1.6, -14.6, -1, 6.4, 6.2);
+    drawProfileFace(ctx, 1.9, -11.8, 2.5, skin, { lashes: true, brow: hairDark });
+
+    ctx.restore();
+    ctx.restore();
+    return;
+  }
+
+  // --- Front / back (marching toward or away from the viewer) ---
+  const back = view === 'back';
+  const hang = back ? -1 : 1; // her free (left) hand: our right in front, our left behind
+  walkLegsFront(ctx, ph, { hipY: 4, footY: 12, sep: 2.8, look: legs, back, lift: 2 });
+
+  ctx.save();
+  ctx.translate(0, -bob * 0.8);
+
+  const capePath = () => {
+    ctx.beginPath();
+    ctx.moveTo(-5.6, -8.8);
+    ctx.quadraticCurveTo(-8.6, 1, -8.4, 10.6);
+    ctx.quadraticCurveTo(0, 12.4, 8.4, 10.6);
+    ctx.quadraticCurveTo(8.6, 1, 5.6, -8.8);
+    ctx.quadraticCurveTo(0, -10, -5.6, -8.8);
+    ctx.closePath();
+  };
+  const swordArm = () => {
+    drawSword(sword.hx, sword.hy, swordAng);
+    arm(ctx, -hang * 5.8, -6.4, sword.hx, sword.hy, gauntlet, hang * (0.6 - r * 1.2));
+  };
+
+  if (back) {
+    // From behind both arms hang at her sides behind the cape, and a raised
+    // sword arm climbs out over its shoulder.
+    arm(ctx, -5.8, -6.4, -7, 1.4, gauntlet, 0.6);
+    swordArm();
+    capePath();
+    ctx.fillStyle = cloth;
+    ctx.fill();
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = clothDark; // folds
+    for (const fx of [-5.4, -1.8, 2, 5.6]) {
+      ctx.beginPath();
+      ctx.ellipse(fx, 4, 0.9, 9, 0, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-8.4, 10.6);
+    ctx.quadraticCurveTo(0, 12.4, 8.4, 10.6);
+    ctx.stroke();
+    fillStar8(ctx, 0, 3, 3.4, gold);
+    braid(0, -10.4, Math.sin(ph) * 0.5, -1.4, 0);
+    for (const side of [-1, 1]) pauldron(ctx, side * 5.8, -6.8, 3.8, plateDark, side * 0.25);
+    // The back of the sallet: a gold dome whose tail flares out over the nape,
+    // the braid coming out from under it.
+    ctx.fillStyle = plate;
+    ctx.beginPath();
+    ctx.moveTo(-4.5, -11);
+    ctx.quadraticCurveTo(-4.9, -18.2, 0, -18.4);
+    ctx.quadraticCurveTo(4.9, -18.2, 4.5, -11);
+    ctx.lineTo(5.6, -9.4);
+    ctx.quadraticCurveTo(0, -8.4, -5.6, -9.4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = plateDark;
+    ctx.beginPath();
+    ctx.moveTo(-5.6, -9.4);
+    ctx.quadraticCurveTo(0, -8.4, 5.6, -9.4);
+    ctx.lineTo(4.6, -11);
+    ctx.quadraticCurveTo(0, -10.2, -4.6, -11);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = plateDeep; // the ridge down the back of the crown
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(0, -18.2);
+    ctx.lineTo(0, -11);
+    ctx.stroke();
+    ctx.fillStyle = plateLit;
+    ctx.beginPath();
+    ctx.ellipse(-1.8, -16, 1.5, 0.9, 0, 0, TAU);
+    ctx.fill();
+    for (const side of [-1, 1]) wing(side * 4, -14.6, side, 4.8, 6);
+  } else {
+    // The cape's lining behind her, showing past her sides.
+    capePath();
+    ctx.fillStyle = clothDark;
+    ctx.fill();
+    // Free arm hanging at her side.
+    arm(ctx, 5.8, -6.4, 7, 1.4, gauntlet, -0.6);
+    // Ivory surcoat, the gold cuirass with a ridge down its middle, faulds,
+    // belt, tassets and the gilt hem.
+    torsoFront(ctx, {
+      color: cloth, lit: clothLit, dark: clothDark,
+      top: -9.2, waistY: 0.4, hemY: 8.4, shoulder: 6.6, waist: 4.2, hem: 6.6,
+    });
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-6.6, 8.4);
+    ctx.quadraticCurveTo(0, 9.9, 6.6, 8.4);
+    ctx.stroke();
+    ctx.strokeStyle = clothDark; // the surcoat's front split
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(0, 4.8);
+    ctx.lineTo(0, 9.1);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-5, -8.6);
+    ctx.quadraticCurveTo(-6, -4, -4.2, 0.8);
+    ctx.quadraticCurveTo(0, 1.8, 4.2, 0.8);
+    ctx.quadraticCurveTo(6, -4, 5, -8.6);
+    ctx.quadraticCurveTo(0, -9.6, -5, -8.6);
+    ctx.closePath();
+    ctx.fillStyle = plate;
+    ctx.fill();
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = plateLit; // the cuirass's curves
+    ctx.beginPath();
+    ctx.ellipse(-2.2, -4.8, 1.9, 2.4, 0, 0, TAU);
+    ctx.ellipse(2.2, -4.8, 1.9, 2.4, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = plateDark;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(0, -8.8);
+    ctx.lineTo(0, 0.9);
+    ctx.stroke();
+    glint(-2.4, -5.6, 1.4);
+    for (const [y, c] of [[1, plate], [2.4, plateDark]] as const) {
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.moveTo(-4.6, y);
+      ctx.quadraticCurveTo(0, y + 1, 4.6, y);
+      ctx.lineTo(4.9, y + 1.5);
+      ctx.quadraticCurveTo(0, y + 2.5, -4.9, y + 1.5);
+      ctx.closePath();
+      ctx.fill();
+    }
+    belt(ctx, -4.6, 4.6, 4.3, leather, gold, 0.8, 1.1);
+    for (const side of [-1, 1]) {
+      ctx.fillStyle = plate;
+      ctx.beginPath();
+      ctx.moveTo(side * 1.2, 4.9);
+      ctx.lineTo(side * 4.8, 4.7);
+      ctx.lineTo(side * 5.2, 7.8);
+      ctx.quadraticCurveTo(side * 3.2, 8.6, side * 1.4, 7.8);
+      ctx.closePath();
+      ctx.fill();
+    }
+    swordArm();
+    for (const side of [-1, 1]) {
+      pauldron(ctx, side * 6, -5, 3.2, plateDark, side * 0.25);
+      pauldron(ctx, side * 5.8, -6.8, 3.8, plate, side * 0.25);
+    }
+    glint(-6.2, -8.2, 1.1);
+    ctx.fillStyle = plate; // gorget
+    ctx.beginPath();
+    ctx.ellipse(0, -8.8, 3.6, 1.5, 0, 0, TAU);
+    ctx.fill();
+
+    // Head: her face under the brow of the open sallet, cheek guards either side.
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.ellipse(0, -12, 3, 3.3, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = hair; // copper at the brow and temples
+    ctx.beginPath();
+    ctx.ellipse(0, -14, 3.1, 1.1, 0, 0, TAU);
+    ctx.ellipse(-2.8, -12.2, 0.9, 2, 0, 0, TAU);
+    ctx.ellipse(2.8, -12.2, 0.9, 2, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = plate;
+    ctx.beginPath();
+    ctx.moveTo(-4.5, -13.6);
+    ctx.quadraticCurveTo(-4.8, -18.2, 0, -18.4);
+    ctx.quadraticCurveTo(4.8, -18.2, 4.5, -13.6);
+    ctx.quadraticCurveTo(0, -14.8, -4.5, -13.6);
+    ctx.closePath();
+    ctx.fill();
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(side * 4.5, -13.8);
+      ctx.lineTo(side * 3, -13.6);
+      ctx.quadraticCurveTo(side * 2.6, -11, side * 2.1, -9.6);
+      ctx.lineTo(side * 4.3, -9.4);
+      ctx.quadraticCurveTo(side * 4.9, -11.6, side * 4.5, -13.8);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = plateLit;
+    ctx.beginPath();
+    ctx.ellipse(-1.4, -16.4, 1.8, 0.9, 0, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = plateLit;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(-4.4, -13.7);
+    ctx.quadraticCurveTo(0, -14.9, 4.4, -13.7);
+    ctx.stroke();
+    ctx.strokeStyle = plateDark;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(0, -18.3);
+    ctx.lineTo(0, -14.6);
+    ctx.stroke();
+    glint(-2, -16.8, 1.1);
+    for (const side of [-1, 1]) wing(side * 4.2, -14.8, side, 4.8, 6);
+    drawProfileFace(ctx, -0.3, -11.8, 2.7, skin, { twoEyes: true, lashes: true, brow: hairDark });
+  }
+
+  // Raised high, the sword hand and blade pass in front of her helm's wing.
+  if (r > 0.3) {
+    drawSword(sword.hx, sword.hy, swordAng);
+    forearm(ctx, -hang * 5.8, -6.4, sword.hx, sword.hy, gauntlet, hang * (0.6 - r * 1.2));
+  }
+
+  ctx.restore();
+  ctx.restore();
+}
+
 /** Fresh sludge running down a sludge foe's body, and its wet glints. */
 const SLUDGE_OOZE = '#a6dc3c';
 const SLUDGE_GLINT = '#e2f8a0';
@@ -3677,6 +4241,557 @@ export function drawSludgeArm(ctx: CanvasRenderingContext2D, a: SludgeArmPose): 
   }
   glints([[a.hand.x - 5 * k, a.hand.y - 6 * k, 3 * k], [prev.x, prev.y - 8 * k, 2.4 * k]]);
   ctx.restore();
+}
+
+// The Sludge Father's walking form (`boss10`, The Getaway): what is left of it
+// once the daylight has burned it down (`sewerBurst.ts`).
+const SF_BOSS_SCALE = 1.5;
+const SF_CRUST = '#6d6844';
+const SF_CRUST_LIT = '#928b5e';
+const SF_CRUST_CRACK = '#2a2816';
+
+/**
+ * Procedural Sludge Father, shrunk to board size (`boss10`, The Getaway boss),
+ * drawn 1.5×: the same creature as the cistern's giant, crawling along on its
+ * huge hands. A heaving mass of sludge it drags behind it, the hump of its back
+ * studded with small glowing pustule-eyes, a raw red wound torn across its
+ * shoulder, and the head sunk low and forward: a crown of dripping lumps, a
+ * scowling V of a brow over two great glowing eyes, a fanged maw strung with
+ * slaver. Its arms pull it along in turn: each hand planted flat, the body
+ * dragging itself over it, then lifted dripping and swung forward again,
+ * while a swell runs back along the mass. Sun-baked crust plates on its upper
+ * surfaces (`scorch`, 0..1: none on the wet giant that bursts out, the most as
+ * the light first burns it, `SLUDGE_FATHER_SCORCH` as it walks). `rear`
+ * (0..1, front view, its entrance) heaves it up with both arms flung high and
+ * its jaws gaping: the roar, and the thrashing in the light. Same three
+ * authored views ('side' mirrored on `faceLeft`, 'front', 'back'); everything
+ * animates off the walk `phase`, so walk frames stay cacheable.
+ */
+export function drawSludgeFatherBoss(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  view: 'side' | 'front' | 'back',
+  faceLeft: boolean,
+  phase: number,
+  rear = 0,
+  scorch = SLUDGE_FATHER_SCORCH,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (view === 'side' && faceLeft) ctx.scale(-1, 1);
+  ctx.scale(SF_BOSS_SCALE, SF_BOSS_SCALE);
+
+  const TAU = Math.PI * 2;
+  const frac = (v: number) => v - Math.floor(v);
+  const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
+  const rr = Math.max(0, Math.min(1, rear));
+  const slime = color;
+  const slimeLit = shade(color, 0.22);
+  const slimeDark = shade(color, -0.3);
+  const slimeDeep = shade(color, -0.55);
+  const ooze = SLUDGE_OOZE;
+  const { grow, drip, drop, glints, lumps } = sludgeKit(ctx, phase, slime);
+  const breathe = Math.sin(phase) * 0.6; // the heave of each pull
+
+  /**
+   * One arm's crawl, offset `off` of a stride: planted for the first half (its
+   * `reach` running from +1, well forward, to -1 as the body drags over it),
+   * then lifted and swung forward again over the second.
+   */
+  const gait = (off: number) => {
+    const u = frac(phase / TAU + off);
+    if (u < 0.5) return { reach: 1 - 4 * u, lift: 0, planted: true };
+    const k = (u - 0.5) / 0.5;
+    return { reach: -1 + 2 * ease.inOutSine(k), lift: Math.sin(Math.PI * k), planted: false };
+  };
+  /** A thick arm from the shoulder through the elbow to the wrist, a drip off the elbow. */
+  const limb = (sx: number, sy: number, ex: number, ey: number, hx: number, hy: number, fill: string, off: number) => {
+    seg(ctx, sx, sy, ex, ey, 4.2, 3.4, fill);
+    seg(ctx, ex, ey, hx, hy, 3.4, 2.6, fill);
+    ctx.fillStyle = shade(fill, 0.16);
+    ctx.beginPath();
+    ctx.ellipse((sx + ex) / 2 - 0.8, (sy + ey) / 2 - 1.4, 2.2, 1.2, Math.atan2(ey - sy, ex - sx), 0, TAU);
+    ctx.fill();
+    drip(ex, ey + 2.8, grow(2.2, off), 0.8, fill);
+  };
+  /**
+   * A huge hand: a lumpy palm with four fingers and a thumb fanned along `ang`.
+   * Planted it lies flat (squashed in depth) with the fingers splayed; raised,
+   * the fingers droop and run off into drips.
+   */
+  const hand = (x: number, y: number, ang: number, planted: boolean, spread: number, fill: string, off: number) => {
+    const depth = planted ? 0.5 : 1;
+    const fan = (o: number) => ang + o * (0.55 + 0.5 * spread);
+    const fingers: [number, number, number][] = [[-0.75, 3.4, 1.15], [-0.25, 4, 1.25], [0.25, 3.8, 1.2], [0.72, 3.2, 1.1]];
+    for (const [o, len, w] of fingers) {
+      const a = fan(o);
+      const fx = x + Math.cos(a) * (2.4 + len);
+      const fy = y + Math.sin(a) * (2.4 + len) * depth;
+      seg(ctx, x + Math.cos(a) * 1.8, y + Math.sin(a) * 1.8 * depth, fx, fy, w, w * 0.7, fill);
+      if (!planted) drip(fx, fy + 0.4, grow(1.6, off + o), 0.45, fill);
+    }
+    const th = ang - 1.5 * (0.7 + 0.3 * spread);
+    seg(ctx, x + Math.cos(th) * 1.4, y + Math.sin(th) * 1.4 * depth, x + Math.cos(th) * 4.6, y + Math.sin(th) * 4.6 * depth, 1.25, 0.9, fill);
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 3.2, 3.2 * (planted ? 0.62 : 1), 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = shade(fill, 0.16); // knuckles
+    for (const [o] of fingers) {
+      const a = fan(o);
+      ctx.beginPath();
+      ctx.arc(x + Math.cos(a) * 2.3, y + Math.sin(a) * 2.3 * depth - 0.3, 0.65, 0, TAU);
+      ctx.fill();
+    }
+  };
+  /** A sun-baked crust plate, showing once `scorch` passes `th`: a dry slab with cracks. */
+  const crust = (th: number, pts: number[][], cracks: number[][]) => {
+    const a = Math.max(0, Math.min(1, (scorch - th) / 0.2));
+    if (a <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = SF_CRUST;
+    ctx.beginPath();
+    pts.forEach(([px, py], i) => (i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)));
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = SF_CRUST_LIT; // the edge curling up, catching the sun
+    ctx.lineWidth = 0.35;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < Math.ceil(pts.length / 2) + 1; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.stroke();
+    ctx.strokeStyle = SF_CRUST_CRACK;
+    ctx.lineWidth = 0.35;
+    ctx.beginPath();
+    for (const [x0, y0, x1, y1] of cracks) {
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+    }
+    ctx.stroke();
+    ctx.restore();
+  };
+  /** Small glowing pustule-eyes, each pulsing on its own beat. */
+  const pustules = (pts: number[][]) => {
+    pts.forEach(([px, py], i) => {
+      ctx.fillStyle = SF_DEEP;
+      ctx.beginPath();
+      ctx.ellipse(px, py, 1.15, 0.8, 0, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = SF_EYE;
+      ctx.globalAlpha = 0.7 + 0.3 * Math.sin(phase + i * 1.7);
+      ctx.beginPath();
+      ctx.ellipse(px, py, 0.75, 0.48, 0, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+  };
+  /** A raw red wound in the sludge, glowing at its core. */
+  const wound = (x0: number, y0: number, x1: number, y1: number, w = 1.2) => {
+    seg(ctx, x0, y0, x1, y1, w, w * 0.6, SF_WOUND);
+    seg(ctx, x0 + (x1 - x0) * 0.2, y0 + (y1 - y0) * 0.2, x1 - (x1 - x0) * 0.2, y1 - (y1 - y0) * 0.2, w * 0.45, w * 0.3, SF_WOUND_LIT);
+  };
+  /** The hump of its back, lumpy along the top and lit on its crown. */
+  const hump = (hx: number, hy: number, hrx: number, hry: number, fill: string) => {
+    const top: number[][] = [];
+    for (let k = 0; k <= 8; k++) {
+      const a = Math.PI + (k / 8) * Math.PI;
+      top.push([hx + Math.cos(a) * hrx * 0.92, hy + Math.sin(a) * hry * 0.92, 2 + 0.8 * Math.sin(k * 1.7)]);
+    }
+    lumps(top, fill);
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(hx, hy, hrx, hry, 0, 0, TAU);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.clip();
+    ctx.fillStyle = slimeLit;
+    ctx.beginPath();
+    ctx.ellipse(hx - hrx * 0.25, hy - hry * 0.48, hrx * 0.52, hry * 0.32, -0.2, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = slimeDark;
+    ctx.beginPath();
+    ctx.ellipse(hx, hy + hry * 0.9, hrx * 1.05, hry * 0.45, 0, 0, TAU);
+    ctx.fill();
+    // Fresh sludge running down it.
+    seg(ctx, hx - hrx * 0.55, hy - hry * 0.6, hx - hrx * 0.62, hy + hry * 0.1, 0.55, 0.3, ooze);
+    seg(ctx, hx + hrx * 0.3, hy - hry * 0.85, hx + hrx * 0.26, hy - hry * 0.25, 0.5, 0.25, ooze);
+    ctx.restore();
+  };
+
+  // A wide puddle it drags along.
+  ctx.fillStyle = slimeDeep;
+  ctx.beginPath();
+  if (view === 'side') {
+    ctx.ellipse(-4, 12.2, 18.5, 2.2, 0, 0, TAU);
+    ctx.ellipse(-22.6, 12.4, 2.4, 0.8, 0, 0, TAU);
+  } else {
+    ctx.ellipse(0, 12.4, 19, 2.6, 0, 0, TAU);
+    ctx.ellipse(-15.6, 13.4, 2.2, 0.7, 0, 0, TAU);
+    ctx.ellipse(16.4, 13.2, 1.8, 0.6, 0, 0, TAU);
+  }
+  ctx.fill();
+
+  if (view === 'side') {
+    // --- Profile (hauling itself along the row, head low and forward) ---
+    const near = gait(0);
+    const far = gait(0.5);
+    const shX = 5;
+    const shY = -9 + breathe;
+    const wrist = (g: ReturnType<typeof gait>) => ({ x: 10 + g.reach * 6, y: 10.6 - g.lift * 4.6 });
+
+    // Far arm, a shade darker, behind the body.
+    const fw = wrist(far);
+    limb(shX - 1.5, shY - 0.4, shX + 1 + (fw.x - shX) * 0.4, (shY + fw.y) / 2 - 2.6, fw.x - 1, fw.y - 0.6, slimeDark, 0.15);
+    hand(fw.x - 1 + 1.4, fw.y - 0.4, far.planted ? 0 : 1.1, far.planted, far.planted ? 1 : 0.3, slimeDark, 0.2);
+
+    // The mass it drags behind it, a swell running back along its top.
+    const sw = frac(phase / TAU);
+    lumps([[-18, 5, 2.8], [-13, 0, 3.2], [7 - 24 * sw, -3, 0.2 + 2.6 * Math.sin(Math.PI * sw)]], slime);
+    const mass = () => {
+      ctx.beginPath();
+      ctx.moveTo(-23, 12);
+      ctx.quadraticCurveTo(-22, 5, -14, 0.4);
+      ctx.quadraticCurveTo(-6, -3.6, 6, -3);
+      ctx.quadraticCurveTo(14, -1.2, 14, 6);
+      ctx.quadraticCurveTo(14, 11, 10, 12);
+      ctx.closePath();
+    };
+    mass();
+    ctx.fillStyle = slime;
+    ctx.fill();
+    ctx.save();
+    mass();
+    ctx.clip();
+    ctx.fillStyle = slimeDark;
+    ctx.beginPath();
+    ctx.ellipse(-4, 12.4, 21, 4.4, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = slimeLit;
+    ctx.beginPath();
+    ctx.ellipse(-8, -0.6, 9, 1.8, -0.1, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // The hump of its back rearing over the front of the mass.
+    hump(-2, -10 + breathe * 0.8, 11.5, 10.5, slime);
+    pustules([[-7, -14.6 + breathe * 0.8], [-1, -17.4 + breathe * 0.8], [4, -14.2 + breathe * 0.8], [-9.4, -7.6 + breathe * 0.8]]);
+    // Its shoulder, with the wound torn across it.
+    ctx.fillStyle = slime;
+    ctx.beginPath();
+    ctx.arc(shX, shY - 1, 5.2, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = slimeLit;
+    ctx.beginPath();
+    ctx.ellipse(shX - 1.2, shY - 3.4, 2.6, 1.4, -0.3, 0, TAU);
+    ctx.fill();
+    wound(shX - 3.4, shY - 4.6, shX + 1.6, shY + 0.4);
+
+    // The head, sunk low and thrust forward.
+    const hx = 11;
+    const hy = -4 + breathe * 0.5;
+    const R = 5.6;
+    const jaw = 0.15 + 0.85 * rr;
+    lumps([[hx - 4, hy - 4, 2], [hx - 1, hy - 5.6, 2.2], [hx + 2.6, hy - 4.8, 1.9]], slime);
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(hx, hy, R * 1.08, R, 0, 0, TAU);
+    ctx.fillStyle = slime;
+    ctx.fill();
+    ctx.clip();
+    ctx.fillStyle = slimeLit;
+    ctx.beginPath();
+    ctx.ellipse(hx - 1.4, hy - 3.2, 3.6, 2, -0.2, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = slimeDark;
+    ctx.beginPath();
+    ctx.ellipse(hx, hy + 5.4, 7, 2.6, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+    // The maw: a dark wedge at the front of the jaw, fanged, drooling.
+    ctx.fillStyle = SF_MAW;
+    ctx.beginPath();
+    ctx.moveTo(hx + 1.2, hy + 1.6);
+    ctx.lineTo(hx + R * 1.18, hy + 0.6);
+    ctx.lineTo(hx + R * 1.06, hy + 2.4 + jaw * 2.6);
+    ctx.quadraticCurveTo(hx + 3.2, hy + 3.4 + jaw * 2, hx + 1.2, hy + 1.6);
+    ctx.fill();
+    ctx.fillStyle = SF_TOOTH;
+    ctx.beginPath();
+    for (const tx of [3, 4.6, 6.1]) {
+      ctx.moveTo(hx + tx - 0.45, hy + 1.3 - tx * 0.12);
+      ctx.lineTo(hx + tx + 0.45, hy + 1.2 - tx * 0.12);
+      ctx.lineTo(hx + tx, hy + 2.2 - tx * 0.12 + jaw * 0.4);
+      ctx.closePath();
+    }
+    ctx.fill();
+    drip(hx + R * 0.9, hy + 2.6 + jaw * 2.4, grow(2.6, 0.1), 0.5, ooze);
+    // A scowling brow over one great glowing eye (the far one just showing).
+    ctx.fillStyle = slimeDark;
+    ctx.beginPath();
+    ctx.moveTo(hx - 0.8, hy - 3.2);
+    ctx.lineTo(hx + R * 1.16, hy - 1.7);
+    ctx.lineTo(hx + R * 1.06, hy - 0.6);
+    ctx.lineTo(hx - 0.4, hy - 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = SF_DEEP;
+    ctx.beginPath();
+    ctx.ellipse(hx + 3, hy - 0.6, 1.9, 1.2, 0.3, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = SF_EYE;
+    ctx.beginPath();
+    ctx.ellipse(hx + 3, hy - 0.6, 1.5, 0.85 * (1 + rr * 0.3), 0.3, 0, TAU);
+    ctx.ellipse(hx + 5.3, hy - 0.9, 0.5, 0.6, 0.3, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = SF_EYE_CORE;
+    ctx.beginPath();
+    ctx.arc(hx + 3.4, hy - 0.6, 0.42, 0, TAU);
+    ctx.fill();
+
+    // Near arm, pulling it along.
+    const nw = wrist(near);
+    limb(shX, shY, shX + 1.6 + (nw.x - shX) * 0.4, (shY + nw.y) / 2 - 2.4, nw.x, nw.y, slime, 0.6);
+    hand(nw.x + 1.4, nw.y + 0.2, near.planted ? 0 : 1.1, near.planted, near.planted ? 1 : 0.3, slime, 0.65);
+
+    // Drips off the hump and the mass, a drop from a raised hand.
+    drip(-10.6, -4 + breathe, grow(2.6, 0.4), 0.9);
+    drip(-1, 0.2, grow(2.2, 0.8), 0.8);
+    drip(13, 5, grow(1.8, 0.25), 0.7);
+    if (!near.planted) drop(nw.x + 1.4, nw.y + 4.4, 0.3, 1.1);
+    glints([[-6, -17, 1], [3, -15.6, 0.8], [hx - 2, hy - 4, 0.7], [-16, 2, 0.7]]);
+
+    // Sun-baked crust on everything the light falls on.
+    const by = breathe * 0.8;
+    crust(0, [[-9, -16.6 + by], [-4, -20.2 + by], [2, -19.8 + by], [5, -17 + by], [1, -14.8 + by], [-5, -15.2 + by]], [[-4, -20.2 + by, -2.6, -16 + by], [-2.6, -16 + by, 1.6, -16.8 + by], [-2.6, -16 + by, -6.4, -15.4 + by]]);
+    crust(0.12, [[hx - 3.4, hy - 4.6], [hx, hy - 5.8], [hx + 3.4, hy - 4], [hx + 1.6, hy - 2.8], [hx - 2.4, hy - 3]], [[hx, hy - 5.8, hx - 0.4, hy - 3]]);
+    crust(0.25, [[shX - 4, shY - 3.6], [shX + 1, shY - 5.4], [shX + 3.8, shY - 3], [shX + 0.4, shY - 1.6]], [[shX + 1, shY - 5.4, shX, shY - 2.4]]);
+    crust(0.45, [[-19, 3], [-14, -0.4], [-9, -1.6], [-11, 1.6], [-16, 3.6]], [[-14, -0.4, -13.4, 2.6]]);
+    crust(0.6, [[-12, -10 + by], [-9.6, -13.4 + by], [-6, -11.6 + by], [-8, -8.4 + by]], [[-9.6, -13.4 + by, -8.6, -10 + by]]);
+
+    ctx.restore();
+    return;
+  }
+
+  // --- Front / back (crawling toward or away from the viewer) ---
+  const back = view === 'back';
+  const heave = rr * 5; // reared up
+  const left = gait(0);
+  const right = gait(0.5);
+  const fill = back ? shade(color, -0.08) : slime;
+
+  /** One arm (`side` -1 screen-left, +1 right): crawling, or flung up as it rears. */
+  const frontArm = (side: -1 | 1, g: ReturnType<typeof gait>, fillArm: string, off: number, toFront: boolean) => {
+    const sx = side * 10.5;
+    const sy = -6.5 - heave + breathe * 0.5;
+    // Crawling, a hand forward is nearer the viewer (lower); seen from behind, higher.
+    const reachY = toFront ? 10 + g.reach * 1.6 : 5.6 - g.reach * 1.4;
+    const cx = side * (15.5 - g.lift);
+    const cy = reachY - g.lift * 5.2;
+    const hx = lerp(cx, side * 21, rr);
+    const hy = lerp(cy, -24 - heave * 0.5, rr);
+    const ex = side * lerp(18, 21, rr);
+    const ey = lerp((sy + cy) / 2 + 1, -9 - heave, rr);
+    limb(sx, sy, ex, ey, hx, hy, fillArm, off);
+    const planted = g.planted && rr < 0.5;
+    const ang = lerp(toFront ? Math.PI / 2 : -Math.PI / 2, -Math.PI / 2 + side * 0.45, rr);
+    hand(hx, hy, ang, planted, lerp(planted ? 1 : 0.35, 1, rr), fillArm, off + 0.1);
+    if (!planted && rr < 0.5) drop(hx, hy + 4.6, off, 1.1);
+  };
+
+  ctx.save();
+  // A slow roll from side to side as each arm pulls.
+  ctx.translate(0, 6);
+  ctx.rotate(Math.sin(phase) * 0.035 * (1 - rr));
+  ctx.translate(0, -6);
+
+  // Seen from behind, the arms reach away past the body: drawn first.
+  if (back) {
+    frontArm(-1, left, shade(color, -0.2), 0.2, false);
+    frontArm(1, right, shade(color, -0.2), 0.7, false);
+  }
+
+  // The hump rising behind the head (from behind, the whole of what we see).
+  const hy = (back ? -9.4 : -11) - heave * 0.8 + breathe * 0.6;
+  const hry = (back ? 13 : 11) + rr * 2;
+  hump(0, hy, back ? 15.5 : 14.5, hry, fill);
+  const dy = hy + 11;
+  pustules(
+    back
+      ? [[-9, -14 + dy], [-3, -19 + dy], [4, -18 + dy], [10, -13.6 + dy], [-12, -6 + dy], [12, -5.4 + dy], [0, -9.6 + dy], [-6, -2.6 + dy]]
+      : [[-9, -15 + dy], [-3, -19 + dy], [4, -18.4 + dy], [10, -14 + dy], [-12.4, -9 + dy], [12.4, -8.4 + dy]],
+  );
+  if (back) wound(4, -16 + dy, 11, -8 + dy, 1.4);
+
+  // The mass it drags, bulging out either side as it pulls.
+  lumps([[-13.4, 6.4, 3 + 0.5 * Math.sin(phase)], [13.4, 6.4, 3 - 0.5 * Math.sin(phase)]], fill);
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.ellipse(0, 6.2, 15.5, 6.6, 0, 0, TAU);
+  // The trunk heaving up out of it to the shoulders (stretching as it rears).
+  ctx.ellipse(0, -1.5 - heave * 0.6, 12.5, 8 + heave * 0.6, 0, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = slimeDark;
+  ctx.beginPath();
+  ctx.ellipse(0, 11, 14.5, 1.8, 0, 0, TAU);
+  ctx.fill();
+
+  // Shoulders heaving up either side.
+  for (const side of [-1, 1]) {
+    const sy = -7 - heave + breathe * 0.5;
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.arc(side * 10.5, sy, 6.2, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = slimeLit;
+    ctx.beginPath();
+    ctx.ellipse(side * 10.5 - 1.6, sy - 3, 3, 1.5, -0.3, 0, TAU);
+    ctx.fill();
+  }
+  if (!back) wound(-15, -11 - heave, -8, -5 - heave, 1.3);
+
+  if (back) {
+    // From behind, the head is hidden under the hump: just the run of sludge
+    // down between the shoulders and drips off the mass.
+    seg(ctx, 0.6, -6 - heave, 0.2, 2, 0.7, 0.4, ooze);
+    drip(-6, 11.4, grow(2.4, 0.4), 1);
+    drip(5.4, 11.6, grow(2, 0.8), 0.9);
+  } else {
+    // Arms either side of the head, then the head over their roots.
+    frontArm(-1, left, fill, 0.2, true);
+    frontArm(1, right, fill, 0.7, true);
+
+    const hx = 0;
+    const hyy = -2 - heave * 1.3 + breathe * 0.4;
+    const R = 8.4;
+    const s = R / 30;
+    lumps(
+      [[-20, -18, 8], [-10, -26, 9], [2, -29, 10], [14, -25, 9], [22, -16, 8]].map(([x, y, r]) => [hx + x * s, hyy + y * s, r * s]),
+      fill,
+    );
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(hx, hyy, R * 1.08, R, 0, 0, TAU);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.clip();
+    ctx.fillStyle = slimeLit;
+    ctx.beginPath();
+    ctx.ellipse(hx - R * 0.3, hyy - R * 0.55, R * 0.6, R * 0.35, -0.2, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = slimeDark;
+    ctx.beginPath();
+    ctx.ellipse(hx, hyy + R * 0.95, R * 1.2, R * 0.45, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // The maw: a dark slit at rest, gaping as it rears.
+    const jaw = 0.12 + 0.88 * rr;
+    const mwy = hyy + (12 + jaw * 3) * s;
+    const mrx = (13 + jaw * 4) * s;
+    const mry = (2.6 + jaw * 10) * s;
+    ctx.fillStyle = SF_MAW;
+    ctx.beginPath();
+    ctx.ellipse(hx, mwy, mrx, mry, 0, 0, TAU);
+    ctx.fill();
+    if (jaw > 0.3) {
+      ctx.fillStyle = SF_THROAT;
+      ctx.beginPath();
+      ctx.ellipse(hx, mwy + mry * 0.2, mrx * 0.55, mry * 0.55, 0, 0, TAU);
+      ctx.fill();
+    }
+    const edge = (x: number) => mry * Math.sqrt(Math.max(0, 1 - ((x - hx) / mrx) ** 2));
+    ctx.fillStyle = SF_TOOTH;
+    ctx.beginPath();
+    for (let i = 0; i < 7; i++) {
+      const tx = hx + (i - 3) * mrx * 0.27;
+      const l = (i % 2 === 0 ? 3.2 : 2) * s * (0.7 + jaw * 0.6);
+      const ty = mwy - edge(tx) + 0.1;
+      ctx.moveTo(tx - 1.2 * s, ty);
+      ctx.lineTo(tx + 1.2 * s, ty);
+      ctx.lineTo(tx, ty + l);
+      ctx.closePath();
+      if (i > 0 && i < 6) {
+        const by = mwy + edge(tx) - 0.1;
+        ctx.moveTo(tx - 1.1 * s, by);
+        ctx.lineTo(tx + 1.1 * s, by);
+        ctx.lineTo(tx, by - l * 0.8);
+        ctx.closePath();
+      }
+    }
+    ctx.fill();
+    ctx.strokeStyle = ooze; // slaver strung across the jaws
+    ctx.lineWidth = 0.3;
+    ctx.beginPath();
+    ctx.moveTo(hx - mrx * 0.5, mwy - mry * 0.8);
+    ctx.quadraticCurveTo(hx - mrx * 0.6, mwy, hx - mrx * 0.45, mwy + mry * 0.85);
+    ctx.moveTo(hx + mrx * 0.35, mwy - mry * 0.85);
+    ctx.quadraticCurveTo(hx + mrx * 0.45, mwy, hx + mrx * 0.3, mwy + mry * 0.9);
+    ctx.stroke();
+    drip(hx - 4 * s, mwy + mry - 0.2, grow(2.8, 0.1), 0.55, ooze);
+    drip(hx + 6 * s, mwy + mry - 0.2, grow(2, 0.55), 0.45, ooze);
+
+    // The heavy V of the brow, and two great eyes glaring out under it.
+    const ey = hyy - 5 * s;
+    ctx.fillStyle = slimeDark;
+    ctx.beginPath();
+    ctx.moveTo(hx - 22 * s, ey - 9 * s);
+    ctx.lineTo(hx, ey - 2 * s);
+    ctx.lineTo(hx + 22 * s, ey - 9 * s);
+    ctx.lineTo(hx + 21 * s, ey - 4.5 * s);
+    ctx.lineTo(hx, ey + 2 * s);
+    ctx.lineTo(hx - 21 * s, ey - 4.5 * s);
+    ctx.closePath();
+    ctx.fill();
+    const flare = 1 + rr * 0.35;
+    for (const side of [-1, 1]) {
+      ctx.fillStyle = SF_DEEP;
+      ctx.beginPath();
+      ctx.ellipse(hx + side * 11 * s, ey + s, 7 * s, 4.4 * s, side * 0.32, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = SF_EYE;
+      ctx.beginPath();
+      ctx.ellipse(hx + side * 11 * s, ey + s, 5.6 * s * flare, 3 * s * flare, side * 0.32, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = SF_EYE_CORE;
+      ctx.beginPath();
+      ctx.arc(hx + side * 10 * s, ey + s, 1.4 * s, 0, TAU);
+      ctx.fill();
+    }
+    drip(-11, 11.2, grow(2.2, 0.45), 0.9);
+    drip(11.6, 11.4, grow(2.6, 0.15), 0.9);
+    glints([[hx - R * 0.4, hyy - R * 0.6, 0.9], [-6, hy - 6, 1], [8, hy - 4, 0.8], [-12, -9 - heave, 0.7]]);
+  }
+  if (back) glints([[-6, hy - 7, 1.1], [7, hy - 5, 0.9], [-12, -8, 0.7], [11, -7.4, 0.7]]);
+
+  // Sun-baked crust on its upper surfaces.
+  crust(0, [[-8, -20.4 + dy], [-2, -22.2 + dy], [5, -21.6 + dy], [9, -18.6 + dy], [2, -17.6 + dy], [-5, -18 + dy]], [[-2, -22.2 + dy, -0.6, -18 + dy], [-0.6, -18 + dy, 4, -19.4 + dy], [-0.6, -18 + dy, -5, -18.6 + dy]]);
+  for (const side of [-1, 1]) {
+    const sy = -7 - heave + breathe * 0.5;
+    crust(0.25, [[side * 7, sy - 4.6], [side * 11, sy - 6.2], [side * 15, sy - 3.6], [side * 12.6, sy - 1.8], [side * 8.6, sy - 2.6]], [[side * 11, sy - 6.2, side * 11, sy - 3]]);
+  }
+  if (back) {
+    crust(0.12, [[-13, -12 + dy], [-10, -16.4 + dy], [-6, -14.6 + dy], [-8.6, -10 + dy]], [[-10, -16.4 + dy, -9, -12 + dy]]);
+    crust(0.5, [[6, -12 + dy], [10.4, -14.6 + dy], [13.6, -10.6 + dy], [10.4, -8 + dy]], [[10.4, -14.6 + dy, 10.2, -10.4 + dy]]);
+  } else {
+    const hyy = -2 - heave * 1.3 + breathe * 0.4;
+    crust(0.12, [[-5.4, hyy - 8], [0, hyy - 9.8], [5.6, hyy - 7.8], [2.4, hyy - 6.4], [-3, hyy - 6.6]], [[0, hyy - 9.8, -0.4, hyy - 6.6]]);
+  }
+  crust(0.55, [[-14, 1.4], [-8, -0.4], [-4, 0.6], [-9, 2.6]], [[-8, -0.4, -8.6, 2]]);
+  crust(0.65, [[5, 0.4], [10, -0.6], [14, 1.6], [9, 2.8]], [[10, -0.6, 9.6, 2.4]]);
+
+  ctx.restore();
+  ctx.restore();
+}
+
+/**
+ * The Sludge Father bursting out of the sewer (`sewerBurst.ts`): its walking
+ * figure facing the viewer, in its entrance's `rear` and `scorch`, on the walk
+ * frame for `dist` walked so the hand-off to the march is seamless.
+ */
+export function drawSludgeFatherBurst(ctx: CanvasRenderingContext2D, color: string, dist: number, rear: number, scorch: number): void {
+  drawSludgeFatherBoss(ctx, color, 'front', false, dist * (ENEMY_CADENCE.boss10 ?? 0.2), rear, scorch);
 }
 
 /**
@@ -8828,6 +9943,7 @@ export function hasEnemySprite(id: string): boolean {
     id === 'cap_grunt2' ||
     id === 'cap_runner' ||
     id === 'cap_brute' ||
+    id === 'cap_brute2' ||
     id === 'cas_runner' ||
     id === 'cas_mage' ||
     id === 'cas_brute' ||
@@ -8839,7 +9955,8 @@ export function hasEnemySprite(id: string): boolean {
     id === 'boss6' ||
     id === 'boss7' ||
     id === 'boss8' ||
-    id === 'boss9'
+    id === 'boss9' ||
+    id === 'boss10'
   );
 }
 
@@ -8873,6 +9990,7 @@ export function drawEnemySprite(
   else if (id === 'cap_grunt') drawManAtArms(ctx, color, view, faceLeft, p);
   else if (id === 'cap_grunt2') drawSludgeBrute(ctx, color, view, faceLeft, p);
   else if (id === 'cap_brute') drawSludgeBehemoth(ctx, color, view, faceLeft, p);
+  else if (id === 'cap_brute2') drawPaladin(ctx, color, view, faceLeft, p, sit);
   else if (id === 'cap_runner') drawBloodhound(ctx, color, view, faceLeft, p, sit);
   else if (id === 'cas_runner') drawOutrider(ctx, color, view, faceLeft, p);
   else if (id === 'cas_mage') drawRoyalMage(ctx, color, view, faceLeft, p);
@@ -8882,6 +10000,7 @@ export function drawEnemySprite(
   else if (id === 'boss7') drawSergeantAtArms(ctx, color, view, faceLeft, p, sit, flourish);
   else if (id === 'boss8') drawHoundMaster(ctx, color, view, faceLeft, p, sit);
   else if (id === 'boss9') drawDraven(ctx, color, view, faceLeft, p, sit, flourish);
+  else if (id === 'boss10') drawSludgeFatherBoss(ctx, color, view, faceLeft, p, sit);
 }
 
 /**
@@ -8898,12 +10017,14 @@ const ENEMY_CADENCE: Record<string, number> = {
   boss7: 0.17,
   boss8: 0.17,
   boss9: 0.16,
+  boss10: 0.13,
   cas_grunt: 0.22,
   cas_grunt2: 0.2,
   cap_grunt: 0.19,
   cap_grunt2: 0.17,
   cap_runner: 0.24,
   cap_brute: 0.15,
+  cap_brute2: 0.18,
   cas_runner: 0.28,
   cas_mage: 0.2,
   cas_brute: 0.2,

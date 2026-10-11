@@ -8,17 +8,22 @@
  * another, the wagon rocking on its springs as each lands; the horn sounds
  * again, nearer, and the team is already lunging off as the last one leaps,
  * the driver cracking the reins, hauling the wagon off the edge of the board
- * in a trail of dust.
+ * in a trail of dust. All the while the army storms the field behind them:
+ * men-at-arms and a pair of paladins pour out of the sewer and the wood at a
+ * run and charge down the road on the champions' heels, never quite catching
+ * the hindmost, and pile up at the road's end as the wagon pulls away.
  *
  * A director over a finished engine: it never steps the simulation. It takes
  * the champions and the parked wagon off the board (`BoardScene.hideTowers` /
  * `hiddenDecor`) and redraws them as its own depth-sorted actors, lit like the
- * rest of the world; the driver's shout is an unlit overlay. Audio is left to
- * the UI, which drains `cues` each frame.
+ * rest of the world; the driver's shout is an unlit overlay. The stormers are
+ * real foes added to the engine (`addSceneFoe`) and walked along their lanes
+ * here, so the board draws them like any other; `dispose` takes them away.
+ * Audio is left to the UI, which drains `cues` each frame.
  */
 
 import type { GameEngine } from '../GameEngine';
-import type { Tower } from '../types';
+import type { Enemy, Tower } from '../types';
 import { BOARD_WIDTH, TILE, type Vec2 } from '../../domain/grid';
 import { drawWagonRig, propAnchor, WAGON_WHEEL_R } from '../props';
 import type { BoardScene, SceneActor } from '../renderer';
@@ -27,7 +32,7 @@ import type { Light } from '../lighting';
 import { alongRoute, drawRunner, routeAlongRoad, routeLengths } from './runners';
 
 /** Sound/beat cues for the UI to voice. */
-export type GetawayCue = 'horn' | 'hornNear' | 'hop' | 'board' | 'shout' | 'whip' | 'depart';
+export type GetawayCue = 'horn' | 'hornNear' | 'hop' | 'board' | 'shout' | 'whip' | 'depart' | 'warCry' | 'march';
 
 /** When the army's horn sounds, and the start of the champions' flinch. */
 const HORN_AT = 0.1;
@@ -56,6 +61,45 @@ const DEPART_ACCEL = 230;
 const DEPART_TOP = 340;
 /** Horse stride (px per gait cycle). */
 const STRIDE = 42;
+
+/**
+ * The army storming the field behind them: who, out of which lane (0 the
+ * sewer, 1 the wood; on a stage with fewer lanes everyone takes the first),
+ * when (s), and at what run (px/s). Men-at-arms, and a paladin with each lot.
+ */
+const STORMERS: { id: string; lane: number; at: number; speed: number }[] = [
+  { id: 'cap_grunt', lane: 0, at: 0.45, speed: 300 },
+  { id: 'cap_grunt', lane: 0, at: 0.68, speed: 290 },
+  { id: 'cap_grunt', lane: 1, at: 0.8, speed: 296 },
+  { id: 'cap_brute2', lane: 0, at: 1.0, speed: 250 },
+  { id: 'cap_grunt', lane: 1, at: 1.02, speed: 284 },
+  { id: 'cap_grunt', lane: 0, at: 1.25, speed: 306 },
+  { id: 'cap_grunt', lane: 1, at: 1.3, speed: 292 },
+  { id: 'cap_grunt', lane: 0, at: 1.5, speed: 288 },
+  { id: 'cap_brute2', lane: 1, at: 1.62, speed: 246 },
+  { id: 'cap_grunt', lane: 0, at: 1.8, speed: 296 },
+  { id: 'cap_grunt', lane: 1, at: 1.95, speed: 290 },
+];
+/** How far (px of road left to the wagon) the front of the charge stays behind the hindmost runner. */
+const CHASE_GAP = 70;
+/** Least gap between two stormers along the road, and how far short of the road's end the first one stops. */
+const STORM_SPACING = 20;
+const STORM_STOP = 26;
+/** Beat of the army's armoured footfalls while it is on the move (s). */
+const MARCH_EVERY = 0.3;
+
+interface Stormer {
+  id: string;
+  lane: number;
+  at: number;
+  speed: number;
+  /** Sideways place in the crowd (px off the road's centre line), and the smoothed offset. */
+  side: number;
+  ox: number;
+  oy: number;
+  dustClock: number;
+  e: Enemy | null;
+}
 
 interface Rider {
   tower: Tower;
@@ -95,6 +139,8 @@ export class GetawayBoardScene {
   readonly cues: GetawayCue[] = [];
 
   private readonly riders: Rider[] = [];
+  private readonly stormers: Stormer[];
+  private marchClock = 0;
   private readonly wagonIndex: number;
   private readonly anchor: Vec2;
   private readonly opening: Vec2;
@@ -132,7 +178,21 @@ export class GetawayBoardScene {
       lights: [this.lantern],
     };
     this.planRiders();
+    this.stormers = STORMERS.map((s, i) => ({
+      ...s,
+      lane: s.lane < engine.lanes.length ? s.lane : 0,
+      side: (((i * 7) % 5) - 2) * 4.5,
+      ox: 0,
+      oy: 0,
+      dustClock: Math.random() * 0.2,
+      e: null,
+    }));
     if (!w) this.done = true;
+  }
+
+  /** Take the stormers back off the board (the cutscene is over or skipped). */
+  dispose(): void {
+    for (const s of this.stormers) if (s.e) s.e.dead = true;
   }
 
   /** The board hooks to pass as `RenderUiState.scene` this frame. */
@@ -153,6 +213,7 @@ export class GetawayBoardScene {
     if (prev < this.hornNearAt && t >= this.hornNearAt) this.cues.push('hornNear');
 
     for (const r of this.riders) this.updateRider(r, t);
+    this.updateStormers(dt, t);
 
     // Springs: each landing in the bed kicks the wagon, which settles back.
     this.rockV += (-130 * this.rock - 9 * this.rockV) * dt;
@@ -366,6 +427,64 @@ export class GetawayBoardScene {
     // Depth: a leaping champion stays on its take-off line, in front of the wagon.
     const ground = t >= r.jumpAt ? r.route[r.route.length - 1].y : r.pos.y;
     r.actor.base = ground + 10;
+  }
+
+  /**
+   * The army pouring onto the field and charging down the road after the
+   * champions. The front of the charge is held `CHASE_GAP` behind whichever
+   * champion has the most road still to run (measured as road left to the
+   * wagon, which every lane shares at its end), and each stormer keeps a
+   * stride behind the one ahead of it, so they bunch into a mob rather than
+   * overtaking anyone or piling onto one spot.
+   */
+  private updateStormers(dt: number, t: number): void {
+    if (dt <= 0) return;
+    for (const s of this.stormers) {
+      if (s.e || t < s.at) continue;
+      s.e = this.engine.addSceneFoe(s.id, s.lane, 0);
+      if (s === this.stormers[0]) this.cues.push('warCry');
+    }
+    let hindmost = 0;
+    for (const r of this.riders) {
+      if (t >= r.jumpAt) continue;
+      const run = t < r.start ? 0 : Math.min(r.length, (t - r.start) * r.speed);
+      hindmost = Math.max(hindmost, r.length - run + STOP_BACK);
+    }
+    const live = this.stormers
+      .filter((s): s is Stormer & { e: Enemy } => s.e !== null)
+      .map((s) => ({ s, left: this.engine.lanes[s.lane].totalPathLength - s.e.dist }))
+      .sort((a, b) => a.left - b.left);
+    let floor = Math.max(STORM_STOP, hindmost > 0 ? hindmost + CHASE_GAP : 0);
+    let moving = false;
+    for (const { s, left } of live) {
+      const e = s.e;
+      const total = this.engine.lanes[s.lane].totalPathLength;
+      // Ease to a halt short of the one ahead (or the hindmost champion).
+      const v = s.speed * Math.max(0, Math.min(1, (left - floor) / 40));
+      e.dist = Math.max(0, Math.min(total - floor, e.dist + v * dt), e.dist);
+      floor = Math.max(floor, total - e.dist) + STORM_SPACING;
+      const p = this.engine.pointOnLane(s.lane, e.dist);
+      const h = this.engine.headingOnLane(s.lane, e.dist);
+      // Spread across the road; the offset swings smoothly round the corners.
+      const k = Math.min(1, dt * 7);
+      s.ox += (-h.y * s.side - s.ox) * k;
+      s.oy += (h.x * s.side - s.oy) * k;
+      e.pos = { x: p.x + s.ox, y: p.y + s.oy };
+      e.heading = h;
+      if (v > 20) {
+        moving = true;
+        s.dustClock -= dt;
+        if (s.dustClock <= 0) {
+          s.dustClock = 0.22 + Math.random() * 0.1;
+          this.puff(e.pos.x - h.x * 6, e.pos.y + 10, -h.x * 16, 3.4);
+        }
+      }
+    }
+    this.marchClock -= dt;
+    if (moving && this.marchClock <= 0) {
+      this.marchClock = MARCH_EVERY;
+      this.cues.push('march');
+    }
   }
 
   private drawRider(ctx: CanvasRenderingContext2D, r: Rider): void {

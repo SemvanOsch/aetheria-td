@@ -320,7 +320,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
             image: t.ability!.image,
             cooldown: t.abilityCooldown,
             cooldownMax: t.abilityCooldownMax,
-            ready: t.abilityCooldown <= 0 && affordable && inRange,
+            ready: t.abilityCooldown <= 0 && affordable && inRange && t.stun <= 0,
             inRange,
             manaCost,
             mana: Math.floor(t.mana),
@@ -671,6 +671,8 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
       // Snap the camera's attention to the caster and refresh the panel.
       if (tower) setSelectedTowerUid(uid);
       refreshDeploys();
+    } else if (tower && tower.stun > 0) {
+      showFlash(`${tower.def.name} is stuck in sludge!`);
     } else if (tower && tower.abilityCooldown > 0) {
       showFlash(`${tower.ability?.name} is recharging…`);
     } else if (tower && tower.mana < (tower.ability?.manaCost ?? 0)) {
@@ -934,6 +936,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                 <ResultCard
                   outcome={hud.outcome}
                   gemReward={level.gemReward}
+                  victoryLine={level.victoryLine}
                   firstClear={firstClearRef.current}
                   armorDrops={hud.armorDrops}
                   onExit={onExit}
@@ -1543,6 +1546,7 @@ function EndlessResultCard({
 function ResultCard({
   outcome,
   gemReward,
+  victoryLine,
   firstClear,
   armorDrops,
   onExit,
@@ -1551,6 +1555,8 @@ function ResultCard({
 }: {
   outcome: Outcome;
   gemReward: number;
+  /** The stage's own line under "Victory" (`LevelDef.victoryLine`), else the usual one. */
+  victoryLine?: string;
   firstClear: boolean;
   armorDrops: ArmorRoll[];
   onExit: () => void;
@@ -1565,7 +1571,7 @@ function ResultCard({
       </h2>
       <p style={{ color: 'var(--text-dim)' }}>
         {won
-          ? 'The realm is saved. The boss lies vanquished!'
+          ? victoryLine ?? 'The realm is saved. The boss lies vanquished!'
           : 'Your castle has fallen. Regroup and try again.'}
       </p>
       <div className="reward">

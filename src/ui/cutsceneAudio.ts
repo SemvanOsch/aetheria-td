@@ -16,6 +16,8 @@ export type CutsceneSound =
   | 'whinny'
   | 'whip'
   | 'creak'
+  | 'warCry'
+  | 'march'
   | 'birds'
   | 'whoa'
   | 'door'
@@ -30,7 +32,12 @@ export type CutsceneSound =
   | 'heave'
   | 'thud'
   | 'roar'
-  | 'growl';
+  | 'growl'
+  // The Sludge Father bursting out onto The Getaway (voiced via `combatAudio`).
+  | 'stir'
+  | 'sear'
+  | 'shed'
+  | 'crumble';
 
 let noiseBuf: AudioBuffer | null = null;
 function noise(ac: AudioContext): AudioBuffer {
@@ -174,6 +181,7 @@ function groan(
 }
 
 let lastHop = 0;
+let lastMarch = 0;
 
 /** Play one cutscene cue. */
 export function playCutsceneSound(sound: CutsceneSound): void {
@@ -263,6 +271,52 @@ export function playCutsceneSound(sound: CutsceneSound): void {
       tone(ac, out, t + 0.05, 160, 120, 0.4, 0.015, 'triangle', 0.1);
       break;
     }
+    case 'warCry': {
+      // The army pouring onto the field: a ragged roar of men, voices
+      // starting one after another and swelling on an open 'ah', over the
+      // breathy rush of the crowd and the rasp of blades drawn.
+      const f = ac.createBiquadFilter();
+      f.type = 'bandpass';
+      f.frequency.value = 720;
+      f.Q.value = 1.6;
+      f.connect(out);
+      for (let i = 0; i < 6; i++) {
+        const at = t + i * 0.07 + Math.random() * 0.05;
+        const pitch = 120 + Math.random() * 90;
+        const o = ac.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(pitch * 0.85, at);
+        o.frequency.linearRampToValueAtTime(pitch * 1.12, at + 0.25);
+        o.frequency.exponentialRampToValueAtTime(pitch * 0.8, at + 1.25);
+        const v = ac.createGain();
+        v.gain.value = 0; // silent until its envelope starts
+        v.gain.setValueAtTime(0.0001, at);
+        v.gain.linearRampToValueAtTime(0.012, at + 0.12);
+        v.gain.setValueAtTime(0.011, at + 0.8);
+        v.gain.exponentialRampToValueAtTime(0.0001, at + 1.3);
+        o.connect(v).connect(f);
+        o.start(at);
+        o.stop(at + 1.35);
+      }
+      burst(ac, out, t, 600, 1100, 1.2, 0.02, 'bandpass', 0.9);
+      burst(ac, out, t + 0.2, 2400, 3200, 0.3, 0.008, 'bandpass', 5);
+      burst(ac, out, t + 0.38, 2600, 3400, 0.26, 0.006, 'bandpass', 5);
+      break;
+    }
+    case 'march': {
+      // Armoured boots pounding the road: a few heavy footfalls just out of
+      // step, and the dull clink of plate and mail on each.
+      if (t - lastMarch < 0.15) return;
+      lastMarch = t;
+      for (let i = 0; i < 3; i++) {
+        const at = t + i * 0.035 + Math.random() * 0.02;
+        tone(ac, out, at, 120 + Math.random() * 25, 55, 0.12, 0.03, 'sine', 0.004);
+        burst(ac, out, at, 420, 220, 0.07, 0.012, 'lowpass', 0.7);
+      }
+      burst(ac, out, t + 0.02, 1700 + Math.random() * 300, 1400, 0.09, 0.008, 'bandpass', 7);
+      burst(ac, out, t + 0.07, 2100 + Math.random() * 300, 1600, 0.07, 0.006, 'bandpass', 7);
+      break;
+    }
     case 'bubbles': {
       // The cistern starting to churn: fat bubbles glooping up through sludge
       // over a low, wet wash.
@@ -334,6 +388,53 @@ export function playCutsceneSound(sound: CutsceneSound): void {
       // Left alone in the sewer: a low, settling growl.
       groan(ac, out, t, 54, 44, 1.6, 0.045, 300, 0.4);
       burst(ac, out, t, 400, 160, 1.4, 0.02, 'lowpass', 0.8);
+      break;
+    }
+    case 'stir': {
+      // Something coming up the tunnel: a distant sub rumble, a muffled groan
+      // from deep inside, and a few fat bubbles glooping at the mouth.
+      tone(ac, out, t, 44, 36, 1.8, 0.07, 'sine', 0.6);
+      groan(ac, out, t + 0.2, 50, 42, 1.5, 0.02, 220, 0.5);
+      burst(ac, out, t, 260, 120, 1.6, 0.03, 'lowpass', 0.7);
+      for (let i = 0; i < 4; i++) {
+        const at = t + 0.5 + Math.random() * 1.1;
+        const f0 = 130 + Math.random() * 90;
+        tone(ac, out, at, f0, f0 * 2, 0.07, 0.016);
+      }
+      break;
+    }
+    case 'sear': {
+      // The daylight hitting it: a hard sizzle like fat on a griddle, hissing
+      // off into steam, under a shriek that cracks upward in pain.
+      burst(ac, out, t, 5200, 3800, 2.2, 0.05, 'highpass', 0.7);
+      burst(ac, out, t, 2600, 1800, 1.8, 0.03, 'bandpass', 1.2);
+      for (let i = 0; i < 18; i++) burst(ac, out, t + Math.random() * 1.8, 6000, 4000, 0.03, 0.02, 'bandpass', 3);
+      groan(ac, out, t + 0.05, 150, 240, 1.3, 0.06, 1500, 0.08);
+      groan(ac, out, t + 0.05, 75, 110, 1.3, 0.05, 700, 0.1);
+      break;
+    }
+    case 'crumble': {
+      // Masonry giving way: a sharp crack, the heavy blocks thudding down and
+      // a clatter of chips and grit after them.
+      burst(ac, out, t, 3400, 1500, 0.12, 0.08, 'bandpass', 2);
+      tone(ac, out, t + 0.02, 180, 70, 0.25, 0.06, 'triangle', 0.003);
+      for (const [at, f0] of [[0.22, 70], [0.38, 60], [0.5, 82]] as const) {
+        tone(ac, out, t + at, f0, f0 * 0.6, 0.25, 0.09, 'sine', 0.003);
+        burst(ac, out, t + at, 900, 260, 0.2, 0.05, 'lowpass', 0.8);
+      }
+      for (let i = 0; i < 14; i++) {
+        const at = t + 0.25 + Math.random() * 0.9;
+        const f0 = 1400 + Math.random() * 2200;
+        burst(ac, out, at, f0, f0 * 0.75, 0.05, 0.018 + Math.random() * 0.015, 'bandpass', 5);
+      }
+      break;
+    }
+    case 'shed': {
+      // A slab of its sludge sloughing off and slapping onto the ground, with
+      // a short hiss as the sun gets at the raw sludge underneath.
+      tone(ac, out, t, 90, 40, 0.35, 0.1, 'sine', 0.004);
+      burst(ac, out, t, 900, 180, 0.4, 0.08, 'lowpass', 0.8);
+      burst(ac, out, t + 0.05, 4800, 3600, 0.5, 0.015, 'highpass', 0.7);
       break;
     }
     case 'birds': {

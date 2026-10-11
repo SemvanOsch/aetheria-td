@@ -17,6 +17,7 @@
 
 import type { SfxName } from '../engine/GameEngine';
 import { AUDIO_LEAD, audioBus } from './audioBus';
+import { playCutsceneSound } from './cutsceneAudio';
 
 // Destination node for the voice currently being scheduled — the combat
 // category output of the shared bus. Set immediately before a voice runs (all
@@ -483,6 +484,23 @@ const VOICES: Record<SfxName, (ac: AudioContext) => void> = {
     noiseSweep(ac, 5200, 4400, 0.6, 0.004, 2, 'bandpass', 0.24);
   },
 
+  // The Paladin raising her sword — a soft steel ring as the blade goes up,
+  // then a hushed choir swelling in: a detuned open fifth climbing a step.
+  paladinRaise: (ac) => {
+    toneGlide(ac, jit(1980, 30), 1940, 0.4, 0.006, 'sine');
+    noiseSweep(ac, jit(900, 80), jit(2600, 200), 0.3, 0.008, 0.9);
+    for (const [f, d] of [[392, 0], [394, 0], [587, 0.06]] as const) toneGlide(ac, f * 0.89, f, 1.1, 0.008, 'triangle', 0.08 + d);
+  },
+  // Her aura pours out — a warm major chord of bell tones ringing out with a
+  // glitter of sparks over it.
+  paladinHeal: (ac) => {
+    for (const [f, d] of [[523.25, 0], [659.25, 0.05], [783.99, 0.1], [1046.5, 0.15]] as const) {
+      toneGlide(ac, f, f * 0.995, 0.9, 0.01, 'sine', d);
+      toneGlide(ac, f * 2.76, f * 2.7, 0.3, 0.002, 'sine', d);
+    }
+    sparkle(ac, 8, 2200, 4200, 0.5, 0.005, 0.05);
+  },
+
   // A sludge foe surfacing from the cistern — a low, thick slosh as it breaks
   // the water, then a couple of fat bubbles glooping up behind it.
   emergeSplash: (ac) => {
@@ -491,6 +509,32 @@ const VOICES: Record<SfxName, (ac: AudioContext) => void> = {
     toneGlide(ac, jit(140, 10), 70, 0.35, 0.02, 'sine');
     toneGlide(ac, jit(260, 20), 520, 0.09, 0.012, 'sine', 0.32);
     toneGlide(ac, jit(220, 20), 480, 0.08, 0.009, 'sine', 0.52);
+  },
+
+  // The Sludge Father bursting out of the sewer on The Getaway: the big beats
+  // are its cutscene voices from the Sewers' ending.
+  sewerStir: () => playCutsceneSound('stir'),
+  sewerRumble: () => playCutsceneSound('rumble'),
+  sludgeSlam: () => playCutsceneSound('thud'),
+  sewerBurst: () => {
+    playCutsceneSound('eruption');
+    playCutsceneSound('crumble');
+  },
+  sludgeRoar: () => playCutsceneSound('roar'),
+  sunSear: () => playCutsceneSound('sear'),
+  sludgeShed: () => playCutsceneSound('shed'),
+  sludgeGrowl: () => playCutsceneSound('growl'),
+  // Its spit: a throaty hawk and a wet hurl, then each glob splatting home.
+  sludgeSpit: (ac) => {
+    noiseSweep(ac, jit(500, 40), 260, 0.28, 0.03, 1.2, 'bandpass');
+    toneGlide(ac, jit(110, 8), 70, 0.3, 0.03, 'sawtooth');
+    noiseSweep(ac, jit(1600, 120), 500, 0.3, 0.035, 0.9, 'bandpass', 0.22);
+    toneGlide(ac, 220, 120, 0.18, 0.02, 'sine', 0.22);
+  },
+  sludgeSplat: (ac) => {
+    noiseSweep(ac, jit(1100, 100), 240, 0.22, 0.04, 0.8, 'lowpass');
+    toneGlide(ac, jit(160, 15), 60, 0.2, 0.03, 'sine');
+    toneGlide(ac, jit(300, 30), 600, 0.06, 0.01, 'sine', 0.14);
   },
 
   bardPlay: (ac) => {

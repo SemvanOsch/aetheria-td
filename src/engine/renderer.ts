@@ -39,13 +39,17 @@ import {
   enemyWalkPeriod,
   greaterOrbAnchor,
   greaterOrbRadius,
+  drawSludgeArm,
+  drawSludgeFatherBurst,
   hasEnemySprite,
   hasSprite,
+  type SludgeArmPose,
   longbowArrow,
   longbowCastGlow,
   MAGIC_CAST_POINT,
   magicOrbAnchor,
   magicOrbRadius,
+  paladinBladeTip,
   staffTip,
 } from './sprites';
 import { BOSS_BOX, DEFAULT_BOX, paintFigure, type FigureStyle } from './figure';
@@ -55,7 +59,17 @@ import { MistLayer, type MistClear } from './mistLayer';
 import { lightableProp } from '../domain/mist';
 import { Vfx, type Corpse } from './vfx';
 import { drawLegacyDecor, drawProp, propAnchor, PROP_META } from './props';
-import { FEEDBACK, INK, LIGHT, ease, shade, tintRamp, withAlpha } from './palette';
+import { FEEDBACK, INK, LIGHT, ease, hash2, shade, tintRamp, withAlpha } from './palette';
+import {
+  SEWER_BURST_FEET,
+  SEWER_BURST_HP_MULT,
+  SEWER_BURST_PLANT,
+  SEWER_BURST_TIME,
+  SEWER_MOUTH,
+  sewerBurstHp,
+  sewerBurstPose,
+  type SewerBurstPose,
+} from './sewerBurst';
 import {
   THROW_ANIM_TIME,
   RISE_LIFT,
@@ -75,14 +89,19 @@ import {
   GREATER_ORB_JUMP,
   GREATER_ORB_LAND,
   GREATER_ORB_THROW_TIME,
+  healPose,
   isSpeaking,
   rallyPose,
+  spitPose,
   summonPose,
   manaStormStance,
   PIERCING_CAST_ANIM_TIME,
   specialAnimTime,
 } from './types';
-import type { Enemy, Tower } from './types';
+import type { Enemy, SludgeGlob, Tower } from './types';
+
+/** How far up a spitter rears at the height of its spit (its `sit` pose). */
+const SPIT_REAR = 0.6;
 import type { GameEngine } from './GameEngine';
 
 export { drawProp };
@@ -209,6 +228,15 @@ interface BoardState {
   propFade: number[];
   /** Each Greater Orb caster's drawn leap height, and any drop out of it (see `settleLeap`). */
   leaps: WeakMap<Tower, LeapState>;
+  /**
+   * The sewer a `'sewerBurst'` foe will come out of: how hard it is stirring
+   * (eased toward `engine.sewerStirring()`), and the sludge spilling out of its
+   * mouth (stays once the foe is out).
+   */
+  stir: number;
+  ooze: number;
+  /** When (renderer seconds) its arch was seen broken, for the rubble landing; -1 while whole. */
+  brokeAt: number;
 }
 
 /**
@@ -275,6 +303,9 @@ function stateFor(engine: GameEngine): BoardState {
     propCells: (engine.level.decor ?? []).map((p) => new Set(propCells(p).map((c) => cellKey(c.col, c.row)))),
     propFade: (engine.level.decor ?? []).map(() => 1),
     leaps: new WeakMap(),
+    stir: 0,
+    ooze: 0,
+    brokeAt: -1,
   };
   STATES.set(engine, st);
   return st;
@@ -324,6 +355,7 @@ export function drawBoard(
     const pool = manaPoolLevel(tw);
     if (pool > 0) st.vfx.manaPool(tw.pos.x, tw.pos.y + MANA_POOL_DY, MANA_POOL_RADIUS * pool, tw.def.visual.color, dt * pool);
   }
+  animateSewerBurst(engine, st, dt);
 
   ctx.clearRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
   const shake = st.vfx.shakeOffset();
@@ -333,6 +365,7 @@ export function drawBoard(
   // 1. Ground.
   drawGround(ctx, engine, st);
   drawGroundProps(ctx, engine, ui);
+  drawSewerOoze(ctx, engine, st);
   st.vfx.drawDecals(ctx);
   drawManaPools(ctx, engine);
   drawManaSwirls(ctx, engine, false);
@@ -342,6 +375,7 @@ export function drawBoard(
 
   // 2. World: props + figures, depth-sorted.
   drawWorld(ctx, engine, ui, st, dt);
+  drawSludgeGlobs(ctx, engine);
   st.vfx.drawWorld(ctx);
   drawShots(ctx, engine);
 
@@ -362,6 +396,7 @@ export function drawBoard(
   drawQuickdraws(ctx, engine);
   drawLongbowGlows(ctx, engine);
   drawStaffGlows(ctx, engine);
+  drawSunGlare(ctx, engine, st);
   drawManaSwirls(ctx, engine, true);
   drawProjectiles(ctx, engine, st.vfx, dt);
   drawThrownSpears(ctx, engine);
@@ -595,6 +630,7 @@ type Drawable =
   | { k: 'enemy'; base: number; e: Enemy }
   | { k: 'corpse'; base: number; c: Corpse }
   | { k: 'king'; base: number }
+  | { k: 'sewer'; base: number }
   | { k: 'actor'; base: number; a: SceneActor };
 
 /**
@@ -622,11 +658,18 @@ function drawWorld(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: Render
   if (!scene?.hideTowers) for (const t of engine.towers) list.push({ k: 'tower', base: t.pos.y + 10, t });
   for (const e of engine.enemies) {
     if (e.dead || scene?.hiddenEnemies?.has(e.uid)) continue;
-    list.push({ k: 'enemy', base: e.pos.y - footLiftFor(e.def.id) + e.def.radius * 0.7, e });
+    // Bursting out of the sewer it is drawn where its entrance has got to.
+    const burst = burstFigure(engine, e);
+    const base = burst ? burst.feetY + SEWER_BURST_BASE : e.pos.y - footLiftFor(e.def.id) + e.def.radius * 0.7;
+    list.push({ k: 'enemy', base, e });
   }
   for (const c of st.vfx.corpses) list.push({ k: 'corpse', base: c.y + c.enemy.def.radius * 0.5, c });
   const king = seatedKingSpawn(engine);
   if (king) list.push({ k: 'king', base: king.y - RISE_LIFT + 4 });
+  // The stirring sewer's mouth (its eyes, the sludge over its sill), just in
+  // front of the entrance's depth line so whatever walks out covers it.
+  const mouth = burstMouth(engine);
+  if (mouth && (st.ooze + st.stir > 0.01 || engine.sewerBroken)) list.push({ k: 'sewer', base: mouth.y + SEWER_MOUTH_BASE + 0.1 });
   for (const a of scene?.actors ?? []) list.push({ k: 'actor', base: a.base, a });
   decor.forEach((p, i) => {
     const meta = PROP_META[p.kind];
@@ -687,7 +730,11 @@ function drawWorld(ctx: CanvasRenderingContext2D, engine: GameEngine, ui: Render
         break;
       case 'enemy':
         if (d.e.dying) drawDeathAnimation(ctx, d.e, st);
+        else if (d.e.riseFrom === 'sewer' && d.e.rise > 0) drawSewerBurst(ctx, engine, st, d.e);
         else drawEnemy(ctx, ui, st, d.e);
+        break;
+      case 'sewer':
+        drawSewerMouth(ctx, engine, st);
         break;
       case 'corpse':
         drawCorpse(ctx, st, d.c);
@@ -841,12 +888,26 @@ function collectLights(engine: GameEngine, st: BoardState, time: number, scene?:
     const k = c.ttl / c.maxTtl;
     out.push({ x: c.pos.x, y: c.pos.y, radius: c.radius * 1.6, family: 'holy', intensity: 0.8 * k });
   }
+  const eyes = stirEyes(engine, st, time);
+  if (eyes) out.push({ x: eyes.x, y: eyes.y, radius: 34, family: 'poison', intensity: 0.55 * eyes.open, glow: 0.5 });
   for (const e of engine.enemies) {
     if (e.dead || scene?.hiddenEnemies?.has(e.uid)) continue;
+    const burst = burstFigure(engine, e);
+    if (burst) {
+      // Bursting out of the sewer: its glow comes with it, and the daylight
+      // flares on it as it burns.
+      const s = Math.max(1, burst.pose.scale);
+      out.push({ x: burst.x, y: burst.feetY - 20 * s, radius: 60 * s, family: 'poison', intensity: 0.35 * (1 - burst.pose.inMouth * 0.5), glow: 0.8 });
+      if (burst.pose.glare > 0) {
+        out.push({ x: burst.x, y: burst.feetY - 26 * s, radius: 60 * s, family: 'holy', intensity: 0.4 * burst.pose.glare, glow: 0.15 });
+      }
+      continue;
+    }
     if (e.def.boss) {
       const pulse = 0.5 + 0.5 * Math.sin(time * 2.4);
-      // Gowzer's shadow, Captain Draven's royal gold, every other boss's blood red.
-      const fam = e.def.id === 'boss4' ? 'dark' : ROYAL_AURA.has(e.def.id) ? 'holy' : 'blood';
+      // Gowzer's shadow, Captain Draven's royal gold, the Sludge Father's
+      // sickly green, every other boss's blood red.
+      const fam = e.def.id === 'boss4' ? 'dark' : ROYAL_AURA.has(e.def.id) ? 'holy' : e.def.id === 'boss10' ? 'poison' : 'blood';
       out.push({ x: e.pos.x, y: e.pos.y, radius: 70 + 14 * pulse, family: fam, intensity: 0.35 + 0.15 * pulse, glow: 0.9 });
       // Gowzer's eyes glare gold out of the hood (gone once he falls).
       if (e.def.id === 'boss4' && !e.dying) out.push({ x: e.pos.x, y: e.pos.y - footLiftFor(e.def.id) - 15, radius: 16, family: 'holy', intensity: 0.5, glow: 0.5 });
@@ -856,6 +917,12 @@ function collectLights(engine: GameEngine, st: BoardState, time: number, scene?:
       // The sludge gives off a faint sickly glow in the dark of the tunnels.
       const big = e.def.id === 'cap_brute';
       out.push({ x: e.pos.x, y: e.pos.y - (big ? 9 : 6), radius: big ? 38 : 30, family: 'poison', intensity: big ? 0.28 : 0.25 });
+    } else if (PALADIN_AURA.has(e.def.id)) {
+      // Her gilded plate gives off a faint holy glow, flaring out over her
+      // reach while she heals.
+      const k = healPose(e);
+      out.push({ x: e.pos.x, y: e.pos.y - 6, radius: 32, family: 'holy', intensity: 0.2 + 0.25 * k });
+      if (k > 0) out.push({ x: e.pos.x, y: e.pos.y, radius: (e.def.heal?.radius ?? 90) * 1.2, family: 'holy', intensity: 0.4 * k, glow: 0.4 });
     }
   }
   for (const ex of engine.baseExits) {
@@ -879,7 +946,18 @@ function collectLights(engine: GameEngine, st: BoardState, time: number, scene?:
 function drawBossBars(ctx: CanvasRenderingContext2D, engine: GameEngine, scene?: BoardScene): void {
   // No bars once a stage's ending has begun (a cutscene directs the board).
   if (scene) return;
-  const bosses = engine.enemies.filter((e) => e.def.boss && (e.rise ?? 0) === 0);
+  // Each boss that is up, and one bursting out of the sewer once it has landed:
+  // its bar shows the swollen health the sun is burning off it.
+  const bosses: { e: Enemy; hp: number; ghost: number; burning: boolean }[] = [];
+  for (const e of engine.enemies) {
+    if (!e.def.boss) continue;
+    if ((e.rise ?? 0) === 0) bosses.push({ e, hp: e.health, ghost: e.health, burning: false });
+    else if (e.riseFrom === 'sewer') {
+      const t = (1 - e.rise) * SEWER_BURST_TIME;
+      const hp = sewerBurstHp(t, e.def.health);
+      if (hp != null) bosses.push({ e, hp, ghost: sewerBurstHp(t - 0.35, e.def.health) ?? hp, burning: hp < (sewerBurstHp(t - 0.05, e.def.health) ?? hp) });
+    }
+  }
   if (bosses.length === 0) return;
 
   const barW = Math.min(BOARD_WIDTH - 60, 460);
@@ -888,8 +966,13 @@ function drawBossBars(ctx: CanvasRenderingContext2D, engine: GameEngine, scene?:
   const rowH = nameH + barH + 14;
   let top = 12;
 
-  for (const e of bosses) {
-    const pct = Math.max(0, Math.min(1, e.health / e.def.health));
+  for (const { e, hp: health, ghost, burning } of bosses) {
+    // Health above its max stacks up in layers (the burning Sludge Father): the
+    // top layer drains over the next one's colour, "×N" counting them down.
+    const max = e.def.health;
+    const layers = Math.max(1, Math.ceil(health / max - 1e-6));
+    const pct = Math.max(0, Math.min(1, (health - (layers - 1) * max) / max));
+    const ghostPct = Math.max(pct, Math.min(1, (ghost - (layers - 1) * max) / max));
     const bx = (BOARD_WIDTH - barW) / 2;
     const by = top + nameH;
 
@@ -911,17 +994,29 @@ function drawBossBars(ctx: CanvasRenderingContext2D, engine: GameEngine, scene?:
     ctx.fillStyle = 'rgba(8,4,12,0.78)';
     roundRect(ctx, bx - 4, by - 4, barW + 8, barH + 8, 4);
     ctx.fill();
-    ctx.fillStyle = FEEDBACK.hpTrack;
+    ctx.fillStyle = layers > 1 ? layerFill(ctx, layers - 1, by, barH) : FEEDBACK.hpTrack;
     ctx.fillRect(bx, by, barW, barH);
+    // What it has just lost, lingering pale before it catches up.
+    if (ghostPct > pct) {
+      ctx.fillStyle = 'rgba(255,226,160,0.75)';
+      ctx.fillRect(bx + barW * pct, by, barW * (ghostPct - pct), barH);
+    }
     // Fill: deep crimson with a lit top edge (boss HP always reads as danger).
-    const fg = ctx.createLinearGradient(0, by, 0, by + barH);
-    fg.addColorStop(0, '#ff6a5a');
-    fg.addColorStop(0.5, '#c8283a');
-    fg.addColorStop(1, '#7a1020');
-    ctx.fillStyle = fg;
+    ctx.fillStyle = layerFill(ctx, layers, by, barH);
     ctx.fillRect(bx, by, barW * pct, barH);
     ctx.fillStyle = 'rgba(255,255,255,0.18)';
     ctx.fillRect(bx, by, barW * pct, 2);
+    // Burning: the end of the bar glows hot and flickers.
+    if (burning && pct > 0) {
+      const ex = bx + barW * pct;
+      const flick = 0.75 + 0.25 * Math.sin(now() / 45);
+      const hot = ctx.createLinearGradient(ex - 18, 0, ex + 4, 0);
+      hot.addColorStop(0, 'rgba(255,160,60,0)');
+      hot.addColorStop(0.75, `rgba(255,200,110,${(0.8 * flick).toFixed(3)})`);
+      hot.addColorStop(1, `rgba(255,250,220,${flick.toFixed(3)})`);
+      ctx.fillStyle = hot;
+      ctx.fillRect(ex - 18, by, 22, barH);
+    }
     // Quarter ticks.
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     for (const q of [0.25, 0.5, 0.75]) ctx.fillRect(bx + barW * q - 0.5, by, 1, barH);
@@ -941,7 +1036,9 @@ function drawBossBars(ctx: CanvasRenderingContext2D, engine: GameEngine, scene?:
       ctx.fill();
     }
 
-    const hp = `${Math.max(0, Math.ceil(e.health))} / ${Math.round(e.def.health)}`;
+    // While it still has layers to burn through, out of its swollen health.
+    const shownMax = Math.round(layers > 1 ? max * SEWER_BURST_HP_MULT : max);
+    const hp = `${Math.max(0, Math.ceil(health))} / ${shownMax}`;
     ctx.font = `700 10.5px ${FONT_UI}`;
     ctx.textBaseline = 'middle';
     ctx.lineWidth = 3;
@@ -951,10 +1048,40 @@ function drawBossBars(ctx: CanvasRenderingContext2D, engine: GameEngine, scene?:
     ctx.fillText(hp, BOARD_WIDTH / 2, by + barH / 2 + 0.5);
     // A shielded boss shows its shield count just past the bar's right cap.
     if (e.shield > 0) drawShieldCount(ctx, bx + barW + 34, by + 1, e.shield, 12);
+    // Stacked layers of health count down past it too.
+    if (layers > 1) {
+      ctx.font = `700 13px ${FONT_TITLE}`;
+      ctx.textAlign = 'left';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(8,4,12,0.85)';
+      ctx.strokeText(`×${layers}`, bx + barW + 18, by + barH / 2 + 0.5);
+      ctx.fillStyle = '#ffd27a';
+      ctx.fillText(`×${layers}`, bx + barW + 18, by + barH / 2 + 0.5);
+    }
     ctx.restore();
 
     top += rowH;
   }
+}
+
+/**
+ * A boss bar's fill for health layer `n` (1 = its real health, the usual deep
+ * crimson): the layers stacked over it alternate the burning colours of the sun
+ * eating it away, ember orange and gold, so each one draining over the next reads.
+ */
+function layerFill(ctx: CanvasRenderingContext2D, n: number, by: number, barH: number): CanvasGradient {
+  const g = ctx.createLinearGradient(0, by, 0, by + barH);
+  if (n <= 1) {
+    g.addColorStop(0, '#ff6a5a');
+    g.addColorStop(0.5, '#c8283a');
+    g.addColorStop(1, '#7a1020');
+    return g;
+  }
+  const c = n % 2 === 0 ? '#e0662a' : '#e6b83a';
+  g.addColorStop(0, shade(c, 0.3));
+  g.addColorStop(0.5, c);
+  g.addColorStop(1, shade(c, -0.4));
+  return g;
 }
 
 function drawSelectedAoe(
@@ -1518,6 +1645,9 @@ function drawTower(
   // The shadow stays on the floor and shrinks while the Greater Orb caster is airborne.
   const air = leap.lift / GREATER_ORB_JUMP;
   contactShadow(ctx, 10.5, 15 * (1 - 0.3 * air), 6 * (1 - 0.3 * air), 1 - 0.45 * air);
+  // Stunned by a Sludge Father's spit: stood in a puddle of the stuff.
+  const goo = stunGoo(t);
+  if (goo > 0) drawStunGoo(ctx, 'floor', goo, time);
   // The player's own champion gets a thin outline around its foot shadow, tinted
   // from its portrait's outfit colour — a subtle "this hero is yours" marker.
   // While its ability haste is active (the Bow's Quickdraw) the ring *flares*.
@@ -1614,6 +1744,11 @@ function drawTower(
       style.rimAlpha = (style.rimAlpha ?? 0.55) * 0.25;
       style.shading = 0.5;
     }
+    // Smothered in sludge while stunned.
+    if (goo > 0) {
+      style.tint = '#3e5a1a';
+      style.tintAmount = Math.round(goo * 4) / 10;
+    }
     if (selected) {
       style.ink = INK.select;
       style.glow = 2.4;
@@ -1676,16 +1811,116 @@ function drawTower(
   }
   if (t.preloadMax > 0) drawPreloadGem(ctx, t.preloaded > 0);
   if (t.rangeBuffed) drawGale(ctx, 'front', t.uid * 0.37);
+  if (goo > 0) drawStunGoo(ctx, 'cover', goo, time);
+  ctx.restore();
+}
+
+/** How much sludge a stunned champion wears, 0..1: on at once, sliding off over its last moments. */
+function stunGoo(t: Tower): number {
+  return t.stun > 0 ? Math.min(1, t.stun / STUN_GOO_FADE) : 0;
+}
+const STUN_GOO_FADE = 0.35;
+
+/**
+ * The sludge a stunned champion is stuck in, in its local space (feet at
+ * y ≈ 11): the `floor` puddle it stands in, or the `cover`, a glob draped
+ * over its head and shoulders with runs dripping down it and a bubble popping.
+ */
+function drawStunGoo(ctx: CanvasRenderingContext2D, layer: 'floor' | 'cover', k: number, time: number): void {
+  const TAU = Math.PI * 2;
+  ctx.save();
+  ctx.globalAlpha = k;
+  if (layer === 'floor') {
+    ctx.fillStyle = 'rgba(46,62,22,0.85)';
+    ctx.beginPath();
+    for (let i = 0; i <= 10; i++) {
+      const a = (i / 10) * TAU;
+      const r = 1 + 0.12 * Math.sin(i * 2.3);
+      const px = Math.cos(a) * 17 * r;
+      const py = 10.5 + Math.sin(a) * 6.5 * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.fill();
+    ctx.fillStyle = 'rgba(166,220,60,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(-5, 8.6, 5, 1.2, -0.1, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+  // The glob over its head and shoulders.
+  ctx.fillStyle = '#4f6a24';
+  ctx.beginPath();
+  ctx.ellipse(0, -17, 9, 6, 0, 0, TAU);
+  ctx.ellipse(-6.5, -12.5, 4.2, 3.4, 0.3, 0, TAU);
+  ctx.ellipse(6.5, -12, 4, 3.2, -0.3, 0, TAU);
+  ctx.fill();
+  // Runs dripping down it, each swelling and letting go.
+  for (const [x, y0, len, off] of [[-8, -12, 9, 0.1], [-3, -12, 5, 0.6], [4, -11, 8, 0.35], [9, -11, 6, 0.8]] as const) {
+    const u = (time * 0.8 + off) % 1;
+    const l = len * (0.5 + 0.5 * u);
+    ctx.beginPath();
+    ctx.moveTo(x - 1.1, y0);
+    ctx.lineTo(x + 1.1, y0);
+    ctx.lineTo(x + 0.5, y0 + l);
+    ctx.arc(x, y0 + l, 1.1, 0, Math.PI);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.fillStyle = '#6e8a36';
+  ctx.beginPath();
+  ctx.ellipse(-2.5, -19.5, 4, 1.8, -0.2, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(226,248,160,0.8)';
+  ctx.beginPath();
+  ctx.ellipse(-3.5, -20, 1.6, 0.7, -0.3, 0, TAU);
+  ctx.fill();
+  // A bubble swelling and popping on top.
+  const b = (time * 0.9) % 1;
+  if (b < 0.85) {
+    ctx.strokeStyle = 'rgba(166,220,60,0.8)';
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.arc(3.5, -20.5, 0.6 + 1.8 * b, 0, TAU);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
 /** Post-lighting champion tells (Bard notes circle the head). */
 function drawTowerOverlays(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
   for (const t of engine.towers) {
+    if (t.stun > 0) drawStunTimer(ctx, t);
     if (t.attackSpeedBuffTimer > 0) {
       drawBuffNotes(ctx, t.pos.x, t.pos.y, t.attackSpeedBuffColor || t.def.visual.color);
     }
   }
+}
+
+/** A stunned champion's countdown: a ring over its head emptying as the stun wears off. */
+function drawStunTimer(ctx: CanvasRenderingContext2D, t: Tower): void {
+  const x = t.pos.x;
+  const y = t.pos.y - 40;
+  const k = t.stunMax > 0 ? t.stun / t.stunMax : 0;
+  ctx.save();
+  ctx.fillStyle = 'rgba(8,4,12,0.78)';
+  ctx.beginPath();
+  ctx.arc(x, y, 7.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#b8e05a';
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.arc(x, y, 5.6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k);
+  ctx.stroke();
+  // A drip of sludge in the middle.
+  ctx.fillStyle = '#8ab83a';
+  ctx.beginPath();
+  ctx.moveTo(x, y - 3.2);
+  ctx.quadraticCurveTo(x + 2.6, y + 0.4, x, y + 2.6);
+  ctx.quadraticCurveTo(x - 2.6, y + 0.4, x, y - 3.2);
+  ctx.fill();
+  ctx.restore();
 }
 
 /** Small palette of note glyphs cycled around a buffed champion. */
@@ -1832,6 +2067,127 @@ export function drawRoyalAura(ctx: CanvasRenderingContext2D, r: number, t: numbe
     ctx.fill();
   }
   ctx.restore();
+}
+
+/** Foes that shine with a paladin's holy light (the Paladin). */
+const PALADIN_AURA = new Set(['cap_brute2']);
+/** The Paladin's feet in her ground space (the sprite's foot line at board scale). */
+const PALADIN_FEET = 11;
+const HEAL_GOLD = '#ffd76a';
+
+/**
+ * The Paladin's light, drawn in her ground space (origin = her position on the
+ * path). At rest it is faint: a few gold motes drifting up off her plate and a
+ * soft glow at her feet. While she heals (`healPose`) it blazes: a golden disc
+ * welling out over the ground to her reach with a ring of turning star-glints
+ * at its edge, many more motes streaming up, and a white-gold star flaring on
+ * the tip of her raised sword. Each orbit is split by depth like the royal
+ * aura: `back` before her figure, `front` after it. `t` in seconds.
+ */
+function drawPaladinAura(ctx: CanvasRenderingContext2D, e: Enemy, t: number, layer: 'back' | 'front'): void {
+  const R = e.def.radius;
+  const k = healPose(e);
+  const reach = e.def.heal?.radius ?? 90;
+  const fy = PALADIN_FEET;
+  const front = layer === 'front';
+  const pulse = 0.5 + 0.5 * Math.sin(t * 3);
+  ctx.save();
+  if (!front) {
+    const g = ctx.createRadialGradient(0, fy, 0, 0, fy, R * 1.2);
+    g.addColorStop(0, withAlpha(AURA_GOLD, 0.16 + 0.1 * pulse));
+    g.addColorStop(1, withAlpha(AURA_GOLD, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(0, fy, R * 1.2, R * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (k > 0) {
+      // The aura welling out over the ground to her reach.
+      const rr = reach * (0.35 + 0.65 * ease.outCubic(k));
+      const d = ctx.createRadialGradient(0, fy, 0, 0, fy, rr);
+      d.addColorStop(0, withAlpha(AURA_CORE, 0.3 * k));
+      d.addColorStop(0.45, withAlpha(AURA_GOLD, 0.16 * k));
+      d.addColorStop(1, withAlpha(AURA_GOLD, 0));
+      ctx.fillStyle = d;
+      ctx.beginPath();
+      ctx.ellipse(0, fy, rr, rr * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = withAlpha(HEAL_GOLD, (0.35 + 0.2 * pulse) * k);
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.ellipse(0, fy, rr, rr * 0.5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+  ctx.globalCompositeOperation = 'lighter';
+  if (k > 0) {
+    // Star-glints turning round the edge of the aura.
+    const rr = reach * (0.35 + 0.65 * ease.outCubic(k));
+    for (let i = 0; i < 10; i++) {
+      const a = t * 0.8 + (i / 10) * Math.PI * 2;
+      if (Math.sin(a) > 0 !== front) continue;
+      const s = (1.4 + 1.1 * (0.5 + 0.5 * Math.sin(t * 5 + i * 2.1))) * k;
+      fourPointStar(ctx, Math.cos(a) * rr, fy + Math.sin(a) * rr * 0.5, s, withAlpha(AURA_CORE, 0.75 * k));
+    }
+  }
+  // Motes drifting up off her: a faint few at rest, a stream while she heals.
+  const n = 5 + Math.round(9 * k);
+  const speed = 2.8 - 1.2 * k;
+  for (let i = 0; i < n; i++) {
+    const u = (((t / speed + i / n) % 1) + 1) % 1;
+    const a = i * 2.39 + t * 0.6;
+    if (Math.sin(a) > 0 !== front) continue;
+    const spread = R * (0.75 + 0.5 * k) * (1 - 0.3 * u);
+    const px = Math.cos(a) * spread;
+    const py = fy + Math.sin(a) * spread * 0.4 - u * R * (2.1 + 0.8 * k);
+    const alpha = Math.sin(Math.PI * u) * (0.35 + 0.5 * k);
+    ctx.fillStyle = withAlpha(AURA_GOLD, alpha * 0.4);
+    ctx.beginPath();
+    ctx.arc(px, py, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = withAlpha(AURA_CORE, alpha);
+    ctx.beginPath();
+    ctx.arc(px, py, 0.9, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (front && k > 0) {
+    // The star on the tip of her raised sword.
+    const view = viewFor(e.heading);
+    const tip = paladinBladeTip(view, k);
+    const sx = view === 'side' && e.heading.x < 0 ? -1 : 1;
+    const x = tip.x * sx * FIGURE_SCALE;
+    // `drawEnemy` scales the figure about its local y 11.
+    const y = 11 + (tip.y - 11) * FIGURE_SCALE;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, 16 * k);
+    g.addColorStop(0, withAlpha(AURA_CORE, 0.8 * k));
+    g.addColorStop(0.4, withAlpha(HEAL_GOLD, 0.35 * k));
+    g.addColorStop(1, withAlpha(HEAL_GOLD, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, 16 * k, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(t * 0.9);
+    fourPointStar(ctx, 0, 0, (5 + 1.5 * pulse) * k, withAlpha('#ffffff', 0.9 * k));
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+/** A filled four-point star (a glint) centred on (x, y), `s` from centre to point. */
+function fourPointStar(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, fill: string): void {
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.moveTo(x, y - s);
+  ctx.lineTo(x + s * 0.3, y - s * 0.3);
+  ctx.lineTo(x + s, y);
+  ctx.lineTo(x + s * 0.3, y + s * 0.3);
+  ctx.lineTo(x, y + s);
+  ctx.lineTo(x - s * 0.3, y + s * 0.3);
+  ctx.lineTo(x - s, y);
+  ctx.lineTo(x - s * 0.3, y - s * 0.3);
+  ctx.closePath();
+  ctx.fill();
 }
 
 function drawWardGlow(ctx: CanvasRenderingContext2D, r: number): void {
@@ -2122,8 +2478,10 @@ const ROLAND_FOOT_LIFT = 9; // Captain Roland's 1.3× mounted frame
 const SERGEANT_FOOT_LIFT = 10; // the Sergeant-at-Arms' 1.35× frame
 const HOUND_MASTER_FOOT_LIFT = 9; // the Hound Master's 1.3× frame
 const DRAVEN_FOOT_LIFT = 9; // Captain Draven's 1.3× frame
+const SLUDGE_FATHER_FOOT_LIFT = 12; // the Sludge Father's 1.5× frame
 export function footLiftFor(id: string): number {
   if (id === 'boss9') return DRAVEN_FOOT_LIFT;
+  if (id === 'boss10') return SLUDGE_FATHER_FOOT_LIFT;
   if (id === 'boss5') return KING_FOOT_LIFT;
   if (id === 'boss1') return CAPTAIN_FOOT_LIFT;
   if (id === 'boss2') return MERCENARY_FOOT_LIFT;
@@ -2213,6 +2571,8 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
   else contactShadow(ctx, R * 0.7, R * (1 - 0.25 * (e.rise ?? 0)), R * 0.42, boss ? 1.1 : 0.9);
   const aura = ROYAL_AURA.has(e.def.id);
   if (aura) drawRoyalAura(ctx, R, now() / 1000, 'back');
+  const holy = PALADIN_AURA.has(e.def.id) && !surfacing;
+  if (holy) drawPaladinAura(ctx, e, now() / 1000, 'back');
   ctx.restore();
 
   ctx.save();
@@ -2260,7 +2620,11 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
     const cower = Math.round((e.cower ?? 0) * 6) / 6;
     // A summoner (the Hound Master) lifts his whistle, quantized to 8 steps.
     const call = Math.round(summonPose(e) * 8) / 8;
-    const pose = taunting ? 1 : rally > 0 ? rally : call > 0 ? call : cower > 0 ? cower : surfacing ? 0 : (e.rise ?? 0);
+    // A spitter (the Sludge Father) rears and spews, quantized to 8 steps.
+    const spit = Math.round(spitPose(e) * SPIT_REAR * 8) / 8;
+    // A healer (the Paladin) raises her sword, quantized to 8 steps.
+    const heal = Math.round(healPose(e) * 8) / 8;
+    const pose = taunting ? 1 : rally > 0 ? rally : call > 0 ? call : spit > 0 ? spit : heal > 0 ? heal : cower > 0 ? cower : surfacing ? 0 : (e.rise ?? 0);
     const flourish = taunting ? twirl : snap;
     paintFigure(
       ctx,
@@ -2268,7 +2632,7 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
       style,
       rising
         ? undefined
-        : `e|${e.def.id}|${e.def.visual.color}|${view}|${left ? 1 : 0}|${sf.idx}${taunting ? `|t${twirl}` : ''}${rally > 0 ? `|r${rally}|${snap}` : ''}${cower > 0 ? `|c${cower}` : ''}${call > 0 ? `|h${call}` : ''}`,
+        : `e|${e.def.id}|${e.def.visual.color}|${view}|${left ? 1 : 0}|${sf.idx}${taunting ? `|t${twirl}` : ''}${rally > 0 ? `|r${rally}|${snap}` : ''}${cower > 0 ? `|c${cower}` : ''}${call > 0 ? `|h${call}` : ''}${spit > 0 ? `|s${spit}` : ''}${heal > 0 ? `|p${heal}` : ''}`,
     );
   } else {
     // Emoji fallback token: lit disc, inked rim (gold for a boss).
@@ -2293,6 +2657,12 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
     ctx.save();
     ctx.translate(x + dodgeX + rc.dx * 0.5, groundY + dodgeY + rc.dy * 0.5);
     drawRoyalAura(ctx, R, now() / 1000, 'front');
+    ctx.restore();
+  }
+  if (holy) {
+    ctx.save();
+    ctx.translate(x + dodgeX + rc.dx * 0.5, groundY + dodgeY + rc.dy * 0.5);
+    drawPaladinAura(ctx, e, now() / 1000, 'front');
     ctx.restore();
   }
   if (surfacing) drawSurfaceCollar(ctx, x + dodgeX, waterline, R, 1 - e.rise);
@@ -2352,6 +2722,678 @@ function drawSurfaceCollar(ctx: CanvasRenderingContext2D, x: number, wy: number,
   ctx.restore();
 }
 
+/** Where a sludge glob is in its arc: on the ground below it, and how high above that. */
+function globAt(g: SludgeGlob): { x: number; y: number; h: number; u: number } {
+  const u = Math.min(1, g.t / g.time);
+  return { x: g.from.x + (g.to.x - g.from.x) * u, y: g.from.y + (g.to.y - g.from.y) * u, h: g.arc * 4 * u * (1 - u), u };
+}
+
+/**
+ * The Sludge Father's spit in flight: each glob a wobbling lump of sludge
+ * stretched along its arc with a couple of gobbets trailing it, and its shadow
+ * sliding along the ground below, darkening as it comes down.
+ */
+function drawSludgeGlobs(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
+  if (engine.globs.length === 0) return;
+  const TAU = Math.PI * 2;
+  ctx.save();
+  for (const g of engine.globs) {
+    const p = globAt(g);
+    ctx.fillStyle = `rgba(8,5,14,${(0.15 + 0.25 * p.u).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y + 8, 5, 2, 0, 0, TAU);
+    ctx.fill();
+    // Its heading along the arc, to stretch it the way it flies.
+    const q = globAt({ ...g, t: Math.min(g.time, g.t + 0.02) });
+    const ang = Math.atan2(q.y - q.h - (p.y - p.h), q.x - p.x);
+    for (const [back, r] of [[0.1, 1.6], [0.05, 2.4]] as const) {
+      const b = globAt({ ...g, t: Math.max(0, g.t - back * g.time) });
+      ctx.fillStyle = '#435a22';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y - b.h, r, 0, TAU);
+      ctx.fill();
+    }
+    const wob = Math.sin(g.t * 30) * 0.12;
+    ctx.save();
+    ctx.translate(p.x, p.y - p.h);
+    ctx.rotate(ang);
+    ctx.fillStyle = '#4f6a24';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 5.4 * (1 + wob), 3.8 * (1 - wob), 0, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(20,28,10,0.85)';
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    ctx.fillStyle = '#a6dc3c';
+    ctx.beginPath();
+    ctx.ellipse(1.4, -1.3, 1.8, 0.9, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// The Sludge Father bursting out of the sewer (The Getaway, `sewerBurst.ts`)
+// ---------------------------------------------------------------------------
+
+/** The sewer entrance's depth line (its mouth), relative to the lane start: 4 px above it. */
+const SEWER_MOUTH_BASE = -4;
+/** A bursting figure's depth line, below its feet (as a walking one's, so the hand-off doesn't re-sort). */
+const SEWER_BURST_BASE = 3;
+/** The walking sprite's foot line in its local space (12 × its 1.5 scale). */
+const SF_FEET_LOCAL = 18;
+/** Foes whose hide the sun has scorched: they steam as they go. */
+const SUN_SCORCHED = new Set(['boss10']);
+const STEAM = '#d9d6c4';
+
+interface SewerMouth {
+  /** The lane start (mid-mouth). */
+  x: number;
+  y: number;
+  /** The sill, the arch's springline and its radius. */
+  floorY: number;
+  springY: number;
+  r: number;
+}
+
+/** The mouth of the sewer entrance lane `lane` starts in (`SEWER_MOUTH`). */
+function sewerMouthOn(engine: GameEngine, lane: number): SewerMouth {
+  const s = engine.pointOnLane(lane, 0);
+  return { x: s.x, y: s.y, floorY: s.y + SEWER_MOUTH.floor, springY: s.y + SEWER_MOUTH.spring, r: SEWER_MOUTH.r };
+}
+
+/** The mouth the stage's sewer-burst foe will come out of, or null on other stages. */
+function burstMouth(engine: GameEngine): SewerMouth | null {
+  return engine.burstLane < 0 ? null : sewerMouthOn(engine, engine.burstLane);
+}
+
+/**
+ * A foe partway through its sewer-burst entrance: its pose, and where its
+ * figure stands (`x`, `feetY`) on the way out. Null for anyone else.
+ */
+function burstFigure(engine: GameEngine, e: Enemy): { pose: SewerBurstPose; x: number; feetY: number } | null {
+  if (e.riseFrom !== 'sewer' || e.rise <= 0) return null;
+  const pose = sewerBurstPose((1 - e.rise) * SEWER_BURST_TIME);
+  const at = engine.pointOnLane(e.laneIndex, pose.fwd);
+  return { pose, x: at.x, feetY: at.y + SEWER_BURST_FEET };
+}
+
+/** How many of something to spawn this frame at `rate` per second. */
+function emitCount(rate: number, dt: number): number {
+  const n = rate * dt;
+  return Math.floor(n) + (Math.random() < n - Math.floor(n) ? 1 : 0);
+}
+
+/**
+ * Per-frame particles for the stirring sewer and its foe: sludge dribbling off
+ * the arch's crown while it stirs; through the entrance, sludge spewing out of
+ * the mouth, then steam and sizzling sparks boiling off it in the light; and,
+ * walking, the steam that keeps rising off its scorched hide.
+ */
+function animateSewerBurst(engine: GameEngine, st: BoardState, dt: number): void {
+  // Sludge dripping off the spit's globs as they fly.
+  for (const g of engine.globs) {
+    const p = globAt(g);
+    for (let i = emitCount(30, dt); i > 0; i--) {
+      st.vfx.spawn('dust', p.x + (Math.random() - 0.5) * 3, p.y - p.h, { color: Math.random() < 0.4 ? '#a6dc3c' : '#4a6420', grav: 260, life: 0.4, size: 1.3, drag: 1 });
+    }
+  }
+  const m = burstMouth(engine);
+  if (m) {
+    const stir = engine.sewerStirring();
+    st.stir += (stir - st.stir) * Math.min(1, dt * 0.5);
+    const ooze = engine.burstSpawned ? 1 : stir;
+    st.ooze += (ooze - st.ooze) * Math.min(1, dt * (engine.burstSpawned ? 1.5 : 0.25));
+    if (engine.sewerBroken && st.brokeAt < 0) st.brokeAt = now() / 1000;
+    for (let i = emitCount(1.8 * st.stir, dt); i > 0; i--) {
+      st.vfx.spawn('dust', m.x + (Math.random() - 0.5) * m.r * 1.2, m.springY - m.r + 4, { color: '#6e8a36', grav: 240, vy: 6, life: 0.55, size: 1.3, drag: 0.5 });
+    }
+  }
+  for (const e of engine.enemies) {
+    if (e.dead || e.dying) continue;
+    const b = burstFigure(engine, e);
+    if (b) {
+      const p = b.pose;
+      const s = Math.max(0.6, p.scale);
+      if (m) {
+        for (let i = emitCount(40 * p.gush, dt); i > 0; i--) {
+          st.vfx.spawn('dust', m.x + (Math.random() - 0.5) * m.r * 1.3, m.floorY - 3, {
+            color: Math.random() < 0.3 ? '#a6dc3c' : '#4a6420',
+            vx: (Math.random() - 0.5) * 70,
+            vy: -30 - Math.random() * 50,
+            grav: 300,
+            life: 0.6,
+            size: 1.6,
+            drag: 0.6,
+          });
+        }
+      }
+      // The hide boiling off in the light: steam rising off its back and
+      // shoulders (off to the sides of its face, so it stays readable).
+      for (let i = emitCount(16 * p.steam, dt); i > 0; i--) {
+        const side = Math.random() < 0.5 ? -1 : 1;
+        st.vfx.spawn('smoke', b.x + side * (8 + Math.random() * 16) * s, b.feetY - (0.55 + 0.45 * Math.random()) * 36 * s, {
+          color: STEAM,
+          vx: side * (4 + Math.random() * 8),
+          vy: -26 - Math.random() * 22,
+          life: 1.1 + Math.random() * 0.5,
+          size: 2.2 * Math.min(2, s),
+          grow: 6,
+          drag: 0.8,
+        });
+      }
+      for (let i = emitCount(30 * p.steam * Math.max(0.3, p.glare), dt); i > 0; i--) {
+        st.vfx.spawn('spark', b.x + (Math.random() - 0.5) * 30 * s, b.feetY - Math.random() * 34 * s, {
+          color: '#fff1c4',
+          vx: (Math.random() - 0.5) * 50,
+          vy: -30 - Math.random() * 40,
+          life: 0.35,
+          size: 1,
+        });
+      }
+    } else if (SUN_SCORCHED.has(e.def.id) && e.rise <= 0) {
+      for (let i = emitCount(2.6, dt); i > 0; i--) {
+        const R = e.def.radius;
+        st.vfx.spawn('smoke', e.pos.x + (Math.random() - 0.5) * R * 1.2, e.pos.y - footLiftFor(e.def.id) - R * (0.2 + 0.6 * Math.random()), {
+          color: STEAM,
+          vx: (Math.random() - 0.5) * 6,
+          vy: -14 - Math.random() * 8,
+          life: 1.4,
+          size: 2.2,
+          grow: 5,
+          drag: 0.6,
+        });
+      }
+    }
+  }
+}
+
+/**
+ * Sludge welling out of the stirring sewer onto the bank in front of it: a
+ * slick spreading from under the sill, a run of it down from the lip, and fat
+ * bubbles swelling and popping in it. Drawn on the ground, under every figure.
+ */
+function drawSewerOoze(ctx: CanvasRenderingContext2D, engine: GameEngine, st: BoardState): void {
+  const m = burstMouth(engine);
+  if (!m) return;
+  if (st.ooze >= 0.01) drawSewerSlick(ctx, m, st);
+  // Once it has burst through, the arch's broken stones lie in front of it.
+  if (st.brokeAt >= 0) drawSewerRubble(ctx, m, now() / 1000 - st.brokeAt);
+}
+
+/** The broken arch's stones lying where they fell, landing one by one just after it bursts. */
+const SEWER_RUBBLE: readonly [number, number, number, number, number][] = [
+  // dx, dy (from the mouth's centre and sill), width, height, tilt
+  [-31, 7, 11, 7, 0.3],
+  [-21, 15, 7, 5.5, -0.4],
+  [-40, 17, 6, 4.5, 0.8],
+  [27, 5, 12, 7, -0.2],
+  [36, 14, 7, 5.5, 0.5],
+  [20, 17, 6, 4.5, 1.1],
+  [-10, 21, 5, 3.6, 0.6],
+  [12, 25, 4.4, 3.2, -0.7],
+];
+
+function drawSewerRubble(ctx: CanvasRenderingContext2D, m: SewerMouth, since: number): void {
+  ctx.save();
+  SEWER_RUBBLE.forEach(([dx, dy, w, h, tilt], i) => {
+    // Each block lands a moment after the burst, with a little bounce.
+    const k = Math.max(0, Math.min(1, (since - 0.12 - i * 0.04) / 0.3));
+    if (k <= 0) return;
+    const hop = Math.sin(Math.PI * Math.min(1, k * 1.25)) * (1 - k) * 6;
+    const x = m.x + dx;
+    const y = m.floorY + dy - hop;
+    ctx.fillStyle = 'rgba(8,5,14,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(m.x + dx + 1, m.floorY + dy + h * 0.55, w * 0.9, h * 0.35, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(tilt);
+    // A chipped block: its front face, its lit top, a broken corner.
+    const lip = h * 0.3;
+    ctx.fillStyle = '#6a6c64';
+    ctx.beginPath();
+    ctx.moveTo(-w / 2, -h / 2 + lip);
+    ctx.lineTo(w / 2 - 2, -h / 2 + lip);
+    ctx.lineTo(w / 2, -h / 2 + lip + 2);
+    ctx.lineTo(w / 2, h / 2);
+    ctx.lineTo(-w / 2, h / 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(30,32,28,0.8)';
+    ctx.lineWidth = 0.6;
+    ctx.stroke();
+    ctx.fillStyle = '#a2a49a';
+    ctx.beginPath();
+    ctx.moveTo(-w / 2, -h / 2 + lip);
+    ctx.lineTo(-w / 2 + 1.4, -h / 2);
+    ctx.lineTo(w / 2 - 2.6, -h / 2);
+    ctx.lineTo(w / 2 - 2, -h / 2 + lip);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  });
+  ctx.restore();
+}
+
+/** The sludge slick on the bank in front of the mouth (see `drawSewerOoze`). */
+function drawSewerSlick(ctx: CanvasRenderingContext2D, m: SewerMouth, st: BoardState): void {
+  const k = ease.outCubic(Math.min(1, st.ooze));
+  const t = now() / 1000;
+  const cx = m.x;
+  const cy = m.floorY + 3 + 7 * k;
+  const rx = 10 + 22 * k;
+  const ry = 3.5 + 7 * k;
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, st.ooze * 2) * 0.9;
+  ctx.fillStyle = '#2b3a15';
+  ctx.beginPath();
+  const N = 14;
+  for (let i = 0; i <= N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    const wob = 0.86 + 0.14 * Math.sin(i * 2.7 + 1.3) + 0.04 * Math.sin(t * 1.3 + i);
+    const x = cx + Math.cos(a) * rx * wob;
+    const y = cy + Math.sin(a) * ry * wob;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.fill();
+  ctx.fillStyle = '#44601e';
+  ctx.beginPath();
+  ctx.ellipse(cx - rx * 0.05, cy - ry * 0.1, rx * 0.7, ry * 0.55, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // The run down off the sill into the slick.
+  ctx.fillStyle = '#3e5620';
+  ctx.beginPath();
+  ctx.moveTo(cx - 8, m.floorY - 2);
+  ctx.lineTo(cx + 8, m.floorY - 2);
+  ctx.lineTo(cx + rx * 0.45, cy);
+  ctx.lineTo(cx - rx * 0.45, cy);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(200,224,112,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(cx - rx * 0.3, cy - ry * 0.3, rx * 0.2, ry * 0.12, -0.15, 0, Math.PI * 2);
+  ctx.fill();
+  // Fat bubbles swelling and popping.
+  ctx.lineWidth = 0.6;
+  for (let i = 0; i < 6; i++) {
+    const cyc = t / (1.4 + i * 0.31) + i * 0.17;
+    const n = Math.floor(cyc);
+    const u = cyc - n;
+    const bx = cx + (hash2(n, i, 3) - 0.5) * rx * 1.3;
+    const by = cy + (hash2(n, i, 5) - 0.5) * ry * 1.1;
+    const br = (0.5 + 2 * u) * (0.5 + 0.5 * k);
+    if (u < 0.85) {
+      ctx.fillStyle = '#5a7a28';
+      ctx.beginPath();
+      ctx.arc(bx, by, br, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(166,220,60,0.6)';
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(226,248,160,0.7)';
+      ctx.beginPath();
+      ctx.arc(bx - br * 0.35, by - br * 0.35, br * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.strokeStyle = `rgba(166,220,60,${(0.6 * (1 - (u - 0.85) / 0.15)).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.ellipse(bx, by, br * (1 + (u - 0.85) * 6), br * 0.5 * (1 + (u - 0.85) * 6), 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/**
+ * The eyes in the stirring sewer's dark: open for a few seconds at a time,
+ * blinking, drifting a little, gone once the thing has come out. Null while
+ * they are shut (or nothing stirs).
+ */
+function stirEyes(engine: GameEngine, st: BoardState, time: number): { x: number; y: number; open: number } | null {
+  const m = burstMouth(engine);
+  if (!m || engine.burstSpawned || st.stir < 0.02) return null;
+  const u = (time * 0.11) % 1;
+  const win = (a: number, b: number) => Math.max(0, Math.min(1, (u - a) / 0.04, (b - u) / 0.04));
+  const blink = (c: number) => (Math.abs(u - c) < 0.008 ? 0 : 1);
+  const open = Math.max(win(0.06, 0.4), win(0.55, 0.92)) * blink(0.24) * blink(0.71) * Math.min(1, st.stir * 1.4);
+  if (open <= 0) return null;
+  return { x: m.x + Math.sin(time * 0.37) * 3.2, y: m.springY + 9 + Math.sin(time * 0.23) * 1.2, open };
+}
+
+/**
+ * The stirring sewer's mouth, over the entrance prop: sludge filling its
+ * channel and welling over the sill in place of the water, and the eyes
+ * watching out of the dark (with a few smaller ones once it is close).
+ */
+function drawSewerMouth(ctx: CanvasRenderingContext2D, engine: GameEngine, st: BoardState): void {
+  const m = burstMouth(engine);
+  if (!m) return;
+  const t = now() / 1000;
+  const TAU = Math.PI * 2;
+  if (engine.sewerBroken) drawBrokenArch(ctx, m);
+  if (st.ooze > 0.01) {
+    const k = Math.min(1, st.ooze * 1.3);
+    ctx.save();
+    ctx.globalAlpha = k;
+    // The channel brimming with sludge, the lip of it bulging over the sill.
+    const g = ctx.createLinearGradient(0, m.floorY - 11, 0, m.floorY);
+    g.addColorStop(0, '#1e2a10');
+    g.addColorStop(1, '#4a6420');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(m.x - 5, m.floorY - 11);
+    ctx.lineTo(m.x + 5, m.floorY - 11);
+    ctx.lineTo(m.x + 13, m.floorY);
+    ctx.lineTo(m.x - 13, m.floorY);
+    ctx.closePath();
+    ctx.fill();
+    const lip = 9 + 6 * k;
+    ctx.fillStyle = '#4f6a24';
+    ctx.beginPath();
+    ctx.ellipse(m.x, m.floorY - 1.5, lip, 2.2, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = '#6e8a36';
+    ctx.beginPath();
+    ctx.ellipse(m.x - lip * 0.3, m.floorY - 2.4, lip * 0.35, 0.7, 0, 0, TAU);
+    ctx.fill();
+    // Drips hanging off the lip, each swelling and letting go.
+    ctx.fillStyle = '#4f6a24';
+    for (const [dx, off] of [[-7, 0.1], [-1.5, 0.55], [5, 0.3]] as const) {
+      const len = 2 + 4 * (((t * 0.7 + off) % 1));
+      ctx.beginPath();
+      ctx.ellipse(m.x + dx, m.floorY + len * 0.5, 0.9, len * 0.5 + 0.5, 0, 0, TAU);
+      ctx.arc(m.x + dx, m.floorY + len, 1.2, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+  const eyes = stirEyes(engine, st, t);
+  if (!eyes) return;
+  const { x, y, open } = eyes;
+  ctx.save();
+  // A sickly glow about them, then the eyes under a scowl of a brow.
+  const halo = ctx.createRadialGradient(x, y, 0, x, y, 14);
+  halo.addColorStop(0, withAlpha(SLUDGE_EYE, 0.3 * open));
+  halo.addColorStop(1, withAlpha(SLUDGE_EYE, 0));
+  ctx.fillStyle = halo;
+  ctx.fillRect(x - 14, y - 14, 28, 28);
+  for (const side of [-1, 1]) {
+    ctx.fillStyle = SLUDGE_EYE;
+    ctx.beginPath();
+    ctx.ellipse(x + side * 4.2, y, 2.5, 1.25 * open, side * 0.32, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = '#fffbe0';
+    ctx.beginPath();
+    ctx.arc(x + side * 3.9, y, 0.6 * open, 0, TAU);
+    ctx.fill();
+  }
+  ctx.strokeStyle = 'rgba(2,4,3,0.9)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(x - 7.5, y - 3.2);
+  ctx.lineTo(x, y - 0.6);
+  ctx.lineTo(x + 7.5, y - 3.2);
+  ctx.stroke();
+  // Close now: smaller eyes opening around them, each on its own beat.
+  if (st.stir > 0.8) {
+    const k = (st.stir - 0.8) / 0.2;
+    for (const [dx, dy, ph] of [[-11, 6, 0.3], [10, 4, 1.7], [-4, -7, 3.1], [13, -4, 4.4]] as const) {
+      const o = Math.max(0, Math.sin(t * 0.9 + ph)) * k;
+      if (o <= 0.05) continue;
+      ctx.fillStyle = SLUDGE_EYE;
+      ctx.beginPath();
+      ctx.ellipse(x + dx, y + dy, 1.1, 0.6 * o, 0, 0, TAU);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+const SLUDGE_EYE = '#e8ff8a';
+
+/**
+ * The crown of the sewer's arch, burst out by the Sludge Father: a ragged hole
+ * torn up through the voussoirs and the masonry over the right shoulder, dark
+ * inside, its broken stone faces catching the light, cracks running out into
+ * the wall and sludge smeared down from its lip. In arch space: x from the
+ * mouth's centre, y from its springline.
+ */
+const ARCH_HOLE: readonly [number, number][] = [
+  [-19, -11], [-21, -15], [-17, -24], [-20, -29], [-12, -33], [-8, -40], [0, -38], [5, -44],
+  [12, -39], [19, -37], [21, -30], [28, -27], [31, -19], [29, -12], [33, -6], [27, -2], [22, -1], [0, -6],
+];
+const ARCH_CRACKS: readonly [number, number][][] = [
+  [[-20, -29], [-27, -34], [-35, -33]],
+  [[-12, -33], [-15, -42], [-13, -47]],
+  [[19, -37], [24, -44], [29, -47]],
+  [[31, -19], [39, -22], [44, -17]],
+  [[-21, -15], [-29, -10], [-31, -4]],
+  [[33, -6], [40, -2]],
+];
+
+function drawBrokenArch(ctx: CanvasRenderingContext2D, m: SewerMouth): void {
+  const ox = m.x;
+  const oy = m.springY;
+  const at = ([x, y]: readonly [number, number]) => [ox + x, oy + y] as const;
+  ctx.save();
+  // The hole: the tunnel's dark falling away behind the broken masonry.
+  const dark = ctx.createRadialGradient(ox, oy + 12, 2, ox, oy + 4, 46);
+  dark.addColorStop(0, '#020403');
+  dark.addColorStop(0.5, '#0a100c');
+  dark.addColorStop(1, '#262c24');
+  ctx.fillStyle = dark;
+  ctx.beginPath();
+  ARCH_HOLE.forEach((p, i) => {
+    const [x, y] = at(p);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.closePath();
+  ctx.fill();
+  // Broken stone faces along its top edge (lit) and the shadow under its lip.
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#a8aa9e';
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  for (let i = 1; i < ARCH_HOLE.length - 3; i++) {
+    const [x, y] = at(ARCH_HOLE[i]);
+    if (i === 1) ctx.moveTo(x, y + 0.6);
+    else ctx.lineTo(x, y + 0.6);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(12,14,12,0.7)';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  for (let i = 1; i < ARCH_HOLE.length - 3; i++) {
+    const [x, y] = at(ARCH_HOLE[i]);
+    if (i === 1) ctx.moveTo(x, y + 2);
+    else ctx.lineTo(x, y + 2);
+  }
+  ctx.stroke();
+  // Cracks running out from it into the wall.
+  ctx.strokeStyle = 'rgba(30,32,28,0.85)';
+  ctx.lineWidth = 0.8;
+  for (const crack of ARCH_CRACKS) {
+    ctx.beginPath();
+    crack.forEach((p, i) => {
+      const [x, y] = at(p);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+  // Sludge smeared over its lip, running down the wall.
+  ctx.fillStyle = 'rgba(74,100,32,0.75)';
+  for (const [x, y, len] of [[-17, -24, 9], [-6, -39, 6], [13, -39, 8], [29, -12, 10], [24, -28, 5]] as const) {
+    const [px, py] = at([x, y]);
+    ctx.beginPath();
+    ctx.moveTo(px - 1.4, py);
+    ctx.lineTo(px + 1.4, py);
+    ctx.lineTo(px + 0.6, py + len);
+    ctx.arc(px, py + len, 0.9, 0, Math.PI);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/**
+ * The Sludge Father partway out of the sewer: first its hands reaching out of
+ * the mouth to slap down on the bank, then its body squeezing through the arch
+ * (clipped to the opening, in the tunnel's shadow, its eyes burning), bursting
+ * out as a giant, rearing to roar, and shrinking in the daylight as it writhes:
+ * its walking figure throughout, posed and scaled from `sewerBurstPose`.
+ */
+function drawSewerBurst(ctx: CanvasRenderingContext2D, engine: GameEngine, st: BoardState, e: Enemy): void {
+  const b = burstFigure(engine, e);
+  if (!b) return;
+  const p = b.pose;
+  const m = sewerMouthOn(engine, e.laneIndex);
+  const def = e.def;
+  const R = def.radius;
+  const clock = now() / 1000;
+  /** The arch's opening and everything in front of the sill: what shows of a thing still coming through. */
+  const archClip = () => {
+    ctx.beginPath();
+    ctx.moveTo(m.x - m.r, m.floorY + 2);
+    ctx.lineTo(m.x - m.r, m.springY);
+    ctx.arc(m.x, m.springY, m.r, Math.PI, 0);
+    ctx.lineTo(m.x + m.r, m.floorY + 2);
+    ctx.closePath();
+    ctx.rect(0, m.floorY - 1, BOARD_WIDTH, BOARD_HEIGHT);
+    ctx.clip();
+  };
+
+  if (p.scale > 0) {
+    // The figure's origin (its feet sit `SF_FEET_LOCAL` below it).
+    const oy = b.feetY - SF_FEET_LOCAL;
+    ctx.save();
+    if (p.inMouth) archClip();
+    else {
+      ctx.save();
+      ctx.translate(b.x, oy);
+      contactShadow(ctx, SF_FEET_LOCAL + (R * 0.7 - SF_FEET_LOCAL) * p.scale, R * p.scale, R * 0.42 * p.scale, 1.1);
+      ctx.restore();
+    }
+    // Writhing in the light: a shudder and a squash about the feet.
+    const jx = p.writhe * Math.sin(clock * 47) * 1.4 * p.scale;
+    const sq = p.writhe * Math.sin(clock * 13) * 0.05;
+    ctx.translate(b.x + jx, oy - p.lift);
+    ctx.translate(0, SF_FEET_LOCAL);
+    ctx.scale(p.scale * (1 + sq), p.scale * (1 - sq));
+    ctx.translate(0, -SF_FEET_LOCAL);
+    const style = boardStyle(st, def.visual.color, true);
+    style.outline = Math.max(0.4, 1.2 / p.scale);
+    if (p.inMouth) style.cast = undefined;
+    if (p.dark > 0) {
+      style.tint = '#050807';
+      style.tintAmount = p.dark;
+    } else if (p.glare > 0) {
+      style.tint = '#ffe2a0';
+      style.tintAmount = p.glare * 0.2;
+    }
+    style.flash = p.flash * 0.45;
+    const dist = strideFrame(def.id, e.dist).q;
+    paintFigure(ctx, (g) => drawSludgeFatherBurst(g, def.visual.color, dist, p.rear, p.scorch), style);
+    // Still in the tunnel's dark, its eyes burn out of it.
+    if (p.dark > 0) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = withAlpha(SLUDGE_EYE, 0.85 * p.dark);
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.ellipse(side * 4.6, -4.7, 2.6, 1.3, side * 0.32, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  // Its hands reaching out ahead of it, melting into it once it is out.
+  if (p.arms > 0) {
+    for (const side of [-1, 1] as const) {
+      const k = side < 0 ? p.reachL : p.reachR;
+      if (k <= 0) continue;
+      const root = { x: side * 7, y: m.springY + 12 - m.y };
+      const plant = { x: side * SEWER_BURST_PLANT.dx, y: SEWER_BURST_PLANT.dy };
+      const ek = ease.outCubic(k);
+      const arm: SludgeArmPose = {
+        root,
+        hand: { x: root.x + (plant.x - root.x) * ek, y: root.y + (plant.y - root.y) * ek - Math.sin(Math.PI * k) * 16 },
+        bulge: -side * 6 * (1 - k),
+        spread: 0.4 + 0.6 * k,
+        planted: k >= 1,
+        time: clock,
+        size: 0.5,
+      };
+      const pad = 46 * arm.size;
+      const x0 = Math.min(arm.root.x, arm.hand.x) - pad - 6;
+      const y0 = Math.min(arm.root.y, arm.hand.y) - pad - 6;
+      const x1 = Math.max(arm.root.x, arm.hand.x) + pad + 6;
+      const y1 = Math.max(arm.root.y, arm.hand.y) + pad + 26;
+      const style = boardStyle(st, def.visual.color, true);
+      style.box = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+      style.headY = y0;
+      style.feetY = y1;
+      style.cast = undefined;
+      style.alpha = p.arms;
+      ctx.save();
+      archClip();
+      ctx.translate(m.x, m.y);
+      paintFigure(ctx, (g) => drawSludgeArm(g, arm), style);
+      ctx.restore();
+    }
+  }
+}
+
+/**
+ * The daylight finding the Sludge Father as it bursts out: a shaft of morning
+ * sun slanting down onto it, a glare on its body, and a white flare as it
+ * first strikes. Additive, in the glow pass.
+ */
+function drawSunGlare(ctx: CanvasRenderingContext2D, engine: GameEngine, st: BoardState): void {
+  for (const e of engine.enemies) {
+    if (e.dead) continue;
+    const b = burstFigure(engine, e);
+    if (!b || b.pose.glare <= 0) continue;
+    const p = b.pose;
+    const s = Math.max(1, p.scale);
+    const cx = b.x;
+    const cy = b.feetY - 26 * s;
+    // Toward the sun: against the way shadows fall, and always from above.
+    const ang = st.atmo.sun ? st.atmo.sun.angle : Math.PI * 0.3;
+    let lx = -Math.cos(ang);
+    let ly = -Math.abs(Math.sin(ang)) - 0.6;
+    const ll = Math.hypot(lx, ly) || 1;
+    lx /= ll;
+    ly /= ll;
+    const L = 380;
+    const w0 = 30 * s;
+    const w1 = 70 * s;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const shaft = ctx.createLinearGradient(cx, cy, cx + lx * L, cy + ly * L);
+    shaft.addColorStop(0, `rgba(255,236,170,${(0.16 * p.glare).toFixed(3)})`);
+    shaft.addColorStop(1, 'rgba(255,236,170,0)');
+    ctx.fillStyle = shaft;
+    ctx.beginPath();
+    ctx.moveTo(cx - ly * w0, cy + lx * w0);
+    ctx.lineTo(cx + ly * w0, cy - lx * w0);
+    ctx.lineTo(cx + lx * L + ly * w1, cy + ly * L - lx * w1);
+    ctx.lineTo(cx + lx * L - ly * w1, cy + ly * L + lx * w1);
+    ctx.closePath();
+    ctx.fill();
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 48 * s);
+    glow.addColorStop(0, `rgba(255,240,190,${(0.1 * p.glare + 0.25 * p.flash).toFixed(3)})`);
+    glow.addColorStop(1, 'rgba(255,240,190,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(cx - 48 * s, cy - 48 * s, 96 * s, 96 * s);
+    ctx.restore();
+  }
+}
+
 /**
  * Whether a foe is out of sight inside a doorway (a tunnel arch, a castle gate,
  * the sewer mouth): a standing prop is drawn in front of it (the same depth
@@ -2389,8 +3431,8 @@ function drawEnemyOverlays(ctx: CanvasRenderingContext2D, engine: GameEngine, ui
     // Still inside a tunnel arch or gate it is walking through: the figure is
     // hidden behind the prop, so its bar and shield pips stay hidden too.
     if (inDoorway(engine, st, e)) continue;
-    // Still under water: no bar or pips floating over the pool yet.
-    if (e.riseFrom === 'water' && (e.rise ?? 0) > 0) continue;
+    // Still under water, or bursting out of the sewer: no bar or pips yet.
+    if (e.riseFrom !== 'throne' && (e.rise ?? 0) > 0) continue;
     const R = e.def.radius;
     const y = e.pos.y - footLiftFor(e.def.id) - (e.riseFrom === 'water' ? 0 : RISE_LIFT * (e.rise ?? 0));
     let dodgeX = 0;

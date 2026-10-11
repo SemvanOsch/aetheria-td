@@ -45,6 +45,12 @@ export function foeLedgerRows(def: EnemyDef, kills: number): { label: string; va
     ...(def.shieldHits ? [{ label: 'Shield', value: `blocks ${def.shieldHits} hits` }] : []),
     ...(def.unkillable ? [{ label: 'Unkillable', value: 'never falls below 1 HP' }] : []),
     ...(def.regen ?[{ label: 'Regeneration', value: `${+(def.regen * 100).toFixed(1)}% HP/s` }] : []),
+    ...(def.spit
+      ? [{ label: 'Sludge spit', value: `every ${def.spit.every}s · stuns ${def.spit.targets} champions ${def.spit.stun}s` }]
+      : []),
+    ...(def.heal
+      ? [{ label: 'Healing', value: `${Math.round(def.heal.amount * 100)}% every ${def.heal.every}s` }]
+      : []),
     ...(def.dodgeChance ?[{ label: 'Evasion', value: `${Math.round(def.dodgeChance * 100)}% dodge` }] : []),
     ...((def.physicalResist ?? 0) > 0
       ? [{ label: 'Physical resist', value: `−${Math.round((def.physicalResist ?? 0) * 100)}%` }]

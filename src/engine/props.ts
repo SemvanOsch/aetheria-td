@@ -5303,143 +5303,239 @@ function wagonWheel(g: Ctx, cx: number, cy: number, r: number, far: boolean, spi
  * A draught horse in profile facing right, in harness. `(x, y)` is the
  * barrel's centre at rest; the hooves stand on y + 34. Standing still when
  * `gait` is null; otherwise trotting, `gait` (radians) the stride phase and
- * `speed` (0..1) how hard: the diagonal leg pairs swing and fold, the body
- * rises on each beat, the head nods and the tail streams out behind.
+ * `speed` (0..1) how hard: the diagonal leg pairs swing, each hoof planted on
+ * the ground through its stance and lifted in an arc through its swing, the
+ * body dips on each beat, the head nods and the tail streams out behind.
+ *
+ * The legs are jointed like a horse's: up front a muscled forearm, the knee,
+ * a slim cannon, the fetlock and a sloped pastern; behind, the gaskin angling
+ * back to a hock that points backward, then the cannon. Each leg is solved
+ * from its hoof up (two-bone IK), so a planted hoof never slides into the
+ * ground; the forelegs fold at the knee as they lift, the hocks flex behind.
  */
 function drawHorse(g: Ctx, x: number, y0: number, coat: string, mane: string, gait: number | null = null, speed = 0): void {
   const ground = y0 + 34;
   const moving = gait != null;
   const ph = gait ?? 0;
-  const y = moving ? y0 - Math.abs(Math.sin(ph)) * (1 + speed * 1.6) : y0;
+  const y = moving ? y0 + Math.abs(Math.sin(ph)) * (0.4 + speed * 0.8) : y0;
   const nod = moving ? Math.sin(ph * 2 + 0.6) * (0.8 + speed) : 0;
+  const ts = moving ? speed : 0;
   const dark = shade(coat, -0.3);
-  const hoof = (hx: number, hy: number, near: boolean) => {
+  /** Upper bone, lower bone, from `(ax, ay)` to `(bx, by)`; the joint on the forward (`front`) or rear side. */
+  const joint = (ax: number, ay: number, bx: number, by: number, l1: number, l2: number, front: boolean) => {
+    const d = Math.max(Math.abs(l1 - l2) + 0.01, Math.min(l1 + l2 - 0.01, Math.hypot(bx - ax, by - ay)));
+    const a = Math.atan2(by - ay, bx - ax);
+    const k = Math.acos(Math.max(-1, Math.min(1, (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d))));
+    const p = { x: ax + Math.cos(a + k) * l1, y: ay + Math.sin(a + k) * l1 };
+    const q = { x: ax + Math.cos(a - k) * l1, y: ay + Math.sin(a - k) * l1 };
+    return front === p.x > q.x ? p : q;
+  };
+  /** A tapered limb segment from `(ax, ay)` (width `w0`) to `(bx, by)` (width `w1`). */
+  const limb = (ax: number, ay: number, bx: number, by: number, w0: number, w1: number) => {
+    const len = Math.hypot(bx - ax, by - ay) || 1;
+    const nx = -(by - ay) / len;
+    const ny = (bx - ax) / len;
+    g.beginPath();
+    g.moveTo(ax + nx * w0 * 0.5, ay + ny * w0 * 0.5);
+    g.lineTo(bx + nx * w1 * 0.5, by + ny * w1 * 0.5);
+    g.arc(bx, by, w1 * 0.5, Math.atan2(ny, nx), Math.atan2(ny, nx) + Math.PI);
+    g.lineTo(ax - nx * w0 * 0.5, ay - ny * w0 * 0.5);
+    g.closePath();
+    g.fill();
+  };
+  const leg = (hx: number, hy: number, off: number, hind: boolean, near: boolean) => {
+    const c = near ? coat : dark;
+    // Where the hoof is: planted and sliding back under the body through the
+    // stance, lifted and carried forward through the swing.
+    const reach = moving ? 2.5 + 4.5 * speed : 0;
+    const lift = moving ? (hind ? 3 + 3.5 * speed : 4.5 + 5.5 * speed) : 0;
+    let fx = hx + (hind ? -1.5 : 0.8);
+    let fy = ground - 2.6;
+    let curl = 0;
+    if (moving) {
+      const u = ((((ph + off) / (Math.PI * 2)) % 1) + 1) % 1;
+      if (u < 0.55) {
+        fx += reach * (1 - (2 * u) / 0.55);
+      } else {
+        const s = (u - 0.55) / 0.45;
+        fx += -reach + reach * (1 - Math.cos(Math.PI * s));
+        curl = Math.sin(Math.PI * s);
+        fy -= lift * curl;
+      }
+    }
+    // The pastern slopes down and forward to the hoof, flicking back as it lifts.
+    const pa = hind ? 0.45 - curl * 1.3 : 0.5 - curl * 2.1;
+    const pl = 3.6;
+    const tx = fx - Math.sin(pa) * pl;
+    const ty = fy - Math.cos(pa) * pl;
+    const l1 = hind ? 13.5 : 11.5;
+    const l2 = hind ? 12.4 : 11;
+    const k = joint(hx, hy, tx, ty, l1, l2, !hind);
+    // The lower bone reaches as far as it can toward the fetlock.
+    const ld = Math.hypot(tx - k.x, ty - k.y) || 1;
+    const fl = { x: k.x + ((tx - k.x) / ld) * Math.min(ld, l2), y: k.y + ((ty - k.y) / ld) * Math.min(ld, l2) };
+    const hoofX = fl.x + Math.sin(pa) * pl;
+    const hoofY = fl.y + Math.cos(pa) * pl;
+    g.fillStyle = c;
+    // Forearm / gaskin, rising into the body; then the knee or hock.
+    const ux = (k.x - hx) / l1;
+    const uy = (k.y - hy) / l1;
+    limb(hx - ux * 4, hy - uy * 4, k.x, k.y, hind ? 8.5 : 7, hind ? 3.6 : 3.8);
+    g.beginPath();
+    g.arc(k.x, k.y, hind ? 2.1 : 2.2, 0, Math.PI * 2);
+    g.fill();
+    if (hind) {
+      // The point of the hock.
+      g.beginPath();
+      g.arc(k.x - 1, k.y - 0.4, 1.6, 0, Math.PI * 2);
+      g.fill();
+    }
+    // Cannon, fetlock, pastern.
+    limb(k.x, k.y, fl.x, fl.y, 3, 2.7);
+    g.beginPath();
+    g.arc(fl.x, fl.y, 1.85, 0, Math.PI * 2);
+    g.fill();
+    limb(fl.x, fl.y, hoofX, hoofY, 2.7, 2.5);
+    // Feathering: the pale fringe of hair over the fetlock and pastern.
     g.fillStyle = near ? shade(coat, 0.35) : shade(coat, 0.05);
     g.beginPath();
-    g.ellipse(hx, hy - 1.2, 2.4, 1.6, 0, 0, Math.PI * 2);
+    g.ellipse((fl.x + hoofX) / 2 - 0.6, (fl.y + hoofY) / 2 + 0.4, 2.2, 2.4, pa, 0, Math.PI * 2);
     g.fill();
+    // The hoof, its sole flat on the ground at rest.
+    g.save();
+    g.translate(hoofX, hoofY);
+    g.rotate(0.5 - pa - (hind ? 0.05 : 0));
     g.fillStyle = '#2a2420';
-    g.fillRect(hx - 1.9, hy, 3.8, 2);
-  };
-  const leg = (lx: number, near: boolean, off: number, hind: boolean) => {
-    if (!moving) {
-      g.fillStyle = near ? coat : dark;
-      g.beginPath();
-      g.moveTo(lx - 2.8, y + 3);
-      g.lineTo(lx + 2.8, y + 3);
-      g.lineTo(lx + 1.7, ground - 7);
-      g.lineTo(lx + 1.5, ground - 2);
-      g.lineTo(lx - 1.5, ground - 2);
-      g.lineTo(lx - 1.7, ground - 7);
-      g.closePath();
-      g.fill();
-      hoof(lx, ground - 2, near);
-      return;
-    }
-    // Hip → knee (swinging) → hoof (folding up as the leg comes forward).
-    const a = ph + off;
-    const swing = Math.sin(a) * (0.28 + 0.32 * speed);
-    const fold = Math.max(0, Math.cos(a)) * (0.45 + 0.7 * speed);
-    const hipY = y + 3;
-    const kx = lx + Math.sin(swing) * 15;
-    const ky = hipY + Math.cos(swing) * 15;
-    const low = hind ? swing + fold * 0.9 : swing - fold * 1.1;
-    const hx = kx + Math.sin(low) * 14;
-    const hy = Math.min(ground - 2, ky + Math.cos(low) * 14);
-    g.strokeStyle = near ? coat : dark;
-    g.lineCap = 'round';
-    g.lineWidth = 5.4;
     g.beginPath();
-    g.moveTo(lx, hipY);
-    g.lineTo(kx, ky);
-    g.stroke();
-    g.lineWidth = 3.2;
-    g.beginPath();
-    g.moveTo(kx, ky);
-    g.lineTo(hx, hy);
-    g.stroke();
-    g.lineCap = 'butt';
-    hoof(hx, hy, near);
+    g.moveTo(-1.9, -0.4);
+    g.lineTo(1.6, -0.4);
+    g.lineTo(2.6, 2.6);
+    g.lineTo(-2.1, 2.6);
+    g.closePath();
+    g.fill();
+    g.restore();
   };
-  leg(x - 10, false, 0, true);
-  leg(x + 11, false, Math.PI, false);
+
+  // The far legs, behind the body.
+  leg(x - 12, y + 3, 0, true, false);
+  leg(x + 10, y + 6, Math.PI, false, false);
   // Tail, streaming out behind with speed.
-  const ts = moving ? speed : 0;
   g.fillStyle = mane;
   g.beginPath();
-  g.moveTo(x - 15, y - 4);
-  g.quadraticCurveTo(x - 23 - ts * 6, y + 4 - ts * 6, x - 20 - ts * 10, y + 21 - ts * 14);
-  g.quadraticCurveTo(x - 16 - ts * 4, y + 9 - ts * 6, x - 12, y + 1);
+  g.moveTo(x - 19, y - 9);
+  g.quadraticCurveTo(x - 27 - ts * 6, y - 2 - ts * 6, x - 23 - ts * 11, y + 20 - ts * 15);
+  g.quadraticCurveTo(x - 19 - ts * 5, y + 6 - ts * 6, x - 16, y - 3);
   g.closePath();
   g.fill();
-  // Barrel and belly shadow.
-  g.fillStyle = hgrad(g, x - 16, x + 16, [[0, shade(coat, 0.08)], [1, shade(coat, -0.12)]]);
+  // Body: the round hindquarters, the barrel, the deep chest and shoulder.
+  g.fillStyle = hgrad(g, x - 21, x + 20, [[0, shade(coat, 0.06)], [0.5, shade(coat, 0.02)], [1, shade(coat, -0.12)]]);
   g.beginPath();
-  g.ellipse(x, y, 16, 8.5, 0, 0, Math.PI * 2);
+  g.ellipse(x - 10, y - 1.5, 10.5, 10, 0, 0, Math.PI * 2);
+  g.moveTo(x + 16, y + 1);
+  g.ellipse(x, y + 1, 16, 9.5, 0, 0, Math.PI * 2);
+  g.moveTo(x + 19.5, y);
+  g.ellipse(x + 11, y, 8.5, 10, 0, 0, Math.PI * 2);
   g.fill();
   g.fillStyle = 'rgba(0,0,0,0.18)';
   g.beginPath();
-  g.ellipse(x, y + 5, 13, 3.4, 0, 0, Math.PI * 2);
+  g.ellipse(x + 1, y + 7, 13, 3, 0, 0, Math.PI * 2);
   g.fill();
-  // Neck and head, bowed a little (nodding with the stride).
+  // Neck and head, bowed in harness (nodding with the stride).
   const hy = y + nod;
   g.fillStyle = coat;
   g.beginPath();
-  g.moveTo(x + 8, y - 6);
-  g.quadraticCurveTo(x + 14, hy - 18, x + 21, hy - 22);
-  g.lineTo(x + 26, hy - 17);
-  g.quadraticCurveTo(x + 20, y - 8, x + 16, y + 3);
+  g.moveTo(x + 5, y - 9);
+  g.quadraticCurveTo(x + 11, hy - 21, x + 19, hy - 25.5);
+  g.lineTo(x + 24, hy - 19);
+  g.quadraticCurveTo(x + 21, y - 7, x + 19, y + 3);
+  g.lineTo(x + 8, y + 2);
+  g.closePath();
+  g.fill();
+  g.fillStyle = dark;
+  g.beginPath();
+  g.moveTo(x + 18.5, hy - 25);
+  g.lineTo(x + 18.6 - ts * 1.5, hy - 30.5);
+  g.lineTo(x + 21.4, hy - 25.6);
   g.closePath();
   g.fill();
   g.save();
-  g.translate(x + 24, hy - 18);
-  g.rotate(0.75);
+  g.translate(x + 20, hy - 24.5);
+  g.rotate(1.02);
   g.fillStyle = coat;
   g.beginPath();
-  g.ellipse(4, 0, 7, 3.7, 0, 0, Math.PI * 2);
-  g.fill();
-  g.fillStyle = shade(coat, -0.22);
-  g.beginPath();
-  g.ellipse(9.5, 0.4, 2.7, 2.7, 0, 0, Math.PI * 2);
-  g.fill();
-  g.restore();
-  g.fillStyle = dark;
-  g.beginPath();
-  g.moveTo(x + 20, hy - 22);
-  g.lineTo(x + 20.5 - ts * 1.5, hy - 27.5);
-  g.lineTo(x + 23, hy - 22.5);
+  g.moveTo(-1.5, -3);
+  g.lineTo(4, -3.5);
+  g.quadraticCurveTo(10.5, -3, 13.5, -1.8);
+  g.quadraticCurveTo(15.6, 0.4, 13.8, 2.8);
+  g.lineTo(11.5, 3.2);
+  g.quadraticCurveTo(7.5, 3.6, 5.5, 6.2);
+  g.quadraticCurveTo(1.5, 7.6, -1.5, 4);
   g.closePath();
   g.fill();
-  g.strokeStyle = mane;
-  g.lineWidth = 2.4;
-  g.lineCap = 'round';
+  // Muzzle, nostril, eye.
+  g.fillStyle = shade(coat, -0.22);
   g.beginPath();
-  g.moveTo(x + 8, y - 7);
-  g.quadraticCurveTo(x + 13 - ts * 2, hy - 18, x + 19.5, hy - 22);
-  g.stroke();
-  g.lineCap = 'butt';
+  g.ellipse(12.6, 0.5, 2.8, 2.9, 0, 0, Math.PI * 2);
+  g.fill();
   g.fillStyle = '#100808';
   g.beginPath();
-  g.arc(x + 25, hy - 18.5, 0.8, 0, Math.PI * 2);
+  g.arc(13.3, -0.2, 0.7, 0, Math.PI * 2);
+  g.arc(4.8, -1.4, 0.85, 0, Math.PI * 2);
   g.fill();
-  leg(x - 7, true, Math.PI, true);
-  leg(x + 14, true, 0, false);
-  // Harness: collar, a trace back to the wagon, the bridle, a brass boss.
+  // Bridle: cheekpiece, noseband, a brass rosette.
   g.strokeStyle = '#4a2e1c';
-  g.lineWidth = 2.6;
+  g.lineWidth = 1.1;
   g.beginPath();
-  g.ellipse(x + 13, y - 6, 3, 7, -0.5, 0, Math.PI * 2);
-  g.stroke();
-  g.lineWidth = 1.2;
-  g.beginPath();
-  g.moveTo(x + 11, y - 1);
-  g.lineTo(x - 18, y0 + 1);
-  g.moveTo(x + 21.5, hy - 19.5);
-  g.lineTo(x + 30, hy - 12.5);
+  g.moveTo(1.6, -3.3);
+  g.lineTo(3, 5.8);
+  g.moveTo(9.6, -3.2);
+  g.lineTo(9.8, 3.6);
+  g.moveTo(3, 1.2);
+  g.lineTo(9.7, 0.6);
   g.stroke();
   g.fillStyle = GOLD;
   g.beginPath();
-  g.arc(x + 13, y - 11, 1.1, 0, Math.PI * 2);
+  g.arc(1.9, -1.4, 0.9, 0, Math.PI * 2);
+  g.fill();
+  g.restore();
+  // Mane along the crest.
+  g.strokeStyle = mane;
+  g.lineWidth = 2.6;
+  g.lineCap = 'round';
+  g.beginPath();
+  g.moveTo(x + 5, y - 9.5);
+  g.quadraticCurveTo(x + 10.5 - ts * 2, hy - 21.5, x + 18.5, hy - 26);
+  g.stroke();
+  g.lineCap = 'butt';
+  // The near legs, in front of the body.
+  leg(x - 9, y + 4, Math.PI, true, true);
+  leg(x + 13, y + 6.5, 0, false, true);
+  // Harness: the collar, only its near side (the far side is round behind
+  // the neck), a band hugging the base of the neck from the withers down to
+  // the chest with the hames along it; a trace back to the wagon; a brass boss.
+  g.lineCap = 'round';
+  g.strokeStyle = '#4a2e1c';
+  g.lineWidth = 3.6;
+  g.beginPath();
+  g.moveTo(x + 8.5, y - 12);
+  g.quadraticCurveTo(x + 16.5, y - 9.5, x + 19, y + 0.5);
+  g.stroke();
+  g.strokeStyle = '#7a5434';
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(x + 9.5, y - 12.6);
+  g.quadraticCurveTo(x + 17.6, y - 10, x + 20, y - 0.2);
+  g.stroke();
+  g.lineCap = 'butt';
+  g.strokeStyle = '#4a2e1c';
+  g.lineWidth = 1.2;
+  g.beginPath();
+  g.moveTo(x + 17, y - 2);
+  g.lineTo(x - 18, y0 + 1);
+  g.stroke();
+  g.fillStyle = GOLD;
+  g.beginPath();
+  g.arc(x + 17.4, y - 2.4, 1.1, 0, Math.PI * 2);
   g.fill();
 }
 

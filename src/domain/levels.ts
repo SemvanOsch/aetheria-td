@@ -136,6 +136,12 @@ export interface LevelDef {
    */
   bossHaltAt?: Cell;
   /**
+   * The line under "Victory" on the stage's result card, for a stage that isn't
+   * won by felling its boss (The Sewers: escaping the Sludge Father). Omit for
+   * the usual "The realm is saved. The boss lies vanquished!".
+   */
+  victoryLine?: string;
+  /**
    * The stage lies in mist (`domain/mist.ts`): champions lose part of their
    * range unless they stand close to a lantern the player has lit.
    */
@@ -149,7 +155,7 @@ const STARTING_GOLD = 200;
 
 // Shorthand enemy ids per section.
 const CAS = { g: 'cas_grunt', g2: 'cas_grunt2', r: 'cas_runner', b: 'cas_brute', m: 'cas_mage' };
-const CAP = { g: 'cap_grunt', g2: 'cap_grunt2', r: 'cap_runner', b: 'cap_brute' };
+const CAP = { g: 'cap_grunt', g2: 'cap_grunt2', r: 'cap_runner', b: 'cap_brute', b2: 'cap_brute2' };
 // Re-enable when the Forest/Inn chapters are authored:
 // const FOR = { g: 'for_grunt', r: 'for_runner', b: 'for_brute' };
 // const INN = { g: 'inn_grunt', r: 'inn_runner', b: 'inn_brute' };
@@ -192,6 +198,8 @@ interface LevelSpec {
   ending?: StageEnding;
   /** Won when the boss reaches this cell (see `LevelDef.bossHaltAt`). */
   bossHaltAt?: Cell;
+  /** The result card's line under "Victory" (see `LevelDef.victoryLine`). */
+  victoryLine?: string;
   /** The stage lies in mist (see `LevelDef.mist`). */
   mist?: boolean;
 }
@@ -575,6 +583,7 @@ const CAPITAL_SPECS: LevelSpec[] = [
     // through the far tunnel while it can (`SludgeFatherCutscene`).
     bossHaltAt: { col: 8, row: 3 },
     ending: 'sludgeFather',
+    victoryLine: 'You escaped the horror beneath the Capital… for now.',
     theme: {
       groundEven: '#5a5a52',
       groundOdd: '#52524b',
@@ -693,15 +702,33 @@ const CAPITAL_SPECS: LevelSpec[] = [
       {
         // Out of the sewer mouth and down the riverbank to the wagon's tail.
         path: [{ col: 1, row: 1 }, { col: 1, row: 7 }, { col: 5, row: 7 }, { col: 5, row: 3 }, { col: 9, row: 3 }, { col: 9, row: 8 }, { col: 11, row: 8 }, { col: 11, row: 5 }, { col: 13, row: 5 }],
-        // Placeholder wave so the stage runs; its waves and boss come later.
         waves: [
-          { groups: [{ enemyId: CAS.g, count: 6 }] },
+          { groups: [{ enemyId: CAP.g2, count: 4, spacing: 3.5 }] },
+          { groups: [{ enemyId: CAP.g2, count: 2 }, { enemyId: CAP.g2, count: 2, delay: 6 }] },
+          { groups: [] },
+          { groups: [{ enemyId: CAP.g2, count: 7, spacing: 5 }] },
+          { groups: [{ enemyId: CAP.b, count: 3 }] },
+          { groups: [] },
+          { groups: [{ enemyId: bossIdForLevel(10), count: 1 }] },
         ],
       },
       {
         // Up out of the wood to the south, joining the sewer road at (5, 7).
         path: [{ col: 5, row: 10 }, { col: 5, row: 7 }, { col: 5, row: 3 }, { col: 9, row: 3 }, { col: 9, row: 8 }, { col: 11, row: 8 }, { col: 11, row: 5 }, { col: 13, row: 5 }],
-        waves: [],
+        waves: [
+          { groups: [] },
+          { groups: [] },
+          { groups: [{ enemyId: CAS.r, count: 20, spacing: 0.3 }] },
+          { groups: [{ enemyId: CAP.g, count: 3, delay: 4 }] },
+          { groups: [{ enemyId: CAP.r, count: 12, spacing: 0.5 }] },
+          {
+            groups: [
+              { enemyId: CAS.g2, count: 8, spacing: 0.5 }, { enemyId: CAP.b2, count: 1, delay: 2 },
+              { enemyId: CAS.m, count: 8, spacing: 0.4, delay: 10 }, { enemyId: CAP.b2, count: 1 },
+              { enemyId: CAP.g, count: 6, spacing: 0.5, delay: 10 }, { enemyId: CAP.b2, count: 1, delay: 2 },
+            ]
+          },
+        ],
       },
     ],
   },
@@ -729,7 +756,7 @@ function specLanes(s: LevelSpec): LaneDef[] {
 }
 
 /** Stages temporarily pulled from the campaign (still authored above). */
-const DISABLED_LEVEL_IDS = new Set<number>([10]); // Capital 5, The Getaway
+const DISABLED_LEVEL_IDS = new Set<number>([]); // Capital 5, The Getaway
 
 function buildLevels(specs: LevelSpec[], section: SectionId, color: string): LevelDef[] {
   return specs.filter((s) => !DISABLED_LEVEL_IDS.has(s.id)).map((s, i) => ({
@@ -749,6 +776,7 @@ function buildLevels(specs: LevelSpec[], section: SectionId, color: string): Lev
     mood: s.mood,
     ending: s.ending,
     bossHaltAt: s.bossHaltAt,
+    victoryLine: s.victoryLine,
     mist: s.mist,
   }));
 }
