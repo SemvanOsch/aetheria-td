@@ -209,75 +209,81 @@ function StageBriefing({
 
   return (
     <aside className="panel ornate campaign-brief" key={level.id}>
-      <div className="campaign-brief-eyebrow">Stage {level.order}</div>
-      <h2 className="campaign-brief-name">{level.name}</h2>
-      <p className="campaign-brief-sub">{level.subtitle}</p>
+      {/* Everything but the Enter button, which stays in view below it. */}
+      <div className="campaign-brief-scroll">
+        <div className="campaign-brief-eyebrow">Stage {level.order}</div>
+        <h2 className="campaign-brief-name">{level.name}</h2>
+        <p className="campaign-brief-sub">{level.subtitle}</p>
 
-      <BoardPreview level={level} />
-
-      <div className="campaign-stats">
-        <span title="Waves">
-          <Icon name="flag" /> {levelTotalWaves(level)} waves
-        </span>
-        <span title="Castle health">
-          <Icon name="heart" /> {level.baseHealth}
-        </span>
-        <span title="Starting gold">
-          <Icon name="coin" /> {level.startingGold}
-        </span>
-        <span title={done ? 'Replay reward' : 'First-clear reward'}>
-          <Icon name="gem" /> {done ? REPLAY_GEM_REWARD : level.gemReward}
-          {!done && <small>first clear</small>}
-        </span>
-      </div>
-
-      {boss && (
-        <div className={`campaign-boss${bossKnown ? '' : ' unknown'}`}>
-          <div className="campaign-boss-portrait">
-            <EnemySprite enemy={boss} size={56} silhouette={!bossKnown} />
-          </div>
-          <div>
-            <div className="campaign-boss-tag">
-              <Icon name="skull" /> Boss
-            </div>
-            <div className="campaign-boss-name">{bossKnown ? boss.name : '???'}</div>
-            <div className="campaign-boss-hint">
-              {bossKnown ? `Defeated ${enemyKillCount(state, boss.id)}×` : 'Defeat it to learn its secrets.'}
-            </div>
-          </div>
+        {/* The board preview shrinks to whatever room the window leaves it. */}
+        <div className="campaign-preview-slot">
+          <BoardPreview level={level} />
         </div>
-      )}
 
-      {foes.length > 0 && (
-        <>
-          <div className="campaign-label">Enemies</div>
-          <div className="campaign-foes">
-            {foes.map((f) => (
-              <span key={f.id} className="campaign-foe" title={f.name}>
-                <EnemySprite enemy={f} size={34} />
-                {enemyKillCount(state, f.id) === 0 && <span className="campaign-new">New</span>}
-              </span>
-            ))}
+        <div className="campaign-stats">
+          <span title="Waves">
+            <Icon name="flag" /> {levelTotalWaves(level)} waves
+          </span>
+          <span title="Castle health">
+            <Icon name="heart" /> {level.baseHealth}
+          </span>
+          <span title="Starting gold">
+            <Icon name="coin" /> {level.startingGold}
+          </span>
+          <span title={done ? 'Replay reward' : 'First-clear reward'}>
+            <Icon name="gem" /> {done ? REPLAY_GEM_REWARD : level.gemReward}
+            {!done && <small>first clear</small>}
+          </span>
+        </div>
+
+        {boss && (
+          <div className={`campaign-boss${bossKnown ? '' : ' unknown'}`}>
+            <div className="campaign-boss-portrait">
+              <EnemySprite enemy={boss} size={56} silhouette={!bossKnown} />
+            </div>
+            <div>
+              <div className="campaign-boss-tag">
+                <Icon name="skull" /> Boss
+              </div>
+              <div className="campaign-boss-name">{bossKnown ? boss.name : '???'}</div>
+              <div className="campaign-boss-hint">
+                {bossKnown ? `Defeated ${enemyKillCount(state, boss.id)}×` : 'Defeat it to learn its secrets.'}
+              </div>
+            </div>
           </div>
-        </>
-      )}
-
-      <div className="campaign-label campaign-team-head">
-        Your team
-        <button className="btn ghost campaign-edit" onClick={onEditTeam}>
-          Edit team
-        </button>
-      </div>
-      <div className="campaign-team">
-        {team.length === 0 ? (
-          <span className="campaign-empty">No champions yet — visit the Summon altar.</span>
-        ) : (
-          team.map((u) => (
-            <span key={u.id} className="campaign-member" title={u.name}>
-              <UnitSprite unit={u} size={34} />
-            </span>
-          ))
         )}
+
+        {foes.length > 0 && (
+          <>
+            <div className="campaign-label">Enemies</div>
+            <div className="campaign-foes">
+              {foes.map((f) => (
+                <span key={f.id} className="campaign-foe" title={f.name}>
+                  <EnemySprite enemy={f} size={34} />
+                  {enemyKillCount(state, f.id) === 0 && <span className="campaign-new">New</span>}
+                </span>
+              ))}
+            </div>
+          </>
+        )}
+
+        <div className="campaign-label campaign-team-head">
+          Your team
+          <button className="btn ghost campaign-edit" onClick={onEditTeam}>
+            Edit team
+          </button>
+        </div>
+        <div className="campaign-team">
+          {team.length === 0 ? (
+            <span className="campaign-empty">No champions yet — visit the Summon altar.</span>
+          ) : (
+            team.map((u) => (
+              <span key={u.id} className="campaign-member" title={u.name}>
+                <UnitSprite unit={u} size={34} />
+              </span>
+            ))
+          )}
+        </div>
       </div>
 
       <button

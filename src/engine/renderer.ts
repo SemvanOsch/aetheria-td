@@ -449,7 +449,7 @@ function themeFor(engine: GameEngine): BoardTheme | undefined {
  * every speck of path detail anew, so the old paths would visibly jump.
  */
 function drawGround(ctx: CanvasRenderingContext2D, engine: GameEngine, st: BoardState): void {
-  const scale = Math.min(2, Math.max(1, ctx.getTransform().a));
+  const scale = Math.min(2.5, Math.max(1, ctx.getTransform().a));
   const done: number[] = [];
   const rolling: number[] = [];
   engine.lanes.forEach((_, i) => {

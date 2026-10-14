@@ -64,7 +64,8 @@ export type IconName =
   | 'turn'
   | 'undo'
   | 'quill'
-  | 'lantern';
+  | 'lantern'
+  | 'expand';
 
 const F = 'ic-fill';
 
@@ -379,6 +380,12 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <rect className={F} x="8" y="7.6" width="8" height="10" rx="1.4" />
       <rect x="8" y="7.6" width="8" height="10" rx="1.4" />
       <path d="M12 10.4c1 1.2 1.2 2.2 0 3.6-1.2-1.4-1-2.4 0-3.6zM7.4 17.6h9.2M9.6 20.6h4.8M12 17.6v3" />
+    </>
+  ),
+  expand: (
+    <>
+      <rect className={F} x="7.4" y="7.4" width="9.2" height="9.2" rx="1.4" />
+      <path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5M4 4l4.6 4.6M20 4l-4.6 4.6M20 20l-4.6-4.6M4 20l4.6-4.6" />
     </>
   ),
 };

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useGame } from '../../application/gameContext';
-import type { AudioSettings } from '../../application/gameState';
+import { BOARD_SIZES, type AudioSettings, type BoardSize } from '../../application/gameState';
 import { Developer } from './Developer';
 import { Icon } from './Icon';
 
@@ -94,8 +94,44 @@ export function SoundSettings() {
   );
 }
 
+const BOARD_SIZE_LABELS: Record<BoardSize, string> = {
+  classic: 'Classic',
+  large: 'Large',
+  fill: 'Fill screen',
+};
+
+/** The Display block (battlefield size); shared by Settings and the pause menu. */
+export function DisplaySettings() {
+  const { state, setPrefs } = useGame();
+  const size = state.prefs.boardSize;
+  return (
+    <div className="settings-section audio">
+      <div className="settings-row-title">
+        <Icon name="expand" /> Battlefield size
+      </div>
+      <div className="seg-toggle" role="radiogroup" aria-label="Battlefield size">
+        {BOARD_SIZES.map((s) => (
+          <button
+            key={s}
+            role="radio"
+            aria-checked={s === size}
+            className={`btn sort-toggle${s === size ? '' : ' off'}`}
+            onClick={() => setPrefs({ boardSize: s })}
+          >
+            {BOARD_SIZE_LABELS[s]}
+          </button>
+        ))}
+      </div>
+      <p className="hint" style={{ margin: 0 }}>
+        How big the board may grow on a big screen, without the battle outgrowing the window. Classic is the original
+        size.
+      </p>
+    </div>
+  );
+}
+
 /**
- * Player-facing Settings modal: volume controls. The old debug/authoring
+ * Player-facing Settings modal: volume and display controls. The old debug/authoring
  * controls now live behind the Developer menu, opened from the bottom here.
  */
 export function Settings({ onClose }: Props) {
@@ -116,6 +152,8 @@ export function Settings({ onClose }: Props) {
         <h2><Icon name="gear" /> Settings</h2>
 
         <SoundSettings />
+
+        <DisplaySettings />
 
         <div className="settings-section">
           <div className="settings-row-title">Developer Menu</div>

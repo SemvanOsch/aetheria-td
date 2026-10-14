@@ -7,6 +7,7 @@
  * motion is CSS (`.desk-*`, `.wv-*`, `.cb-*`, `.cd-*` in styles.css), so it all
  * stops under `prefers-reduced-motion`.
  */
+import type { SectionId } from '../../domain/levels';
 
 /** Deterministic pseudo-random sequence (same drawing every render). */
 function seeded(seed: number) {
@@ -422,24 +423,86 @@ export function CrystalBallArt() {
 
 /* ------------------------------------------------------------ map */
 
-/** Islands of Aetheria: land shapes for the map (viewBox units). */
-const ISLANDS = [
-  'M150 96 C180 70 250 74 282 92 C306 106 300 132 276 142 C258 150 268 172 244 180 C214 190 178 176 166 156 C150 138 128 116 150 96 Z',
-  'M330 82 C362 62 430 66 452 90 C470 110 456 134 432 140 C404 148 392 130 366 136 C338 142 314 108 330 82 Z',
-  'M170 214 C196 196 246 204 262 228 C276 250 262 282 232 290 C204 298 170 286 160 262 C152 244 154 226 170 214 Z',
-  'M320 190 C352 168 434 172 476 196 C508 214 506 258 474 276 C444 294 402 290 372 300 C340 310 304 286 300 256 C296 228 300 204 320 190 Z',
-  'M254 312 C270 302 300 304 310 318 C318 332 302 346 280 346 C260 346 242 326 254 312 Z',
+/** Aetheria: one continent, west to east as the story runs. Mountains along
+ *  the north; the walled Capital in the west with the Castle at its heart, a
+ *  lake and a river running past the walls to the western sea; farmland along
+ *  the road east; the inn at the edge of the old forest, which fills the east. */
+const CONTINENT =
+  'M118 196 C112 170 128 146 150 136 C168 112 196 98 232 96 C262 94 282 84 312 88 C346 92 368 80 404 86 C440 92 470 100 494 118 C518 136 532 160 528 190 C524 214 538 236 530 262 C522 292 498 310 470 316 C440 322 420 336 388 334 C364 332 352 316 330 318 C306 320 296 338 268 336 C236 334 214 318 196 306 C176 294 160 286 150 268 C140 252 120 246 116 228 C115 216 120 208 118 196 Z';
+
+/** Where each chapter sits on the map (the pin's point, the route's stops),
+ *  in story order. */
+const MAP_PLACES: Record<SectionId, [number, number]> = {
+  castle: [196, 202],
+  capital: [234, 210],
+  inn: [392, 212],
+  forest: [470, 194],
+};
+const MAP_ORDER: SectionId[] = ['castle', 'capital', 'inn', 'forest'];
+/** The road between consecutive places (castle→capital, capital→inn, inn→forest). */
+const MAP_ROADS = [
+  'M196 202 C206 214 222 214 234 210',
+  'M234 210 C258 216 270 234 296 226 C330 218 352 206 392 212',
+  'M392 212 C420 214 448 202 470 194',
 ];
+
+/** The old forest's trees: a jittered grid inside an oval, back to front. */
+const FOREST_TREES = (() => {
+  const rnd = seeded(41);
+  const trees: [number, number, boolean][] = [];
+  for (let y = 136; y < 304; y += 11) {
+    for (let x = 414; x < 520; x += 12) {
+      const tx = x + (rnd() - 0.5) * 7;
+      const ty = y + (rnd() - 0.5) * 6;
+      const pine = rnd() < 0.3;
+      if (((tx - 466) / 52) ** 2 + ((ty - 216) / 84) ** 2 > 0.92) continue;
+      trees.push([tx, ty, pine]);
+    }
+  }
+  return trees.sort((a, b) => a[1] - b[1]);
+})();
+
+/** Fields along the road east: [cx, cy, w, h, angle]. */
+const FIELDS: [number, number, number, number, number][] = [
+  [258, 190, 26, 14, -6],
+  [290, 186, 24, 16, 5],
+  [322, 192, 26, 14, -4],
+  [350, 184, 20, 14, 8],
+  [252, 248, 28, 16, 4],
+  [286, 246, 24, 18, -6],
+  [318, 252, 28, 14, 6],
+  [352, 242, 22, 16, -8],
+  [300, 274, 26, 14, 3],
+];
+
+/** An inked tree: a round old oak, or a pine. */
+function MapTree({ x, y, pine }: { x: number; y: number; pine?: boolean }) {
+  return pine ? (
+    <g>
+      <path d={`M${x} ${y - 9} L${x + 5.5} ${y + 3} L${x - 5.5} ${y + 3} Z`} fill="#4f7a3a" stroke="#2f4a20" strokeWidth="0.8" />
+      <path d={`M${x} ${y + 3} v3`} stroke="#3a2a14" strokeWidth="1" />
+    </g>
+  ) : (
+    <g>
+      <path d={`M${x} ${y + 1} v5`} stroke="#3a2a14" strokeWidth="1.1" />
+      <circle cx={x} cy={y - 2} r="5.4" fill="#5a8442" stroke="#2f4a20" strokeWidth="0.8" />
+      <path d={`M${x - 3} ${y - 4} a3 3 0 0 1 3 -2`} stroke="#8ab26a" strokeWidth="0.9" fill="none" />
+    </g>
+  );
+}
 
 /** Scale a path about its own centre (for the coastline ripples). */
 const ripple = (s: number) => ({ transformBox: 'fill-box', transformOrigin: 'center', transform: `scale(${s})` }) as const;
 
-/** The scroll map of Aetheria, with pins, a route, a rose and a brass compass. */
-export function MapArt() {
+/** The scroll map of Aetheria, with the road travelled so far, a pin where
+ *  the party is now (`here`), a rose and a brass pocket compass. */
+export function MapArt({ here }: { here: SectionId }) {
   const top = jagged(64, 576, 46, 7, 11);
   const bottom = jagged(576, 64, 398, 8, 29);
   const sheet = `M${top} L${bottom} Z`;
   const ink = '#4a3418';
+  const reached = Math.max(0, MAP_ORDER.indexOf(here));
+  const [px, py] = MAP_PLACES[here];
   return (
     <svg className="desk-art map-art" viewBox="0 0 640 440" aria-hidden="true">
       <defs>
@@ -458,11 +521,32 @@ export function MapArt() {
           <stop offset="0.62" stopColor="#d2ae72" />
           <stop offset="1" stopColor="#6a4520" />
         </linearGradient>
+        <linearGradient id="mp-roll-end" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#000" stopOpacity="0.28" />
+          <stop offset="1" stopColor="#000" stopOpacity="0" />
+        </linearGradient>
         <linearGradient id="mp-brass" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#fff0bf" />
           <stop offset="0.4" stopColor="#d6a64c" />
           <stop offset="1" stopColor="#6e4812" />
         </linearGradient>
+        <linearGradient id="mp-case" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#4a2e08" />
+          <stop offset="0.28" stopColor="#d8a850" />
+          <stop offset="0.5" stopColor="#a8762a" />
+          <stop offset="0.8" stopColor="#6a4410" />
+          <stop offset="1" stopColor="#2e1c04" />
+        </linearGradient>
+        <radialGradient id="mp-bezel" cx="0.32" cy="0.28" r="0.85">
+          <stop offset="0" stopColor="#fff2c4" />
+          <stop offset="0.4" stopColor="#d6a64c" />
+          <stop offset="0.8" stopColor="#8a5a16" />
+          <stop offset="1" stopColor="#4a2e08" />
+        </radialGradient>
+        <radialGradient id="mp-dial" cx="0.56" cy="0.62" r="0.62">
+          <stop offset="0.6" stopColor="#f2e6c8" />
+          <stop offset="1" stopColor="#b8a274" />
+        </radialGradient>
         <filter id="mp-grain" x="0" y="0" width="100%" height="100%">
           <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="3" seed="7" result="n" />
           <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.42  0 0 0 0 0.26  0 0 0 0 0.09  0 0 0 0.5 -0.12" />
@@ -497,33 +581,65 @@ export function MapArt() {
 
         {/* Sea swells. */}
         {[
-          [118, 300],
-          [522, 230],
-          [480, 350],
-          [120, 186],
-          [298, 72],
-          [500, 72],
+          [100, 150],
+          [98, 270],
+          [292, 74],
+          [430, 72],
+          [534, 214],
+          [196, 352],
+          [424, 352],
         ].map(([x, y]) => (
           <path key={`${x}${y}`} d={`M${x} ${y} q5 -4 10 0 t10 0 M${x + 5} ${y + 7} q5 -4 10 0`} fill="none" stroke="#5a4a32" strokeWidth="0.9" opacity="0.55" />
         ))}
 
-        {/* Land: coastline ripples, the fields, the inked coast. */}
-        {ISLANDS.map((d, i) => (
-          <g key={i}>
-            <path d={d} fill="none" stroke="#5a4a32" strokeWidth="0.7" opacity="0.35" style={ripple(1.1)} />
-            <path d={d} fill="none" stroke="#5a4a32" strokeWidth="0.7" opacity="0.22" style={ripple(1.2)} />
-            <path d={d} fill={i === 1 ? '#c0b28a' : '#b6b37a'} stroke={ink} strokeWidth="1.6" strokeLinejoin="round" />
-            <path d={d} fill="#93a65e" opacity="0.32" style={ripple(0.86)} />
+        {/* The continent: coastline ripples, the land, the inked coast. */}
+        <path d={CONTINENT} fill="none" stroke="#5a4a32" strokeWidth="0.7" opacity="0.35" style={ripple(1.04)} />
+        <path d={CONTINENT} fill="none" stroke="#5a4a32" strokeWidth="0.7" opacity="0.22" style={ripple(1.08)} />
+        <path d={CONTINENT} fill="#b6b37a" stroke={ink} strokeWidth="1.6" strokeLinejoin="round" />
+        <path d={CONTINENT} fill="#93a65e" opacity="0.3" style={ripple(0.93)} />
+
+        {/* The old forest's ground, darker. */}
+        <ellipse cx="466" cy="216" rx="56" ry="88" fill="#5f7e3e" opacity="0.28" />
+
+        {/* Fields along the road east, ploughed in rows. */}
+        {FIELDS.map(([x, y, w, h, a], i) => (
+          <g key={i} transform={`translate(${x} ${y}) rotate(${a})`}>
+            <rect x={-w / 2} y={-h / 2} width={w} height={h} fill={i % 2 ? '#c8bc7c' : '#a9b46a'} stroke={ink} strokeWidth="0.6" opacity="0.85" />
+            {[-0.25, 0, 0.25].map((f) => (
+              <path key={f} d={`M${-w / 2 + 2} ${h * f} H${w / 2 - 2}`} stroke={ink} strokeWidth="0.4" opacity="0.45" />
+            ))}
           </g>
         ))}
-
-        {/* Mountains on the northern isle. */}
+        {/* Meadow tufts and southern hills. */}
         {[
-          [362, 100, 1],
-          [384, 90, 1.3],
-          [408, 100, 1.05],
-          [430, 114, 0.85],
-          [452, 222, 0.85],
+          [250, 170],
+          [372, 186],
+          [272, 286],
+          [356, 272],
+          [172, 250],
+          [224, 276],
+        ].map(([x, y]) => (
+          <path key={`${x}${y}`} d={`M${x} ${y} l2 -4 l2 4 M${x + 5} ${y} l2 -3 l2 3`} fill="none" stroke="#5a6a32" strokeWidth="0.8" />
+        ))}
+        {[
+          [228, 300, 1],
+          [254, 306, 0.8],
+          [372, 302, 0.9],
+        ].map(([x, y, s]) => (
+          <path key={x} d={`M${x - 12 * s} ${y} Q${x} ${y - 14 * s} ${x + 12 * s} ${y}`} fill="#bba870" stroke={ink} strokeWidth="1" />
+        ))}
+
+        {/* Mountains along the north. */}
+        {[
+          [212, 118, 0.9],
+          [236, 108, 1.2],
+          [262, 116, 0.95],
+          [292, 106, 1.1],
+          [318, 114, 0.9],
+          [346, 104, 1.15],
+          [372, 112, 0.9],
+          [400, 106, 1],
+          [424, 116, 0.8],
         ].map(([x, y, s], i) => (
           <g key={i} transform={`translate(${x} ${y}) scale(${s})`}>
             <path d="M-12 8 L0 -10 L12 8 Z" fill="#cdb88e" stroke={ink} strokeWidth="1.2" strokeLinejoin="round" />
@@ -531,82 +647,100 @@ export function MapArt() {
             <path d="M-3 -5 L0 -10 L3 -5" fill="none" stroke="#fff8e8" strokeWidth="1" opacity="0.7" />
           </g>
         ))}
-        {/* The fire mountain. */}
-        <g transform="translate(408 248)">
-          <path d="M-20 14 L-5 -14 L5 -14 L20 14 Z" fill="#a8664a" stroke="#4a2414" strokeWidth="1.4" strokeLinejoin="round" />
-          <path d="M-5 -14 Q0 -6 5 -14 L2 -2 Q0 4 -2 -2 Z" fill="#d84c28" />
-          <path d="M-2 -18 q3 -6 0 -10 M4 -18 q3 -5 1 -9" fill="none" stroke="#6a5a4a" strokeWidth="1" opacity="0.6" />
-        </g>
-        {/* Forests. */}
-        {[
-          [176, 112],
-          [190, 104],
-          [204, 116],
-          [244, 106],
-          [258, 118],
-          [270, 130],
-          [184, 132],
-          [228, 150],
-          [242, 162],
-          [196, 236],
-          [208, 252],
-          [350, 220],
-          [364, 232],
-          [466, 240],
-          [478, 256],
-          [334, 268],
-        ].map(([x, y], i) => (
-          <g key={i}>
-            <path d={`M${x} ${y - 9} L${x + 6} ${y + 3} L${x - 6} ${y + 3} Z`} fill="#4f7a3a" stroke="#2f4a20" strokeWidth="0.8" />
-            <path d={`M${x} ${y + 3} v3`} stroke="#3a2a14" strokeWidth="1" />
-          </g>
+
+        {/* The river: down from the mountains, through a lake, past the
+            Capital's west wall and out to the western sea. */}
+        <path d="M226 122 C214 138 192 150 172 156 M150 166 C146 182 148 198 152 212 C152 230 138 234 117 226" fill="none" stroke={ink} strokeWidth="3.6" strokeLinecap="round" />
+        <path d="M226 122 C214 138 192 150 172 156 M150 166 C146 182 148 198 152 212 C152 230 138 234 117 226" fill="none" stroke="#86b0b4" strokeWidth="2" strokeLinecap="round" />
+        <ellipse cx="160" cy="160" rx="14" ry="7" fill="#86b0b4" stroke={ink} strokeWidth="1" />
+
+        {/* The road east, and the way on into the forest. */}
+        {MAP_ROADS.map((d, i) => (
+          <path key={i} d={d} fill="none" stroke="#7a5a34" strokeWidth="1.6" strokeDasharray={i === 2 ? '2 3' : undefined} opacity="0.75" />
         ))}
-        {/* A lake in the forest. */}
-        <ellipse cx="218" cy="134" rx="14" ry="7" fill="#86b0b4" stroke={ink} strokeWidth="1" />
-        {/* The castle. */}
-        <g transform="translate(232 266)" fill="#7a6a58" stroke="#3a2a18" strokeWidth="1">
-          <rect x="-12" y="-6" width="24" height="12" />
-          <rect x="-15" y="-14" width="7" height="20" />
-          <rect x="8" y="-14" width="7" height="20" />
-          <path d="M-15 -14 l3.5 -6 l3.5 6 M8 -14 l3.5 -6 l3.5 6" fill="#a24a3a" />
-          <path d="M-3 6 v-6 h6 v6" fill="#3a2a18" />
-        </g>
-        {/* The capital: a cluster of roofs on the northern isle. */}
-        <g transform="translate(388 124)" stroke="#3a2a18" strokeWidth="0.9">
+
+        {/* A few trees round the Capital and the inn. */}
+        {[
+          [134, 178],
+          [132, 204],
+          [232, 238],
+          [362, 196],
+          [378, 188],
+          [370, 252],
+        ].map(([x, y], i) => (
+          <MapTree key={i} x={x} y={y} pine={i % 2 === 1} />
+        ))}
+        {/* The old forest. */}
+        {FOREST_TREES.map(([x, y, pine], i) => (
+          <MapTree key={i} x={x} y={y} pine={pine} />
+        ))}
+
+        {/* The Capital: a walled city of roofs and a spire, the Castle on its
+            mound at the heart of it, a gate on the road east. */}
+        <g transform="translate(198 206)" stroke="#3a2a18" strokeWidth="0.9">
+          <ellipse rx="36" ry="24" fill="#d2bf94" strokeWidth="1.5" />
+          <ellipse rx="31" ry="19.5" fill="none" stroke="#a8946c" strokeWidth="0.8" />
+          {Array.from({ length: 24 }, (_, i) => {
+            const a = (i / 24) * Math.PI * 2;
+            return <rect key={i} x={Math.cos(a) * 36 - 1.5} y={Math.sin(a) * 24 - 1.5} width="3" height="3" fill="#7a6a58" strokeWidth="0.6" />;
+          })}
           {[
-            [-12, 0],
-            [-2, -3],
-            [8, 1],
+            [-26, 2],
+            [-20, 11],
+            [-9, 15],
+            [3, 16],
+            [15, 13],
+            [25, 5],
+            [-24, -8],
+            [22, -8],
+            [28, -1],
           ].map(([x, y]) => (
-            <g key={x} transform={`translate(${x} ${y})`}>
-              <rect x="-4" y="-4" width="8" height="7" fill="#9a8a70" />
-              <path d="M-5 -4 L0 -9 L5 -4 Z" fill="#a24a3a" />
+            <g key={`${x}${y}`} transform={`translate(${x} ${y})`}>
+              <rect x="-3.5" y="-3" width="7" height="6" fill="#9a8a70" />
+              <path d="M-4.5 -3 L0 -7.5 L4.5 -3 Z" fill="#a24a3a" />
             </g>
           ))}
-          <path d="M-2 -12 v-6 l4 2 l-4 2" fill="#a24a3a" />
+          {/* The cathedral's spire. */}
+          <g transform="translate(13 3)">
+            <rect x="-4" y="-4" width="8" height="8" fill="#a8987c" />
+            <path d="M-4 -4 L0 -18 L4 -4 Z" fill="#7a6a58" />
+            <path d="M0 -18 v-4" />
+          </g>
+          {/* The east gate. */}
+          <g transform="translate(36 0)">
+            <rect x="-3" y="-7" width="6" height="14" fill="#7a6a58" />
+            <path d="M-1.6 7 v-4 a1.6 1.6 0 0 1 3.2 0 v4" fill="#3a2a18" />
+          </g>
+          {/* The Castle on its mound. */}
+          <g transform="translate(-2 -2) scale(1.15)">
+            <ellipse cy="3" rx="16" ry="4" fill="#a8946c" strokeWidth="0.8" />
+            <g fill="#7a6a58" stroke="#3a2a18" strokeWidth="1">
+              <rect x="-10" y="-8" width="20" height="10" />
+              <rect x="-13" y="-16" width="6" height="18" />
+              <rect x="7" y="-16" width="6" height="18" />
+              <rect x="-3" y="-14" width="6" height="7" />
+              <path d="M-13 -16 l3 -6 l3 6 M7 -16 l3 -6 l3 6" fill="#a24a3a" />
+              <path d="M0 -14 v-6 l4 1.5 l-4 1.5" fill="#a24a3a" />
+              <path d="M-2.5 2 v-5 h5 v5" fill="#3a2a18" />
+            </g>
+          </g>
         </g>
-        {/* The inn, its chimney smoking. */}
-        <g transform="translate(372 210)" stroke="#3a2a18" strokeWidth="0.9">
+        {/* The inn at the forest's edge, its chimney smoking. */}
+        <g transform="translate(392 206)" stroke="#3a2a18" strokeWidth="0.9">
           <rect x="-8" y="-5" width="16" height="10" fill="#9a8a70" />
-          <path d="M-10 -5 L0 -13 L10 -5 Z" fill="#7a4a2a" />
+          <path d="M-10 -5 L0 -13 L10 -5 Z" fill="#b08a44" />
           <rect x="4" y="-14" width="3" height="6" fill="#6a5a4a" />
           <path d="M5.5 -16 q3 -3 0 -6 q-3 -3 1 -6" fill="none" stroke="#6a5a4a" opacity="0.6" />
           <path d="M-2 5 v-5 h4 v5" fill="#3a2a18" />
         </g>
 
-        {/* The road between the pins. */}
-        <path d="M232 266 C262 222 300 206 340 196 S392 156 388 128" fill="none" stroke="#8a2a22" strokeWidth="2" strokeDasharray="5 5" opacity="0.8" />
+        {/* The road travelled so far, inked in red. */}
+        {MAP_ROADS.slice(0, reached).map((d, i) => (
+          <path key={i} d={d} fill="none" stroke="#8a2a22" strokeWidth="2" strokeDasharray="5 4" opacity="0.85" />
+        ))}
 
-        {/* Chapter names in a cartographer's italic. */}
-        <g className="mp-label" fill="#3b2a17">
-          <text x="212" y="90" textAnchor="middle">The Forest</text>
-          <text x="390" y="74" textAnchor="middle">The Capital</text>
-          <text x="214" y="310" textAnchor="middle">The Castle</text>
-          <text x="410" y="300" textAnchor="middle">The Inn</text>
-        </g>
-
-        {/* A sea serpent in the eastern waters. */}
-        <g transform="translate(508 152)" fill="none" stroke={ink} strokeWidth="1.3" strokeLinecap="round">
+        {/* A sea serpent in the north-western waters. */}
+        <g transform="translate(124 100)" fill="none" stroke={ink} strokeWidth="1.3" strokeLinecap="round">
           <path d="M-22 6 q5 -12 10 0 M-8 6 q5 -12 10 0 M6 6 q5 -12 10 0" />
           <path d="M16 6 q4 -16 10 -12 q4 3 -1 6" />
           <path d="M-26 9 h50" stroke="#5a4a32" strokeWidth="0.8" opacity="0.5" />
@@ -631,8 +765,8 @@ export function MapArt() {
           </text>
         </g>
 
-        {/* A sailing ship. */}
-        <g transform="translate(506 304)" fill="none" stroke={ink} strokeWidth="1.2" strokeLinejoin="round">
+        {/* A sailing ship in the southern sea. */}
+        <g transform="translate(482 348)" fill="none" stroke={ink} strokeWidth="1.2" strokeLinejoin="round">
           <path d="M-20 6 L20 6 L14 14 L-14 14 Z" fill="#8a6a44" />
           <path d="M0 6 L0 -22 M0 -20 L14 0 L0 0 M0 -16 L-12 2 L0 2" fill="#ead6aa" />
           <path d="M0 -22 l6 2 l-6 2" fill="#8a2a22" />
@@ -648,47 +782,79 @@ export function MapArt() {
         </g>
       </g>
 
-      {/* Pins pushed into the map. */}
-      {[
-        [232, 254, '#c8352d'],
-        [340, 186, '#2f6fd0'],
-        [388, 116, '#3a9a4a'],
-      ].map(([x, y, c]) => (
-        <g key={String(c)} transform={`translate(${x} ${y})`}>
-          <ellipse cx="4" cy="6" rx="6" ry="2.4" fill="#000" opacity="0.35" />
-          <circle r="6" fill={String(c)} stroke="#2a1a0a" strokeWidth="1" />
-          <circle cx="-2" cy="-2" r="2" fill="#fff" opacity="0.65" />
-        </g>
-      ))}
+      {/* The pin where the party is now, a ring of ink pulsing round it. */}
+      <g transform={`translate(${px} ${py})`}>
+        <circle className="mp-here" r="9" fill="none" stroke="#8a2a22" strokeWidth="1.4" />
+        <path d="M0 0 L9 -2" stroke="#000" strokeWidth="1.6" opacity="0.25" strokeLinecap="round" />
+        <ellipse cx="11" cy="-1" rx="4.6" ry="2.2" fill="#000" opacity="0.3" />
+        <path d="M0 0 L4 -14" stroke="#a8aeb6" strokeWidth="1.3" strokeLinecap="round" />
+        <circle cx="5" cy="-17" r="4.8" fill="#c8352d" stroke="#2a1a0a" strokeWidth="1" />
+        <circle cx="3.6" cy="-18.6" r="1.5" fill="#fff" opacity="0.7" />
+      </g>
 
-      {/* The rolled ends of the scroll, with the curl's shadow on the sheet. */}
+      {/* The rolled ends of the scroll, lying away from you: only their near
+          ends show the curl of the paper. */}
       {[44, 572].map((x) => (
         <g key={x}>
           <rect x={x === 44 ? 70 : 556} y="44" width="14" height="356" fill="#5a3410" opacity="0.18" />
-          <rect x={x} y="40" width="26" height="366" rx="4" fill="url(#mp-roll)" stroke="#6a4520" strokeWidth="1.2" />
-          <path d={`M${x + 8} 46 V400`} stroke="#fff8e0" strokeWidth="1.4" opacity="0.4" />
-          <ellipse cx={x + 13} cy="40" rx="13" ry="5" fill="#e9cf98" stroke="#6a4520" strokeWidth="1.2" />
-          <path d={`M${x + 13} 40 m-6 0 a6 2.4 0 1 0 12 0 a4 1.6 0 1 0 -8 0`} fill="none" stroke="#8a6232" strokeWidth="0.9" />
-          <ellipse cx={x + 13} cy="406" rx="13" ry="5" fill="#c9a46a" stroke="#6a4520" strokeWidth="1.2" />
+          <rect x={x} y="40" width="26" height="366" rx="10" fill="url(#mp-roll)" stroke="#6a4520" strokeWidth="1.2" />
+          <rect x={x} y="40" width="26" height="22" rx="10" fill="url(#mp-roll-end)" />
+          <path d={`M${x + 8} 50 V400`} stroke="#fff8e0" strokeWidth="1.4" opacity="0.4" />
+          <ellipse cx={x + 13} cy="404" rx="13" ry="7" fill="#e9cf98" stroke="#6a4520" strokeWidth="1.2" />
+          <path d={`M${x + 13} 404 m-7 0 a7 3.6 0 1 0 14 0 a5 2.6 0 1 0 -10 0 a3 1.6 0 1 0 6 0`} fill="none" stroke="#8a6232" strokeWidth="0.9" />
         </g>
       ))}
 
-      {/* A brass pocket compass resting on the map. */}
-      <g transform="translate(514 96)">
-        <ellipse cx="5" cy="7" rx="36" ry="34" fill="#000" opacity="0.4" filter="url(#mp-shadow)" />
-        <circle cx="0" cy="-38" r="7" fill="none" stroke="url(#mp-brass)" strokeWidth="3" />
-        <circle r="36" fill="url(#mp-brass)" stroke="#3a2408" strokeWidth="1.4" />
-        <circle r="31" fill="none" stroke="#6e4812" strokeWidth="1" />
-        <circle r="28" fill="#efe2c2" stroke="#6e4812" strokeWidth="1.2" />
-        {Array.from({ length: 16 }, (_, i) => (
-          <path key={i} d="M0 -27 L0 -23" transform={`rotate(${i * 22.5})`} stroke="#5a3c1c" strokeWidth={i % 4 === 0 ? 1.6 : 0.8} />
+      {/* A brass pocket compass resting on the map: its case stands up off
+          the paper, a bevelled bezel round a recessed dial under glass. */}
+      <g transform="translate(512 94)">
+        <ellipse cx="9" cy="16" rx="38" ry="34" fill="#000" opacity="0.45" filter="url(#mp-shadow)" />
+        {/* The bow and crown, lying on the paper. */}
+        <ellipse cx="0" cy="-49" rx="8.5" ry="7.5" fill="none" stroke="#2e1c04" strokeWidth="4.6" />
+        <ellipse cx="0" cy="-49" rx="8.5" ry="7.5" fill="none" stroke="url(#mp-brass)" strokeWidth="2.8" />
+        <path d="M-6 -53 A8 7 0 0 1 3 -56" stroke="#fff4c8" strokeWidth="1" fill="none" opacity="0.8" />
+        <rect x="-5" y="-42" width="10" height="9" rx="2" fill="url(#mp-case)" stroke="#2e1c04" strokeWidth="0.8" />
+        {[-2.5, 0, 2.5].map((dx) => (
+          <path key={dx} d={`M${dx} -41 v7`} stroke="#3a2408" strokeWidth="0.6" opacity="0.6" />
         ))}
-        <g className="mp-needle">
-          <path d="M0 -22 L4 0 L0 3 L-4 0 Z" fill="#c0392b" />
-          <path d="M0 22 L4 0 L0 -3 L-4 0 Z" fill="#2c3e60" />
+        {/* The case's side, toward you, knurled. */}
+        <circle cy="8" r="36" fill="url(#mp-case)" stroke="#2a1806" strokeWidth="1.2" />
+        <rect x="-36" y="0" width="72" height="8" fill="url(#mp-case)" />
+        {Array.from({ length: 17 }, (_, i) => {
+          const a = ((10 + i * 10) * Math.PI) / 180;
+          const x = Math.cos(a) * 36;
+          const y = Math.sin(a) * 36;
+          return <path key={i} d={`M${x.toFixed(1)} ${y.toFixed(1)} v8`} stroke="#2e1c04" strokeWidth="0.7" opacity="0.4" />;
+        })}
+        {/* The bezel and its bevel. */}
+        <circle r="36" fill="url(#mp-bezel)" stroke="#3a2408" strokeWidth="1.2" />
+        <circle r="33.5" fill="none" stroke="#fff4c8" strokeWidth="0.8" opacity="0.45" />
+        <circle r="30.5" fill="none" stroke="#3a2408" strokeWidth="1.8" />
+        {/* The dial, sunk below the bezel's lip. */}
+        <circle r="29.5" fill="url(#mp-dial)" />
+        <path d="M-29.5 0 A29.5 29.5 0 0 1 29.5 0 A29.5 24 0 0 0 -29.5 0 Z" fill="#3a2408" opacity="0.2" />
+        {Array.from({ length: 16 }, (_, i) => (
+          <path key={i} d="M0 -28 L0 -24.5" transform={`rotate(${i * 22.5})`} stroke="#5a3c1c" strokeWidth={i % 4 === 0 ? 1.6 : 0.8} />
+        ))}
+        <g fontFamily="Cinzel, serif" fontSize="6.5" fontWeight="700" textAnchor="middle" fill="#5a3c1c">
+          <text y="-17.5" fill="#a83226">N</text>
+          <text x="19.5" y="2.3">E</text>
+          <text y="22">S</text>
+          <text x="-19.5" y="2.3">W</text>
         </g>
-        <circle r="2.5" fill="url(#mp-brass)" stroke="#3a2408" strokeWidth="0.8" />
-        <ellipse cx="-12" cy="-14" rx="11" ry="5" transform="rotate(-35 -12 -14)" fill="#fff" opacity="0.32" />
+        <g className="mp-needle">
+          <path d="M1.5 -16 L5 2.5 L1.5 5.5 L-2 2.5 Z M1.5 21 L5 2.5 L1.5 -0.5 L-2 2.5 Z" fill="#000" opacity="0.22" />
+          <path d="M0 -18 L3.6 0 L0 2.6 L-3.6 0 Z" fill="#c0392b" />
+          <path d="M0 -18 L0 2.6 L-3.6 0 Z" fill="#e8584a" />
+          <path d="M0 18 L3.6 0 L0 -2.6 L-3.6 0 Z" fill="#2c3e60" />
+          <path d="M0 18 L0 -2.6 L-3.6 0 Z" fill="#4a5e84" />
+        </g>
+        <circle r="3" fill="url(#mp-bezel)" stroke="#3a2408" strokeWidth="0.8" />
+        <circle cx="-0.8" cy="-0.8" r="1" fill="#fff8dc" opacity="0.8" />
+        {/* The glass: a curved sheen and a glint. */}
+        <path d="M-24 -10 A26 26 0 0 1 -6 -26 A30 30 0 0 0 -20 -6 Z" fill="#fff" opacity="0.38" />
+        <path d="M14 22 A26 26 0 0 0 23 12" stroke="#fff" strokeWidth="1.4" fill="none" opacity="0.22" strokeLinecap="round" />
+        <circle cx="-17" cy="-19" r="1.4" fill="#fff" opacity="0.85" />
       </g>
     </svg>
   );

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useGame } from '../../application/gameContext';
 import { Icon } from './Icon';
-import { SoundSettings } from './Settings';
+import { DisplaySettings, SoundSettings } from './Settings';
 
 interface Props {
   /** True in an endless run: the leave button concedes the run instead of retreating. */
@@ -13,8 +13,8 @@ interface Props {
 
 /**
  * In-stage pause menu: the battle is frozen while it's open. Holds the volume
- * sliders (the same block as Settings), the auto-start-waves switch and a way
- * out of the stage.
+ * sliders and battlefield size (the same blocks as Settings), the
+ * auto-start-waves switch and a way out of the stage.
  */
 export function PauseMenu({ endless, onResume, onLeave }: Props) {
   const { state, setPrefs } = useGame();
@@ -41,6 +41,8 @@ export function PauseMenu({ endless, onResume, onLeave }: Props) {
         </button>
 
         <SoundSettings />
+
+        <DisplaySettings />
 
         <div className="settings-section audio">
           <div className="pause-toggle-row">

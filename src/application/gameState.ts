@@ -169,13 +169,24 @@ export interface UiPrefs {
   autoStartWaves: boolean;
   /** Silence the Bard's lute tune in battle (Champion sheet + in-stage panel). */
   bardSoundMuted: boolean;
+  /** How big the battlefield may grow on a big window (Settings, pause menu). */
+  boardSize: BoardSize;
 }
+
+/**
+ * The battlefield's size: `classic` keeps the original layout; `large` and
+ * `fill` let the board grow past it on a big window, as far as fits the
+ * window's height (`large` stops at a medium width). Never smaller than classic.
+ */
+export type BoardSize = 'classic' | 'large' | 'fill';
+export const BOARD_SIZES: BoardSize[] = ['classic', 'large', 'fill'];
 
 const DEFAULT_PREFS: UiPrefs = {
   championSort: 'desc',
   showMasteryMarks: true,
   autoStartWaves: false,
   bardSoundMuted: false,
+  boardSize: 'fill',
 };
 
 /**
@@ -315,6 +326,7 @@ export function loadState(): GameState {
   migrated.team = normalizeTeam(raw.team ?? migrated.ownedUnits, migrated.ownedUnits);
   // Pre-v11 saves have no UI preferences; fill missing keys with the defaults.
   migrated.prefs = { ...DEFAULT_PREFS, ...(raw.prefs ?? {}) };
+  if (!BOARD_SIZES.includes(migrated.prefs.boardSize)) migrated.prefs.boardSize = DEFAULT_PREFS.boardSize;
   // Pre-v14 saves have no volume settings; default everything to full/unmuted.
   migrated.audio = normalizeAudio(raw.audio);
   // Pre-v12 saves have no player profile. Rather than fabricate an identity,

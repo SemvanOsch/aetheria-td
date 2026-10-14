@@ -1831,14 +1831,6 @@ button:disabled .icon {
   height: 15px;
   color: var(--ink-soft);
 }
-/* Map lettering. */
-.mp-label {
-  font-family: var(--font-story);
-  font-style: italic;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
 
 /* ---- Ambient motion (all off under reduced motion) ---- */
 @keyframes drape-sway {
@@ -1896,6 +1888,16 @@ button:disabled .icon {
 .mp-needle {
   transform-origin: 0 0;
   animation: needle 7s ease-in-out infinite;
+}
+/* The ring of ink pulsing round the map's "you are here" pin. */
+.mp-here {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mp-here 2.6s ease-out infinite;
+}
+@keyframes mp-here {
+  0% { transform: scale(0.4); opacity: 0.9; }
+  100% { transform: scale(1.7); opacity: 0; }
 }
 @keyframes needle {
   0%, 100% { transform: rotate(-9deg); }
@@ -2025,6 +2027,7 @@ button:disabled .icon {
   .cd-flame,
   .cd-halo,
   .mp-needle,
+  .mp-here,
   .wv-star,
   .wv-halo,
   .wv-lit,
@@ -4230,6 +4233,97 @@ button.cd-mastery:hover {
   margin-top: 18px;
 }
 
+/* On a desktop window the whole campaign fits the window, with no page scroll:
+   the map stretches to the height left under the tabs, the briefing's board
+   preview shrinks to the room it has (sized off its slot, a size container),
+   and the Enter button stays pinned at the bottom of the briefing; only a
+   very short window scrolls the briefing's contents above it. */
+@media (min-width: 901px) and (min-height: 560px) {
+  .screen.campaign {
+    flex: none;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 18px;
+  }
+  .campaign-tabs {
+    margin: 12px 0 14px;
+  }
+  /* A wider briefing, so a stage's foes fit on one row of tiles. */
+  .campaign-body {
+    flex: 1;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) 420px;
+    grid-template-rows: minmax(0, 1fr);
+    align-items: stretch;
+  }
+  .campaign-foes,
+  .campaign-team {
+    gap: 6px;
+  }
+  .campaign-foe,
+  .campaign-member {
+    width: 42px;
+    height: 42px;
+  }
+  .campaign-map {
+    position: relative;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .campaign-map-area {
+    flex: 1;
+    min-height: 0;
+    aspect-ratio: auto;
+    margin: 14px 6% 36px;
+  }
+  .campaign-brief {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding-bottom: 16px;
+  }
+  .campaign-brief-scroll {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    margin-right: -8px;
+    padding-right: 8px;
+  }
+  .campaign-brief-sub {
+    margin-bottom: 10px;
+  }
+  .campaign-preview-slot {
+    flex: 1 1 120px;
+    min-height: 84px;
+    max-height: 240px;
+    container-type: size;
+    display: flex;
+    justify-content: center;
+  }
+  .campaign-preview-slot .campaign-preview {
+    flex: none;
+    width: auto;
+    height: auto;
+    max-width: 100cqw;
+    max-height: 100cqh;
+  }
+  .campaign-stats {
+    margin: 10px 0;
+  }
+  .campaign-label {
+    margin: 12px 0 7px;
+  }
+  .btn.campaign-go {
+    flex: none;
+    margin-top: 14px;
+  }
+}
+
 @media (max-width: 900px) {
   .campaign-body {
     grid-template-columns: 1fr;
@@ -4405,12 +4499,30 @@ button.cd-mastery:hover {
 }
 
 /* ---------------------------------------------------------- game screen */
+/* On a big window the battlefield grows past the classic 1180px layout
+   (Settings → Battlefield size, `data-board-size`): as far as the HUD, board
+   and deploy bar still fit the window's height (`--battle-chrome` is what
+   isn't board; the board is 1.6 wide per tall; 302px is the side panel, the
+   gap and the padding), and `large` stops at a medium width. Never narrower
+   than classic. */
 .game-wrap {
-  max-width: 1180px;
+  --game-cap: 100vw;
+  --battle-chrome: 284px;
+  --game-fit: calc((100dvh - var(--battle-chrome)) * 1.6 + 302px);
+  max-width: max(1180px, min(var(--game-cap), var(--game-fit)));
+  /* An explicit width: as a centred flex item it would otherwise shrink to its
+     content, i.e. to the canvas's backing size, which follows the shown size. */
+  width: 100%;
   margin: 0 auto;
   padding: 14px;
   /* The battle fades up out of the dark rather than popping in. */
   animation: page-in 0.9s ease-out both;
+}
+.game-wrap[data-board-size='classic'] {
+  --game-cap: 1180px;
+}
+.game-wrap[data-board-size='large'] {
+  --game-cap: 1640px;
 }
 /* The battle has no backdrop canvas: a deep vignette keeps focus on the board. */
 .game-wrap::before {
@@ -4526,6 +4638,15 @@ button.cd-mastery:hover {
 }
 .pause-toggle-row .settings-row-title {
   margin: 0;
+}
+/* A row of choices, one lit (e.g. Battlefield size). */
+.seg-toggle {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0;
+}
+.seg-toggle .btn {
+  flex: 1;
 }
 .btn.pause-leave {
   margin-top: 16px;

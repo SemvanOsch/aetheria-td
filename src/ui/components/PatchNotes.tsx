@@ -20,6 +20,17 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-10-14 · A Bigger Battlefield',
+    changes: [
+      'New Battlefield size setting (in Settings and the pause menu): Classic keeps the original board, Large and Fill screen let it grow on a big window, as far as the battle still fits the window’s height. Fill screen is the new default.',
+      'The board now renders sharper at any size, matching your screen’s resolution.',
+      'The map on the home desk is redrawn as one continent, laid out west to east as the story goes: the walled Capital with the Castle at its heart in the west, a river and lake, fields along the road east, and the inn at the edge of the old forest.',
+      'The road you’ve already travelled is inked in red, and a red “you are here” pin marks the chapter you’re on.',
+      'The map’s brass pocket compass has been redrawn with real depth: a raised case, a bevelled bezel, a sunken dial and a glass sheen.',
+      'Stage briefings in the campaign now fit smaller windows: the board preview shrinks to fit, the details scroll, and the Enter button always stays in view.',
+    ],
+  },
+  {
     version: '2026-10-14 · A Room at the Inn',
     changes: [
       'Once you’ve cleared every Capital stage, your home screen moves: the party is holed up in the upstairs room of the inn at the forest’s edge, where the Getaway’s ride ends. The crystal ball, the map and the journal are on the table just like before.',

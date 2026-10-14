@@ -265,11 +265,28 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     settledRef.current = false;
 
     const canvas = canvasRef.current!;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = BOARD_WIDTH * dpr;
-    canvas.height = BOARD_HEIGHT * dpr;
     const ctx = canvas.getContext('2d')!;
-    ctx.scale(dpr, dpr);
+    // Back the canvas at the size it is shown (× device pixels), so a board
+    // grown on a big screen stays crisp. Quarter steps, so a small resize
+    // doesn't re-bake the ground; capped, so a huge window stays smooth.
+    const fitResolution = () => {
+      const shown = canvas.clientWidth || BOARD_WIDTH;
+      const s = Math.min(2.5, Math.max(1, Math.round(((shown * (window.devicePixelRatio || 1)) / BOARD_WIDTH) * 4) / 4));
+      const w = Math.round(BOARD_WIDTH * s);
+      if (canvas.width === w) return;
+      canvas.width = w;
+      canvas.height = Math.round(BOARD_HEIGHT * s);
+      ctx.setTransform(s, 0, 0, s, 0, 0);
+    };
+    fitResolution();
+    // Resizing clears the canvas: repaint at once rather than flash a blank
+    // frame (unless the ending cutscene is drawing the board itself).
+    const resizer = new ResizeObserver(() => {
+      const w = canvas.width;
+      fitResolution();
+      if (canvas.width !== w && endingRef.current !== 'playing') drawBoard(ctx, engine, uiRef.current);
+    });
+    resizer.observe(canvas);
 
     let raf = 0;
     let last = performance.now();
@@ -483,6 +500,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
 
     return () => {
       cancelAnimationFrame(raf);
+      resizer.disconnect();
       releaseAudio();
     };
     // Engine is created once per level mount.
@@ -742,7 +760,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   };
 
   return (
-    <main className="game-wrap">
+    <main className="game-wrap" data-board-size={game.state.prefs.boardSize}>
       {paused && hud?.outcome === 'playing' && (
         <PauseMenu endless={!!endless} onResume={() => setPaused(false)} onLeave={leaveFromPause} />
       )}

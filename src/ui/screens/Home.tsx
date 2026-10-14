@@ -3,7 +3,7 @@ import { useGame } from '../../application/gameContext';
 import { hasAffordableMasteryUpgrade, isLevelUnlocked, isSectionCleared } from '../../application/gameState';
 import { canAffordSummon } from '../../application/summon';
 import { unlockedChapterCount } from '../../domain/journal';
-import { LEVELS, getSection } from '../../domain/levels';
+import { LEVELS, SECTIONS, getSection } from '../../domain/levels';
 import { Icon } from '../components/Icon';
 import { playDeskSound } from '../deskAudio';
 import {
@@ -129,6 +129,8 @@ export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, ret
     state.prefs.showMasteryMarks && state.ownedUnits.some((id) => hasAffordableMasteryUpgrade(state, id));
   const summonReady = canAffordSummon(state.gems);
   const inn = isSectionCleared(state, 'capital');
+  // Where the party is now: the first chapter, in story order, not yet won.
+  const here = SECTIONS.find((s) => !isSectionCleared(state, s.id))?.id ?? SECTIONS[SECTIONS.length - 1].id;
   // Once the journal is open its veil lifts, so the (still zoomed) desk shows
   // through the journal's blurred backdrop rather than a flat dark wash.
   const veiled = leaving != null && !frozenOn && !(leaving.target === 'journal' && journalOpen);
@@ -276,7 +278,7 @@ export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, ret
 
           <div className="desk-map-slot">
             <DeskObject kind="map" label="Play" hint="Unroll the map to choose where to fight" onClick={choose('play')}>
-              <MapArt />
+              <MapArt here={here} />
             </DeskObject>
             {next && (
               <button
