@@ -6,3 +6,6 @@ dist-ssr
 
 # Local-only design/reference docs (not shipped)
 /docs/aetheria-units.xlsx
+
+# Unity port (separate project, not part of the web game)
+/Unity Aetheria/

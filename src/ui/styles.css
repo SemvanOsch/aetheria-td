@@ -1361,6 +1361,253 @@ button:disabled .icon {
   70% { opacity: 0.93; }
 }
 
+/* ---- The inn (once the Capital has fallen; ui/components/InnArt) ----
+   The same scene as a table in the inn's upstairs room: lime plaster between
+   oak timbers instead of panelling, herbs and a plate shelf in the bays, a
+   leaded window between tied-back homespun curtains, scrubbed oak planks,
+   and a hearth off to the left flickering over everything. */
+.screen.desk-home.inn {
+  --inn-win: min(66vw, 860px);
+  --inn-beam: clamp(16px, 3.2cqh, 28px);
+  background: #170d07;
+}
+.desk-wall.inn-wall {
+  background:
+    radial-gradient(55% 120% at 0% 100%, rgba(255, 140, 60, 0.2), transparent 70%),
+    radial-gradient(40% 90% at 100% 100%, rgba(255, 170, 90, 0.09), transparent 70%),
+    repeating-linear-gradient(97deg, rgba(70, 46, 22, 0.08) 0 3px, transparent 3px 13px),
+    repeating-linear-gradient(7deg, rgba(255, 236, 200, 0.035) 0 2px, transparent 2px 19px),
+    linear-gradient(180deg, #1e140c 0%, #3a2a1a 40%, #5e4a30 100%);
+}
+/* The ceiling beam, adze-marked. */
+.inn-beam {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 4;
+  height: var(--inn-beam);
+  background:
+    repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 23px),
+    linear-gradient(180deg, #1a0e06 0%, #3a2212 45%, #2a180b 80%, #120904 100%);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.55);
+}
+/* The bays either side of the window, framed by a post, a rail and a brace. */
+.inn-bay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: calc((100% - var(--inn-win)) / 2);
+}
+.inn-bay.left {
+  left: 0;
+  background:
+    linear-gradient(90deg, transparent calc(100% - 18px), #2e1a0c calc(100% - 18px), #4a2c16 calc(100% - 10px), #24140a 100%),
+    linear-gradient(180deg, transparent 80%, #2e1a0c 80%, #452914 calc(80% + 6px), #24140a calc(80% + 13px), transparent calc(80% + 13px));
+}
+.inn-bay.right {
+  right: 0;
+  background:
+    linear-gradient(90deg, #24140a 0, #4a2c16 10px, #2e1a0c 18px, transparent 18px),
+    linear-gradient(180deg, transparent 80%, #2e1a0c 80%, #452914 calc(80% + 6px), #24140a calc(80% + 13px), transparent calc(80% + 13px));
+}
+.inn-bay::before {
+  content: '';
+  position: absolute;
+  top: var(--inn-beam);
+  bottom: 20%;
+  left: 0;
+  right: 18px;
+  background: linear-gradient(to top left, transparent calc(50% - 7px), #2e1a0c calc(50% - 7px), #3e2412 50%, #24140a calc(50% + 7px), transparent calc(50% + 7px));
+}
+.inn-bay.right::before {
+  left: 18px;
+  right: 0;
+  background: linear-gradient(to top right, transparent calc(50% - 7px), #2e1a0c calc(50% - 7px), #3e2412 50%, #24140a calc(50% + 7px), transparent calc(50% + 7px));
+}
+.inn-bay-art {
+  position: absolute;
+  display: flex;
+  pointer-events: none;
+}
+.inn-bay.left .inn-bay-art { top: calc(var(--inn-beam) - 4px); right: calc(18px + 10%); height: 64%; max-width: 76%; }
+.inn-bay.right .inn-bay-art { top: 22%; left: calc(18px + 8%); height: 56%; max-width: 76%; }
+.inn-art {
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  filter: brightness(0.78) saturate(0.85) drop-shadow(3px 5px 4px rgba(0, 0, 0, 0.45));
+}
+.ih-sway { animation: ih-sway 7s ease-in-out infinite alternate; }
+@keyframes ih-sway {
+  from { transform: rotate(-1.4deg); }
+  to { transform: rotate(1.4deg); }
+}
+/* The window: a wooden pole with iron finials, an oak frame, leaded panes. */
+.desk-casement.inn-casement {
+  width: var(--inn-win);
+  padding-top: calc(var(--inn-beam) + 10px);
+}
+.inn-pole {
+  position: absolute;
+  top: calc(var(--inn-beam) + 6px);
+  left: 3%;
+  right: 3%;
+  z-index: 3;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #6a4424, #3e2412 55%, #1e1008);
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.6);
+}
+.inn-pole::before,
+.inn-pole::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #7a7a84, #2a2a30 55%, #0e0e12);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+}
+.inn-pole::before { left: -9px; }
+.inn-pole::after { right: -9px; }
+.desk-window.inn-window {
+  margin-top: 6px;
+  border-color: #2e1a0c;
+  box-shadow:
+    inset 0 0 0 2px #4a2c16,
+    inset 0 0 30px rgba(0, 0, 0, 0.6),
+    0 0 60px rgba(120, 130, 220, 0.12);
+}
+/* A centre mullion and transom, diamond quarries, old glass catching the
+   room's firelight. */
+.inn-lattice {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, transparent calc(50% - 6px), #2e1a0c calc(50% - 6px), #4a2c16 50%, #2e1a0c calc(50% + 6px), transparent calc(50% + 6px)),
+    linear-gradient(180deg, transparent calc(30% - 5px), #2e1a0c calc(30% - 5px), #4a2c16 30%, #2e1a0c calc(30% + 5px), transparent calc(30% + 5px)),
+    repeating-linear-gradient(56deg, transparent 0 26px, rgba(22, 16, 12, 0.62) 26px 27.5px),
+    repeating-linear-gradient(-56deg, transparent 0 26px, rgba(22, 16, 12, 0.62) 26px 27.5px),
+    radial-gradient(40% 50% at 8% 90%, rgba(255, 160, 80, 0.1), transparent 70%),
+    linear-gradient(115deg, transparent 20%, rgba(255, 230, 200, 0.05) 30%, transparent 36%, transparent 60%, rgba(255, 230, 200, 0.04) 68%, transparent 72%);
+}
+/* Homespun check curtains, tied back with a cord. */
+.inn-curtain {
+  position: relative;
+  z-index: 2;
+  width: 15%;
+  height: 100%;
+  margin-top: -2px;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.4), transparent 14%),
+    repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.32) 0 2px, rgba(255, 255, 255, 0.03) 5px, transparent 8px 20px),
+    repeating-linear-gradient(90deg, rgba(232, 200, 150, 0.09) 0 7px, transparent 7px 21px),
+    repeating-linear-gradient(0deg, rgba(232, 200, 150, 0.09) 0 7px, transparent 7px 21px),
+    linear-gradient(90deg, #3e140c, #6e2618 45%, #4a1810);
+}
+.inn-curtain.left {
+  margin-right: -10px;
+  clip-path: polygon(0 0, 100% 0, 94% 16%, 62% 42%, 42% 55%, 60% 70%, 80% 100%, 0 100%);
+}
+.inn-curtain.right {
+  margin-left: -10px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 20% 100%, 40% 70%, 58% 55%, 38% 42%, 6% 16%);
+}
+.inn-curtain::after {
+  content: '';
+  position: absolute;
+  top: 53%;
+  width: 46%;
+  height: 7px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #e0bc72, #8a6224);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.5);
+}
+.inn-curtain.left::after { left: 0; }
+.inn-curtain.right::after { right: 0; }
+/* A deep oak sill. */
+.desk-sill.inn-sill {
+  left: 10%;
+  right: 10%;
+  height: 14px;
+  background: linear-gradient(180deg, #7a5a3a 0%, #4a3020 45%, #24160c 100%);
+}
+/* Night-side details through the glass. */
+.iv-sign { animation: iv-sign 3.4s ease-in-out infinite alternate; }
+@keyframes iv-sign {
+  from { transform: rotate(-4deg); }
+  to { transform: rotate(3deg); }
+}
+.iv-owl {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: iv-owl 7s ease-in-out infinite;
+}
+@keyframes iv-owl {
+  0%, 90%, 96%, 100% { transform: scaleY(1); }
+  93% { transform: scaleY(0.1); }
+}
+.iv-spill { animation: iv-spill 4.2s ease-in-out infinite; }
+@keyframes iv-spill {
+  0%, 100% { opacity: 1; }
+  40% { opacity: 0.78; }
+  70% { opacity: 0.92; }
+}
+/* The table: scrubbed oak, wider planks, knife-scored, lit by the fire. */
+.desk-home.inn .desk-wood-clip { background: #4a2c16; }
+.desk-home.inn .desk-wood-clip::after {
+  background: linear-gradient(180deg, rgba(40, 22, 10, 0.7) 0%, rgba(40, 22, 10, 0.25) 18%, transparent 34%);
+}
+.desk-home.inn .desk-wood {
+  background:
+    repeating-linear-gradient(180deg, transparent 0 168px, rgba(0, 0, 0, 0.6) 168px 172px, rgba(255, 220, 170, 0.06) 172px 173px),
+    repeating-linear-gradient(177deg, rgba(0, 0, 0, 0.14) 0 1px, transparent 1px 9px),
+    repeating-linear-gradient(183deg, rgba(255, 210, 150, 0.06) 0 2px, transparent 2px 15px),
+    repeating-linear-gradient(140deg, transparent 0 230px, rgba(255, 230, 190, 0.05) 230px 231px, transparent 231px 410px),
+    linear-gradient(180deg, #4a2c16 0%, #5a361a 60%, #64401f 80%, #4a2c16 93%, #26160a 100%);
+}
+.desk-home.inn .desk-gloss {
+  left: 0;
+  right: 45%;
+  height: 70%;
+  background: radial-gradient(80% 90% at 0% 30%, rgba(255, 140, 60, 0.14), transparent 75%);
+}
+.desk-home.inn .desk-prop.lantern { width: clamp(120px, 12.5vw, 210px); }
+.desk-home.inn .desk-prop.coins { width: clamp(80px, 7.6vw, 124px); }
+.desk-home.inn .desk-prop.inkwell { width: clamp(80px, 7vw, 116px); }
+/* Light: the candles, the orb, little of the moon, and the hearth. */
+.desk-home.inn .desk-light {
+  background:
+    radial-gradient(30% 34% at 95% 22%, rgba(255, 176, 90, 0.18), transparent 70%),
+    radial-gradient(26% 30% at 6% 26%, rgba(255, 176, 90, 0.08), transparent 70%),
+    radial-gradient(24% 26% at 4% 86%, rgba(255, 176, 90, 0.14), transparent 70%),
+    radial-gradient(22% 28% at 15% 58%, rgba(150, 100, 255, 0.1), transparent 70%),
+    radial-gradient(34% 24% at 50% 32%, rgba(120, 150, 255, 0.04), transparent 70%);
+  box-shadow: inset 0 0 160px 40px rgba(0, 0, 0, 0.66);
+}
+.inn-hearth {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: radial-gradient(45% 75% at -6% 62%, rgba(255, 120, 40, 0.22), rgba(255, 90, 30, 0.08) 50%, transparent 75%);
+  mix-blend-mode: screen;
+  animation: hearth 3.3s ease-in-out infinite;
+}
+@keyframes hearth {
+  0%, 100% { opacity: 0.85; }
+  12% { opacity: 1; }
+  27% { opacity: 0.7; }
+  41% { opacity: 0.95; }
+  58% { opacity: 0.78; }
+  73% { opacity: 1; }
+  86% { opacity: 0.82; }
+}
+
 /* ---- The three objects ---- */
 .desk-objects {
   grid-row: 2;
@@ -1789,7 +2036,12 @@ button:disabled .icon {
   .wv-glint,
   .wv-mist,
   .wv-tree,
-  .wv-fly {
+  .wv-fly,
+  .inn-hearth,
+  .ih-sway,
+  .iv-sign,
+  .iv-owl,
+  .iv-spill {
     animation: none;
   }
   .desk-obj-lift,
@@ -1829,6 +2081,9 @@ button:disabled .icon {
   .desk-note-name { font-size: 18px; }
   .desk-plaque { font-size: 12px; padding: 4px 14px; }
   .desk-plaque-ready { font-size: 0; gap: 0; }
+  .screen.desk-home.inn { --inn-win: 100%; }
+  .inn-bay { display: none; }
+  .inn-curtain { width: 12%; }
 }
 
 /* ---------------------------------------------------------- unit cards */

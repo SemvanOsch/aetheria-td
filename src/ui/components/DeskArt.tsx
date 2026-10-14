@@ -32,7 +32,7 @@ function jagged(x0: number, x1: number, y: number, amp: number, seed: number): s
 /* ------------------------------------------------------------ candles */
 
 /** Wax, brass and flame-glow gradients for the candles in one SVG. */
-function CandleDefs({ p }: { p: string }) {
+export function CandleDefs({ p }: { p: string }) {
   return (
     <>
       <radialGradient id={`${p}-glow`}>
@@ -61,7 +61,7 @@ function CandleDefs({ p }: { p: string }) {
 }
 
 /** A dripping candle standing on `base`, its flame flickering via CSS. */
-function Candle({ p, x, base, h, w = 20, delay = 0 }: { p: string; x: number; base: number; h: number; w?: number; delay?: number }) {
+export function Candle({ p, x, base, h, w = 20, delay = 0 }: { p: string; x: number; base: number; h: number; w?: number; delay?: number }) {
   const top = base - h;
   const l = x - w / 2;
   const r = x + w / 2;

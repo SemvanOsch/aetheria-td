@@ -20,6 +20,15 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-10-14 · A Room at the Inn',
+    changes: [
+      'Once you’ve cleared every Capital stage, your home screen moves: the party is holed up in the upstairs room of the inn at the forest’s edge, where the Getaway’s ride ends. The crystal ball, the map and the journal are on the table just like before.',
+      'The inn room has timber-framed plaster walls, herbs drying on a peg rail, a shelf of pewter plates with tankards hanging beneath, and a hearth off to one side that flickers over the room.',
+      'Through its leaded window: the inn yard at night, with your wagon parked by the stable, the inn’s swinging sign, the old forest in the mist, an owl, bats and fireflies, and the Capital still burning on the far horizon.',
+      'The table is set with an ale jug and a tankard of foaming ale, a candle in a wax-run wine bottle, a tallow stub, the room key with a couple of pennies, and bread and cheese.',
+    ],
+  },
+  {
     version: '2026-10-11 · The Getaway',
     changes: [
       'The Getaway is open again, now with its real waves: seven waves of the royal army along the riverbank, and something nasty following you up out of the sewers for the last one.',

@@ -17,6 +17,16 @@ import {
   MapArt,
   WindowView,
 } from '../components/DeskArt';
+import {
+  AleArt,
+  BottleCandleArt,
+  BreadCheeseArt,
+  HerbsArt,
+  InnWindowView,
+  PlateShelfArt,
+  RoomKeyArt,
+  TallowCandleArt,
+} from '../components/InnArt';
 
 interface Props {
   onPlay: () => void;
@@ -45,6 +55,10 @@ const LEAVE_MS: Record<Target, number> = { summon: 1450, play: 1850, journal: 65
  * continues straight into the next stage. Choosing one zooms the desk toward
  * it under a tinted veil, then opens the destination; Escape (or reduced
  * motion) skips the zoom.
+ *
+ * The room follows the story: once the Capital has fallen the party is holed
+ * up in the inn at the forest's edge (where the Getaway's ride ends), so the
+ * desk becomes a table in its upstairs room, with the same three objects on it.
  */
 export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, returnFrom, frozenOn }: Props) {
   const { state } = useGame();
@@ -114,6 +128,7 @@ export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, ret
   const masteryReady =
     state.prefs.showMasteryMarks && state.ownedUnits.some((id) => hasAffordableMasteryUpgrade(state, id));
   const summonReady = canAffordSummon(state.gems);
+  const inn = isSectionCleared(state, 'capital');
   // Once the journal is open its veil lifts, so the (still zoomed) desk shows
   // through the journal's blurred backdrop rather than a flat dark wash.
   const veiled = leaving != null && !frozenOn && !(leaving.target === 'journal' && journalOpen);
@@ -179,7 +194,7 @@ export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, ret
 
   return (
     <main
-      className="screen desk-home"
+      className={`screen desk-home${inn ? ' inn' : ''}`}
       style={origin ? ({ '--zx': `${origin.x}%`, '--zy': `${origin.y}%` } as CSSProperties) : undefined}
     >
       <div
@@ -188,43 +203,63 @@ export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, ret
           settling ? ` settling-${settling}` : ''
         }`}
       >
-        {/* The wall: panelling, a moonlit window between star-sewn drapes. */}
-        <div className="desk-wall" aria-hidden="true">
-          <div className="desk-panel left" />
-          <div className="desk-panel right" />
-          <div className="desk-casement">
-            <div className="desk-rod" />
-            <div className="desk-drape left" />
-            <div className="desk-window">
-              <WindowView burning={isSectionCleared(state, 'castle')} />
-              <div className="desk-window-bars" />
+        {inn ? (
+          /* The inn's wall: lime plaster between oak timbers, herbs drying
+             and a plate shelf in the bays, a leaded window between tied-back
+             curtains looking out over the yard to the forest. */
+          <div className="desk-wall inn-wall" aria-hidden="true">
+            <div className="inn-beam" />
+            <div className="inn-bay left">
+              <div className="inn-bay-art">
+                <HerbsArt />
+              </div>
             </div>
-            <div className="desk-drape right" />
-            <div className="desk-sill" />
+            <div className="inn-bay right">
+              <div className="inn-bay-art">
+                <PlateShelfArt />
+              </div>
+            </div>
+            <div className="desk-casement inn-casement">
+              <div className="inn-pole" />
+              <div className="inn-curtain left" />
+              <div className="desk-window inn-window">
+                <InnWindowView />
+                <div className="inn-lattice" />
+              </div>
+              <div className="inn-curtain right" />
+              <div className="desk-sill inn-sill" />
+            </div>
           </div>
-        </div>
+        ) : (
+          /* The wall: panelling, a moonlit window between star-sewn drapes. */
+          <div className="desk-wall" aria-hidden="true">
+            <div className="desk-panel left" />
+            <div className="desk-panel right" />
+            <div className="desk-casement">
+              <div className="desk-rod" />
+              <div className="desk-drape left" />
+              <div className="desk-window">
+                <WindowView burning={isSectionCleared(state, 'castle')} />
+                <div className="desk-window-bars" />
+              </div>
+              <div className="desk-drape right" />
+              <div className="desk-sill" />
+            </div>
+          </div>
+        )}
 
-        {/* The desk top, with the clutter that isn't a way anywhere. */}
+        {/* The desk top, with the clutter that isn't a way anywhere (in the
+            inn, the same spots hold the table's ale, candles and key). */}
         <div className="desk-top" aria-hidden="true">
           <div className="desk-wood-clip">
             <div className="desk-wood" />
           </div>
           <div className="desk-gloss" />
-          <div className="desk-prop lantern">
-            <LanternBooksArt />
-          </div>
-          <div className="desk-prop candles">
-            <CandleClusterArt />
-          </div>
-          <div className="desk-prop candle-front">
-            <CandleArt />
-          </div>
-          <div className="desk-prop coins">
-            <CoinsArt />
-          </div>
-          <div className="desk-prop inkwell">
-            <InkwellArt />
-          </div>
+          <div className="desk-prop lantern">{inn ? <AleArt /> : <LanternBooksArt />}</div>
+          <div className="desk-prop candles">{inn ? <BottleCandleArt /> : <CandleClusterArt />}</div>
+          <div className="desk-prop candle-front">{inn ? <TallowCandleArt /> : <CandleArt />}</div>
+          <div className="desk-prop coins">{inn ? <RoomKeyArt /> : <CoinsArt />}</div>
+          <div className="desk-prop inkwell">{inn ? <BreadCheeseArt /> : <InkwellArt />}</div>
         </div>
 
         {/* The three ways into the game. */}
@@ -273,8 +308,10 @@ export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, ret
           </DeskObject>
         </div>
 
-        {/* Warm candlelight, the orb's glow and the room's falloff. */}
+        {/* Warm candlelight, the orb's glow and the room's falloff (in the
+            inn, a hearth off to the left flickers over it all too). */}
         <div className="desk-light" aria-hidden="true" />
+        {inn && <div className="inn-hearth" aria-hidden="true" />}
       </div>
       {/* The veil keeps its tint after the zoom ends, so it fades out in colour
           rather than losing its light the moment the zoom lets go. */}
