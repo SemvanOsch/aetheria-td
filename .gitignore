@@ -9,3 +9,6 @@ dist-ssr
 
 # Unity port (separate project, not part of the web game)
 /Unity Aetheria/
+
+# Balance simulator output (npm run balance)
+/tools/balance-sim/out/

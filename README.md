@@ -18,6 +18,8 @@ npm run lint       # eslint
 npm run typecheck  # tsc only
 npm run champions  # dev server opened on the champion stats sheet (#champions)
 npm run enemies    # dev server opened on the enemy stats sheet (#enemies)
+npm run balance    # headless balance simulator (tools/balance-sim)
+npm run editor     # content editor (http://localhost:5175), see "Content editor" below
 ```
 
 ## How to play
@@ -140,3 +142,94 @@ src/
 
 All persistence flows through `application/store.tsx` + `infrastructure/storage.ts`.
 Nothing in the UI touches `localStorage` or game rules directly.
+
+## Content editor
+
+A separate app in `tools/editor/` for authoring levels, waves, enemies, bosses,
+champions and skill trees. It is not part of the game: nothing in the game
+links to it, and `npm run build` doesn't bundle it. It reuses the game's domain
+catalogs, `GameEngine`, renderer and sprites, so what you edit is drawn and
+simulated by the real code.
+
+```bash
+npm run editor          # dev server at http://localhost:5175 (auto-bumps if taken)
+npm run editor:build    # type-check + static build into tools/editor/dist
+npm run editor:preview  # serve that build
+npm run editor:check    # headless self-check of validation, source export and packs
+```
+
+**Workflow.** The editor opens on the content shipped in `src/domain`. Edits go
+into a working copy with undo/redo (Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y). **Save**
+(Ctrl+S) stores it as the draft in this browser's `localStorage` (under
+`aetheria-editor:`; the game's `aetheria-td:` saves are never read or written),
+and **Discard** goes back to the last save. The top bar shows whether there are
+unsaved changes. Unsaved work is also kept in a recovery slot, so a closed tab
+or crash offers to restore it on the next launch. If `src/domain` changes
+after you saved a draft, the draft is carried onto the new content one entity
+at a time. Your version wins where both changed, and a notice lists those
+entities.
+
+- **Levels:** stage fields, multi-lane paths with reveal/emerge settings, a
+  board editor (paths, props, floor/path materials, colours, mood, with
+  validation overlays), a per-lane wave editor with group timelines, and a
+  summary of foes, total HP, gold and timing per wave. Create, duplicate,
+  reorder, archive (to `DISABLED_LEVEL_IDS`) or delete stages.
+- **Enemies & bosses:** stats, defences and structured mechanics (aura,
+  rally, summon, spit, heal), entrances and set-piece lines, with a "Used in"
+  list. A boss leaves a stat blank to keep the escalating curve's value, or
+  fills it in to override it.
+- **Champions:** every `UnitDef` field (only shapes that have a sprite),
+  in-stage upgrade tiers and forks, and derived DPS/max stats from the game's
+  own helpers. The three hero champions are read-only.
+- **Mastery:** a tree view per champion with prerequisite edges, node
+  operations and grouped effect controls.
+
+**Validation.** Every change is validated by one module
+(`tools/editor/src/validation/validate.ts`): errors, warnings and notes appear
+inline at the field and in the Problems drawer, each saying what is wrong and
+how to fix it. Click a problem to jump to it. Errors block content packs and
+source export, but a backup can always be taken.
+
+**Test play.** A level's **Test play** button runs it on the real
+`GameEngine` with the draft content installed. You can set starting gold,
+mastery (none or full), which heroes to bring and the RNG seed, then use
+pause, 1–8× speed, step, skip to the end of the wave, restart and extra gold.
+It never touches progression or game saves.
+
+**Content packs.** Content Packs → Export writes a versioned JSON file:
+
+```jsonc
+{
+  "format": "aetheria-content-pack",
+  "version": 1,
+  "kind": "content",        // or "backup": a draft as-is, errors and all
+  "scope": "full",          // or "changes": only what differs from shipped
+  "createdAt": "2026-10-17T12:00:00.000Z",
+  "validation": { "errors": 0, "warnings": 1 },
+  "content": { "levels": [], "enemies": [], "bosses": [], "units": [], "mastery": {} },
+  "removed": ["enemy:cas_brute"],   // changes only: shipped entities deleted
+  "order": { "levels": ["level:1"] } // changes only: a collection's order, when it changed
+}
+```
+
+A `content` pack is only written when there are no errors. Import (file, drop
+or paste) previews the result first. A full pack replaces the working copy or
+is merged in; a changes pack is merged in. Fields the game doesn't read can be
+stripped. An import is unsaved until you press Save, and Undo reverts it.
+Older pack versions are upgraded on import.
+
+**Back into the game (source export).** Content Packs → Generate source files
+patches `src/domain/levels.ts`, `enemies.ts`, `units.ts` and `mastery.ts` in
+memory. Only the changed entries are rewritten, in the files' own style, so
+comments and formatting elsewhere survive and unchanged files come out
+byte-identical. Review the per-file diff, then copy or download the files. On
+the editor's dev server you can also press **Write N files to src/domain**.
+This is an explicit, confirmed action: it saves your draft first, then the dev
+server checks each file still matches the version the editor loaded (if one
+changed it writes nothing and asks you to reload), then writes every changed
+file or none. Only those four files can be written, and only from `npm run editor`
+(never from a build or preview). Review the result with `git diff`, then run
+`npm run typecheck`.
+
+**Reset.** Content Packs → Reset to the shipped content throws the draft away
+after a confirmation that offers a backup download first.

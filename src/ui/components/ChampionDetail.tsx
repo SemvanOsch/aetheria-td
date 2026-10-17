@@ -6,7 +6,7 @@ import {
   masteryGreaterOrb,
   masteryThrow,
   masteryUpgradeCost,
-  masteryUpgradeDeltas,
+  masteryUpgradeEffect,
 } from '../../domain/mastery';
 import { playerChampionPath } from '../../domain/playerChampion';
 import { proficiencyDef } from '../../domain/proficiency';
@@ -156,14 +156,36 @@ export function ChampionDetail({
             </div>
             <div className="cd-levels">
               {unit.upgrades.map((u, i) => {
-                const effect = upgradeEffectLabel({
-                  ...masteryUpgradeDeltas(unit, i + 1, purchased),
-                  setAoe: u.setAoe,
-                  coneAngle: unit.coneAngle,
-                  // Bard tune deltas aren't stat-scaled — pass them straight through.
-                  bardTargets: u.bardTargets,
-                  bardSpeedBonus: u.bardSpeedBonus,
-                });
+                // A fork tier: its options side by side, only one of which can be bought.
+                if (u.choices) {
+                  return (
+                    <div key={i} className="cd-level-fork">
+                      {u.choices.map((c, ci) => {
+                        const effect = upgradeEffectLabel({ ...masteryUpgradeEffect(unit, i + 1, purchased, ci), ability: undefined });
+                        return (
+                          <div key={ci} className="cd-level">
+                            <span className="cd-level-num">{i + 1}</span>
+                            <div className="cd-level-body">
+                              <div className="cd-level-head">
+                                <span className="cd-level-name">{c.name}</span>
+                                <span className="cd-level-cost">
+                                  {isHero ? `${c.cost} EXP` : `${masteryUpgradeCost(unit, i + 1, purchased, ci)} gold`}
+                                </span>
+                              </div>
+                              <div className="cd-level-eff">
+                                {effect && <b>{effect}</b>}
+                                {effect && c.description ? ' - ' : ''}
+                                {c.description}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                }
+                // The ability is written out in its own box below, so leave it off the label.
+                const effect = upgradeEffectLabel({ ...masteryUpgradeEffect(unit, i + 1, purchased), ability: undefined });
                 return (
                   <div key={i} className={`cd-level${u.ability ? ' ability' : ''}`}>
                     <span className="cd-level-num">{i + 1}</span>

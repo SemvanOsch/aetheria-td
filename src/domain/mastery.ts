@@ -18,8 +18,11 @@ import {
   DEFAULT_BURST_RADIUS,
   effectiveBard,
   effectiveGenerate,
+  effectiveShatter,
   effectiveStats,
+  withUpgradeChoice,
   type BardDef,
+  type ShatterDef,
   type UnitDef,
   type UpgradeEffect,
 } from './units';
@@ -212,6 +215,40 @@ export interface MasteryUpgradeDef {
    * every surface picks it up through `getUnit`. Read through `masteryWeaponForm`.
    */
   weaponForm?: HeroWeaponForm;
+  /**
+   * Overrides the slow fraction of an ice champion's chill (`UnitDef.special`;
+   * the Frost Witch's Deep Freeze, 0.45 = 45% slower). Highest wins. Read
+   * through `masteryChill`.
+   */
+  chillSlow?: number;
+  /** Extra seconds an ice champion's chill lasts (Lingering Rime). Read through `masteryChill`. */
+  chillDurationBonus?: number;
+  /**
+   * Her hits no longer chill at all (the Frost Witch's Shatterfrost). Ice Storm,
+   * an in-stage upgrade, still slows. Read through `masteryChill`.
+   */
+  noChill?: boolean;
+  /**
+   * Icebreak: the champion's hit on a foe that is already slowed (or already
+   * Brittle) makes it Brittle for `brittleDuration` s, taking `brittleMult`×
+   * damage from every source meanwhile. Read through `masteryBrittle`.
+   */
+  brittleMult?: number;
+  /** Seconds Brittle lasts (see `brittleMult`). */
+  brittleDuration?: number;
+  /**
+   * Overrides the damage fraction each ice shard deals of the missile's hit
+   * (the Frost Witch's Splintering Cold). Highest wins. Read through
+   * `masteryShatter`.
+   */
+  shardDamageMult?: number;
+  /**
+   * Shatter Storm: a shard that kills bursts again from the fallen foe into a
+   * ring of smaller splinters (as many as the missile's shards), each dealing
+   * this fraction of the killing shard's damage. Splinters never burst again.
+   * Highest wins. Read through `masteryShardSplit`.
+   */
+  shardSplitMult?: number;
 }
 
 /**
@@ -507,7 +544,7 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
       major: true,
       exclusiveGroup: 'blade_style',
       crossSlashEvery: 3,
-      crossSlashMult: 1.8,
+      crossSlashMult: 2.2,
     },
     {
       id: 'claymore',
@@ -628,6 +665,79 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
       weaponForm: 'staff',
     },
   ],
+  frostWitch: [
+    {
+      id: 'permafrost',
+      name: 'Permafrost',
+      description: 'The cold settles deeper into every needle making them deal 10% more damage.',
+      cost: 150,
+      damageMult: 1.1,
+    },
+    {
+      id: 'glacial_sight',
+      name: 'Glacial Sight',
+      description: 'Her gaze finds enemies through frost and distance, extending her range by 10%.',
+      cost: 150,
+      requires: 'permafrost',
+      rangeMult: 1.1,
+    },
+    {
+      id: 'deep_freeze',
+      name: 'Deep Freeze',
+      description: 'Her magic draws out the bitter heart of the winter, slowing enemies by 45%.',
+      cost: 400,
+      requires: 'glacial_sight',
+      major: true,
+      exclusiveGroup: 'frost_witch_mode',
+      chillSlow: 0.45,
+    },
+    {
+      id: 'shatterfrost',
+      name: 'Shatterfrost',
+      description: "Forsaking winter's lingering grip, her needles form into brutal shards that deal 80% more damage, but no longer slow their victims.",
+      cost: 400,
+      requires: 'glacial_sight',
+      major: true,
+      exclusiveGroup: 'frost_witch_mode',
+      damageMult: 1.8,
+      noChill: true,
+    },
+    {
+      id: 'lingering_rime',
+      name: 'Lingering Rime',
+      description: 'The frost clings a little longer to every victim, making the slow last 0.5s longer.',
+      cost: 250,
+      requires: 'deep_freeze',
+      chillDurationBonus: 0.5,
+    },
+    {
+      id: 'icebreak',
+      name: 'Icebreak',
+      description: 'Striking an already-slowed enemy cracks its frozen guard, making it Brittle: for 3s it takes 25% more damage from every champion. Her hits on a Brittle enemy keep it Brittle.',
+      cost: 750,
+      requires: 'lingering_rime',
+      major: true,
+      brittleMult: 1.25,
+      brittleDuration: 3,
+    },
+    {
+      id: 'splintering_cold',
+      name: 'Splintering Cold',
+      description: "The shattering needles carry more force making each shard deal 50% of the needle's damage instead of 40%.",
+      cost: 250,
+      requires: 'shatterfrost',
+      shardDamageMult: 0.5,
+    },
+    {
+      id: 'shatter_storm',
+      name: 'Shatter Storm',
+      description: 'Each shard that kills an enemy fractures again, bursting from the fallen foe into a ring of smaller splinters that deal 50% of its damage.',
+      cost: 750,
+      requires: 'splintering_cold',
+      major: true,
+      shardSplitMult: 0.5,
+    },
+  ],
 };
 
 /** The skill tree for a champion (empty if it has none). */
@@ -671,9 +781,10 @@ export function isMasteryUpgradeUnlocked(
  * The subset of a champion's *learned* nodes whose effects are actually live.
  * A node outside any exclusive group is always live; for each exclusive group,
  * only one learned member is live — the one named in `active`, falling back to
- * the first learned member of the group when `active` names none. Feed the
- * result to the engine and every stat display so a swapped-out path stops
- * contributing (see `exclusiveGroup`).
+ * the first learned member of the group when `active` names none. A node is
+ * only live while its prerequisite is, so everything learned after a
+ * swapped-out member goes dark with it. Feed the result to the engine and every
+ * stat display so a swapped-out path stops contributing (see `exclusiveGroup`).
  */
 export function activeMasteryUpgrades(
   unitId: string,
@@ -690,11 +801,14 @@ export function activeMasteryUpgrades(
       chosen.set(node.exclusiveGroup, node.id); // fallback: first learned member
     }
   }
-  return purchased.filter((id) => {
+  const live = (id: string, depth = 0): boolean => {
     const def = getMasteryUpgrade(unitId, id);
-    if (!def?.exclusiveGroup) return true;
-    return chosen.get(def.exclusiveGroup) === id;
-  });
+    if (!def) return true;
+    if (def.exclusiveGroup && chosen.get(def.exclusiveGroup) !== id) return false;
+    // Guard against a malformed `requires` loop.
+    return !def.requires || depth > 32 || live(def.requires, depth + 1);
+  };
+  return purchased.filter((id) => live(id));
 }
 
 /** Total EXP already committed to the given purchased upgrade ids. */
@@ -712,14 +826,17 @@ export function masterySpent(
  * discounts (e.g. the Wizard's Magical Bargaining). `tier` is 1-based (the
  * upgrade's position in `unit.upgrades`). The engine's charge, the in-stage
  * upgrade button, and the champion sheet all read this so the shown and charged
- * prices agree. Never drops below 0.
+ * prices agree. Never drops below 0. For a fork tier, `choice` picks which of
+ * its `choices` to price.
  */
 export function masteryUpgradeCost(
   unit: UnitDef,
   tier: number,
   purchased: readonly string[],
+  choice?: number,
 ): number {
-  const up = unit.upgrades[tier - 1];
+  const fork = unit.upgrades[tier - 1];
+  const up = choice != null && fork?.choices ? fork.choices[choice] : fork;
   if (!up) return 0;
   let discount = 0;
   for (const u of masteryTree(unit.id)) {
@@ -968,6 +1085,35 @@ export function masteryUpgradeDeltas(
 }
 
 /**
+ * Everything an in-stage upgrade adds, ready for `upgradeEffectLabel`: the
+ * mastery-adjusted stat deltas plus the tier's own non-scaled effects (Bard
+ * tune, magic pen, shatter, Ice Storm, ability). For a fork tier, `choice`
+ * picks which option to describe. The champion sheet and the in-stage panel
+ * both read this so their labels agree.
+ */
+export function masteryUpgradeEffect(
+  unit: UnitDef,
+  tier: number,
+  purchased: readonly string[],
+  choice?: number,
+): UpgradeEffect {
+  const resolved = choice != null ? withUpgradeChoice(unit, tier, choice) : unit;
+  const up = resolved.upgrades[tier - 1];
+  return {
+    ...masteryUpgradeDeltas(resolved, tier, purchased),
+    setAoe: up?.setAoe,
+    coneAngle: resolved.coneAngle,
+    bardTargets: up?.bardTargets,
+    bardSpeedBonus: up?.bardSpeedBonus,
+    magicPen: up?.magicPen,
+    shatterCount: up?.shatterCount,
+    shatterReach: up?.shatterReach,
+    iceStorm: up?.iceStorm,
+    ability: up?.ability?.name,
+  };
+}
+
+/**
  * A Bard's performance at in-stage upgrade `tier` with permanent mastery bonuses
  * (tempo, duration) folded in — the single source the engine and every Bard
  * stat display read. Null for a non-Bard unit.
@@ -1142,6 +1288,74 @@ export function masteryFinalBounceDamageMult(
     if (u.finalBounceDamageMult && purchased.includes(u.id)) {
       mult = Math.max(mult, u.finalBounceDamageMult);
     }
+  }
+  return mult;
+}
+
+/**
+ * The chill an ice champion's hits lay (the Frost Witch's slow: speed ×
+ * (1 − `slow`) for `duration` s), with purchased nodes applied — Deep Freeze's
+ * stronger slow, Lingering Rime's longer one — or null when it doesn't chill
+ * (no `special.slow`, or Shatterfrost). The engine and every slow display read this.
+ */
+export function masteryChill(
+  unit: UnitDef,
+  purchased: readonly string[],
+): { slow: number; duration: number } | null {
+  let slow = unit.special?.slow ?? 0;
+  let duration = unit.special?.slowDuration ?? 0;
+  for (const u of masteryTree(unit.id)) {
+    if (!purchased.includes(u.id)) continue;
+    if (u.noChill) return null;
+    if (u.chillSlow) slow = Math.max(slow, u.chillSlow);
+    duration += u.chillDurationBonus ?? 0;
+  }
+  return slow > 0 && duration > 0 ? { slow: Math.min(1, slow), duration } : null;
+}
+
+/**
+ * A shattering champion's shatter after the first `tier` in-stage upgrades
+ * (`effectiveShatter`), with a purchased shard-damage override (Splintering
+ * Cold) applied. Null if it doesn't shatter. The engine and every shatter
+ * display read this.
+ */
+export function masteryShatter(
+  unit: UnitDef,
+  tier: number,
+  purchased: readonly string[],
+): ShatterDef | null {
+  const s = effectiveShatter(unit, tier);
+  if (!s) return null;
+  for (const u of masteryTree(unit.id)) {
+    if (u.shardDamageMult && purchased.includes(u.id)) s.damageMult = Math.max(s.damageMult, u.shardDamageMult);
+  }
+  return s;
+}
+
+/**
+ * The Brittle a champion's purchased nodes let its hits inflict (Icebreak):
+ * `mult`× damage taken for `duration` s. Undefined when none do.
+ */
+export function masteryBrittle(
+  unitId: string,
+  purchased: readonly string[],
+): { mult: number; duration: number } | undefined {
+  for (const u of masteryTree(unitId)) {
+    if (u.brittleMult && u.brittleDuration && purchased.includes(u.id)) {
+      return { mult: u.brittleMult, duration: u.brittleDuration };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The damage fraction of the splinters a killing shard bursts into (Shatter
+ * Storm), or 0 when no purchased node grants them. Highest wins.
+ */
+export function masteryShardSplit(unitId: string, purchased: readonly string[]): number {
+  let mult = 0;
+  for (const u of masteryTree(unitId)) {
+    if (u.shardSplitMult && purchased.includes(u.id)) mult = Math.max(mult, u.shardSplitMult);
   }
   return mult;
 }

@@ -55,7 +55,7 @@ export const RARITIES: Record<Rarity, RarityDef> = {
     id: 'epic',
     name: 'Epic',
     weight: 4,
-    available: false,
+    available: true,
     summonable: true,
     color: '#b455ff',
     order: 2,

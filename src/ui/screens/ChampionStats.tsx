@@ -1,17 +1,21 @@
 import { useMemo, useState } from 'react';
 import {
   ALL_UNITS,
-  aoeLabel,
+  attackShapeLabel,
   attackTypeLabel,
   damageTypeLabel,
   effectiveAbility,
   effectiveAoe,
   effectiveBard,
   effectiveGenerate,
+  effectiveIceStorm,
+  effectiveMagicPen,
+  effectiveShatter,
   effectiveStats,
   formatAttackSpeed,
   maxUpgradeTier,
   unitDps,
+  upgradePaths,
   type UnitDef,
 } from '../../domain/units';
 import { ALL_RARITIES, RARITIES, type Rarity } from '../../domain/rarity';
@@ -45,14 +49,37 @@ const HEROES: UnitDef[] = Object.values(PLAYER_CHAMPION_IDS)
   .concat(buildPlayerChampionDef('player-magic', 'Magic Adventurer (Staff)', defaultPlayerSprite(), 'staff'))
   .filter((u): u is UnitDef => u !== null);
 
-const CHAMPIONS: UnitDef[] = [...ALL_UNITS, ...HEROES];
-
 /** Shapes of the alternate weapon forms, which share their champion's id. */
 const FORM_SHAPES = new Set(['player-claymore', 'player-longbow', 'player-staff']);
 
-/** URL key for a champion's detail page — the id, or the shape for a weapon form (shares its id). */
-export const championKey = (u: UnitDef) => (FORM_SHAPES.has(u.visual.shape) ? u.visual.shape : u.id);
-export const findChampion = (key: string) => CHAMPIONS.find((u) => championKey(u) === key);
+/** URL key of a champion row before its upgrade path — the id, or the shape for a weapon form (shares its id). */
+const baseKey = (u: UnitDef) => (FORM_SHAPES.has(u.visual.shape) ? u.visual.shape : u.id);
+
+/** Each path row's URL key (`frostWitch~1`) and its picks, for champions with upgrade forks. */
+const PATH_INFO = new WeakMap<UnitDef, { key: string; picks: string[] }>();
+
+/**
+ * One row per champion, or one per upgrade path for a champion with fork tiers
+ * (the Frost Witch's Shattering Cold / Ice Storm), named after its picks.
+ */
+const CHAMPIONS: UnitDef[] = [...ALL_UNITS, ...HEROES].flatMap((u) => {
+  const paths = upgradePaths(u);
+  if (paths.length === 1) return [u];
+  return paths.map((p, i) => {
+    const def = { ...p.def, name: `${u.name} (${p.picks.join(', ')})` };
+    PATH_INFO.set(def, { key: `${baseKey(u)}~${i}`, picks: p.picks });
+    return def;
+  });
+});
+
+/** URL key for a champion's detail page: its base key, plus `~n` for an upgrade path. */
+export const championKey = (u: UnitDef) => PATH_INFO.get(u)?.key ?? baseKey(u);
+/** The champion row for a key; a bare key of a forked champion opens its first path. */
+export const findChampion = (key: string) =>
+  CHAMPIONS.find((u) => championKey(u) === key) ?? CHAMPIONS.find((u) => baseKey(u) === key);
+/** Every upgrade path row of the same champion as `u` (just `u` if it has no forks), with its picks. */
+export const championPaths = (u: UnitDef) =>
+  CHAMPIONS.filter((c) => baseKey(c) === baseKey(u)).map((c) => ({ unit: c, picks: PATH_INFO.get(c)?.picks ?? [] }));
 
 type SortKey = 'name' | 'cost' | 'deployLimit' | 'damage' | 'attackSpeed' | 'range' | 'dps' | 'maxDps' | 'upgradeCost';
 
@@ -81,13 +108,15 @@ function sortValue(u: UnitDef, key: SortKey): number | string {
 /** Attack-shape notes: volley size, bounces, cone angle, burst radius, line width. */
 function shapeText(u: UnitDef): string {
   const tier = maxUpgradeTier(u);
-  const base = aoeLabel(u.aoe);
+  const base = attackShapeLabel(u);
   const max = effectiveAoe(u, tier);
-  const parts = [max !== u.aoe ? `${base} → ${aoeLabel(max)}` : base];
+  const parts = [max !== u.aoe ? `${base} → ${attackShapeLabel(u, max)}` : base];
   if (u.burst && u.burst > 1) parts.push(`×${u.burst} volley`);
   if (u.bounces) parts.push(`${u.bounces} bounce${u.bounces > 1 ? 's' : ''}`);
   if (u.aoe === 'line' && u.aoeWidth) parts.push(`${u.aoeWidth}px wide`);
   if (u.aoe === 'circle' && u.burstRadius) parts.push(`${u.burstRadius}px radius`);
+  const shatter = effectiveShatter(u, tier);
+  if (shatter) parts.push(`${shatter.count} shards × ${Math.round(shatter.damageMult * 100)}%, ${shatter.reach}px (max tier)`);
   return parts.join(' · ');
 }
 
@@ -105,6 +134,10 @@ function specialText(u: UnitDef): string {
     );
   }
   if (u.special?.slow) out.push(`Slow ${Math.round(u.special.slow * 100)}% for ${u.special.slowDuration ?? 0}s`);
+  const storm = effectiveIceStorm(u, tier);
+  if (storm) out.push(`Ice Storm: foes in range ${Math.round(storm * 100)}% slower (max tier)`);
+  const pen = effectiveMagicPen(u, tier);
+  if (pen) out.push(`Ignores ${Math.round(pen * 100)}% magic resist (max tier)`);
   const ability = effectiveAbility(u, tier);
   if (ability) {
     out.push(`${ability.name}: ${ability.manaCost ?? 0} mana, ${ability.cooldown}s cooldown`);
@@ -163,7 +196,7 @@ function ChampionTable({ rows }: { rows: UnitDef[] }) {
               const combat = isCombat(u);
               return (
                 <tr
-                  key={`${u.id}|${u.visual.shape}`}
+                  key={championKey(u)}
                   className="es-link"
                   onClick={() => { location.hash = `champions/${championKey(u)}`; }}
                 >
@@ -240,7 +273,7 @@ export function ChampionStats() {
       </nav>
       <ChampionTable key={tab} rows={shown} />
       <p className="es-faint">
-        Base catalog values — no mastery or armor. Every champion crits {Math.round(BASE_CRIT_CHANCE * 100)}% of the time for ×{CRIT_MULTIPLIER}. Max tier = all in-stage gold upgrades bought. Click a champion for its full breakdown.
+        Base catalog values — no mastery or armor. Every champion crits {Math.round(BASE_CRIT_CHANCE * 100)}% of the time for ×{CRIT_MULTIPLIER}. Max tier = all in-stage gold upgrades bought; a champion with an upgrade choice gets one row per path. Click a champion for its full breakdown.
       </p>
     </div>
   );

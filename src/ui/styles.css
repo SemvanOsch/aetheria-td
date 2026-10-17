@@ -2367,6 +2367,27 @@ button:disabled .icon {
   color: var(--text-dim);
 }
 
+/* A fork tier in-stage: its options stacked; buying one locks the rest. */
+.upgrade-fork {
+  margin-top: 12px;
+}
+.upgrade-fork-head {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+.upgrade-fork-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.upgrade-fork-opts .upgrade-box {
+  margin-top: 0;
+}
+
 /* Hero champion in-stage leveling: an EXP pool that auto-levels, shown as a
    progress bar instead of a gold buy button. */
 .upgrade-box.hero-xp {
@@ -2691,6 +2712,25 @@ button.cd-mastery:hover {
   color: var(--green);
   font-weight: 700;
 }
+/* A fork tier: its options side by side (one may be bought per champion). */
+.cd-level-fork {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.cd-level-fork .cd-level {
+  padding: 11px 12px;
+  gap: 10px;
+}
+.cd-level-fork .cd-level-head {
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+@media (max-width: 560px) {
+  .cd-level-fork {
+    grid-template-columns: 1fr;
+  }
+}
 /* A tier that grants an activated ability, picked out in gold. */
 .cd-level.ability {
   border-color: rgba(232, 191, 94, 0.5);
@@ -2753,7 +2793,7 @@ button.cd-mastery:hover {
 }
 
 /* mastery skill-tree menu (its own modal): a node board on the left, the
-   selected node + running totals on the right. */
+   selected node on the right. */
 .modal.mastery-tree-modal {
   max-width: 940px;
 }
@@ -2872,20 +2912,22 @@ button.cd-mastery:hover {
   align-items: start;
 }
 
-/* The board: a dark well with a faint drafting grid. */
+/* The board: a dark well with a faint drafting grid. It is a fixed window
+   (a common champion's tree fits whole); bigger trees are dragged around in
+   it, the grid sliding along with the nodes. */
 .mt-board {
   position: relative;
-  min-height: 420px;
-  overflow-x: auto;
-  display: flex;
-  justify-content: center;
-  padding: 8px 0 14px;
+  box-sizing: content-box;
+  height: 472px;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
   border-radius: var(--radius);
   border: 1px solid var(--hairline);
   background:
     radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--rarity) 12%, transparent), transparent 60%),
-    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px) 0 0 / 28px 28px,
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px) var(--pan-x, 0) var(--pan-y, 0) / 28px 28px,
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px) var(--pan-x, 0) var(--pan-y, 0) / 28px 28px,
     var(--well);
   box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.5);
   transition: opacity 0.2s ease, filter 0.2s ease;
@@ -2896,9 +2938,26 @@ button.cd-mastery:hover {
   opacity: 0.55;
   filter: grayscale(0.7);
 }
+.mt-board.pannable {
+  cursor: grab;
+}
+.mt-board.dragging,
+.mt-board.dragging .mt-node {
+  cursor: grabbing;
+}
 .mt-canvas {
-  position: relative;
-  flex: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.mt-pan-hint {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+  pointer-events: none;
+  opacity: 0.8;
 }
 .mt-edges {
   position: absolute;
@@ -3184,55 +3243,6 @@ button.cd-mastery:hover {
   color: var(--gold);
   border-color: rgba(232, 191, 94, 0.4);
 }
-.mt-totals {
-  padding-top: 14px;
-  border-top: 1px solid transparent;
-  border-image: var(--gild-line) 1;
-}
-.mt-totals-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  margin-bottom: 8px;
-}
-.mt-totals-title span {
-  color: var(--red);
-  letter-spacing: 0.06em;
-}
-.mt-totals-empty {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--text-faint);
-}
-.mt-totals ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.mt-totals ul.paused {
-  opacity: 0.5;
-}
-.mt-totals li {
-  display: flex;
-  gap: 8px;
-  font-size: 12.5px;
-  line-height: 1.4;
-  color: var(--text-dim);
-}
-.mt-totals li > .icon {
-  flex: none;
-  margin-top: 2px;
-  color: var(--gold);
-}
-.mt-totals li b {
-  color: var(--text);
-}
 
 @media (max-width: 760px) {
   .mt-head {
@@ -3242,10 +3252,7 @@ button.cd-mastery:hover {
     grid-template-columns: 1fr;
   }
   .mt-board {
-    justify-content: flex-start;
-  }
-  .mt-canvas {
-    margin: 0 auto;
+    height: 400px;
   }
 }
 
@@ -4779,108 +4786,204 @@ button.cd-mastery:hover {
   }
 }
 
-/* hovered-enemy tooltip (positioned as % of the board, follows the enemy) */
-.enemy-tooltip {
-  position: absolute;
-  transform: translate(-50%, calc(-100% - 14px));
-  min-width: 110px;
-  padding: 7px 10px;
-  border-radius: 9px;
-  background: rgba(11, 14, 28, 0.94);
-  border: 1px solid var(--border-strong);
-  box-shadow: var(--shadow);
-  pointer-events: none;
-  z-index: 15;
-  text-align: center;
-}
-.enemy-tooltip.boss {
-  border-color: var(--red);
-  box-shadow: 0 0 18px rgba(255, 90, 90, 0.4);
-}
-.enemy-tooltip::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  bottom: -5px;
-  width: 9px;
-  height: 9px;
-  background: inherit;
-  border-right: 1px solid var(--border-strong);
-  border-bottom: 1px solid var(--border-strong);
-  transform: translateX(-50%) rotate(45deg);
-}
-/* When there's no room above the enemy, show the tooltip below instead. */
-.enemy-tooltip.below {
-  transform: translate(-50%, 14px);
-}
-.enemy-tooltip.below::after {
-  bottom: auto;
-  top: -5px;
-  border: none;
-  border-left: 1px solid var(--border-strong);
-  border-top: 1px solid var(--border-strong);
-}
-.enemy-tooltip.boss.below::after {
-  border-left-color: var(--red);
-  border-top-color: var(--red);
-}
-.enemy-tooltip.boss::after {
-  border-right-color: var(--red);
-  border-bottom-color: var(--red);
-}
-.enemy-tooltip .et-name {
-  font-weight: 700;
+/* click-to-inspect foe panel (battle side panel; replaces the champion inspector) */
+.enemy-inspect {
+  position: relative;
   font-size: 13px;
-  color: var(--text);
-  white-space: nowrap;
 }
-.enemy-tooltip .et-resist {
-  margin-left: 4px;
-  vertical-align: -2px;
+.enemy-inspect.boss {
+  border-color: color-mix(in srgb, var(--red) 55%, transparent);
+  box-shadow: var(--shadow), 0 0 18px rgba(255, 90, 90, 0.18);
 }
-.enemy-tooltip .et-hpbar {
-  height: 6px;
-  margin: 5px 0 3px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.5);
-  overflow: hidden;
-}
-.enemy-tooltip .et-hpbar > span {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, #ff5a5a, #ffb44a);
-  transition: width 0.1s linear;
-}
-.enemy-tooltip .et-hp {
-  font-size: 11.5px;
-  font-weight: 600;
+.ei-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--well);
   color: var(--text-dim);
-  white-space: nowrap;
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
 }
-/* A shielded foe's remaining shield hits, matching the board's pips. */
-.enemy-tooltip .et-shield {
+.ei-close:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.ei-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.ei-portrait {
+  margin: 0;
+}
+.ei-title {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 3px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #b9cdf5;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+  font-weight: 700;
+  font-size: 16px;
+}
+.ei-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.enemy-tooltip .et-pips {
+.ei-boss-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--red);
+  border: 1px solid color-mix(in srgb, var(--red) 60%, transparent);
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+}
+.ei-hp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--red);
+}
+.ei-hp-val {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.ei-hpbar {
+  margin-top: 5px;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+/* No width transition: the panel re-renders every frame (see .mana-bar). */
+.ei-hpbar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #4fae5c, var(--green));
+}
+.ei-hpbar > span.mid {
+  background: linear-gradient(90deg, #d6992e, #ffc85a);
+}
+.ei-hpbar > span.low {
+  background: linear-gradient(90deg, var(--danger), #ff8a6a);
+}
+.ei-section-head {
+  display: flex;
+  align-items: center;
+  margin: 12px 0 6px;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.ei-empty {
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--well);
+  color: var(--text-faint);
+  font-size: 12px;
+  text-align: center;
+}
+.ei-defs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ei-def {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 3px;
+  border-bottom: 1px dotted rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.ei-def b {
+  margin-left: auto;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ei-def-ic {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  font-size: 14px;
+  line-height: 1;
+}
+.ei-def-ic.ei-dodge {
+  color: #bfe4ff;
+}
+.ei-def-ic.ei-ward,
+.ei-def-ic.ei-aura {
+  color: var(--gold);
+}
+.ei-def-ic.ei-regen {
+  color: var(--green);
+}
+.ei-def-ic.ei-unkillable {
+  color: var(--text-dim);
+}
+.ei-resist {
+  display: block;
+}
+/* A shielded foe's remaining shield hits, matching the board's pips. */
+.ei-pips {
   display: inline-flex;
   gap: 2px;
 }
-.enemy-tooltip .et-pips > i {
+.ei-pips > i {
   width: 6px;
   height: 7px;
   background: rgba(70, 80, 100, 0.55);
   clip-path: polygon(0 0, 100% 0, 100% 45%, 50% 100%, 0 45%);
 }
-.enemy-tooltip .et-pips > i.on {
+.ei-pips > i.on {
   background: #8fb4ff;
 }
+.buffs-count.ei-has {
+  background: var(--frost);
+  color: #0b1a26;
+}
+.buff-row.ei-debuff {
+  background: color-mix(in srgb, var(--debuff) 10%, transparent);
+  border-color: color-mix(in srgb, var(--debuff) 30%, transparent);
+}
+.ei-debuff .buff-ic,
+.ei-debuff .buff-info b {
+  color: var(--debuff);
+}
+.ei-time {
+  margin-left: auto;
+  padding-left: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
 .boss-banner {
   display: flex;
   align-items: center;
@@ -7645,6 +7748,45 @@ body:has(.intro-root) > .modal-backdrop {
   color: var(--gold);
   border-bottom-color: var(--gold);
 }
+/* Dev champion page: switch between a forked champion's upgrade paths. */
+.cd-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.cd-path-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+.cd-path-opts {
+  display: inline-flex;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+}
+.cd-path-opts button {
+  padding: 6px 16px;
+  border-radius: 999px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.cd-path-opts button:hover:not(.active) {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+.cd-path-opts button.active {
+  color: #1a1206;
+  background: linear-gradient(180deg, var(--gold) 0%, var(--gold-deep) 100%);
+}
 .es-section {
   margin-bottom: 32px;
 }
@@ -7658,6 +7800,38 @@ body:has(.intro-root) > .modal-backdrop {
 .es-count {
   color: var(--text-faint);
   font-weight: 400;
+}
+/* A foldable section: its h2 is the toggle, with a chevron that turns open. */
+.es-fold > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+.es-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.es-fold > summary h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.es-fold > summary h2::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+.es-fold[open] > summary h2::before {
+  transform: rotate(45deg);
+}
+.es-fold > summary:hover h2 {
+  color: var(--gold);
+}
+.es-fold:not([open]) > summary h2 {
+  margin-bottom: 0;
 }
 .es-scroll {
   overflow-x: auto;
@@ -8993,49 +9167,134 @@ button.cd-mastery.cd-armory:hover {
 .cd-picker-bar button:hover {
   color: var(--gold);
 }
-.cd-nodes {
-  list-style: none;
+/* The mastery picker as a branching tree: rows by prerequisite depth, branches
+   side by side, curved connectors drawn in an SVG under the cards. */
+.cd-tree-scroll {
+  overflow-x: auto;
+  padding: 4px 2px 10px;
+}
+.cd-tree {
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 6px;
+  justify-content: center;
+  column-gap: 18px;
+  row-gap: 40px;
+  width: max-content;
+  min-width: 100%;
 }
-.cd-nodes li {
-  background: var(--panel);
+.cd-tree-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.cd-tree-edges path {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 2;
+  opacity: 0.45;
+}
+.cd-tree-edges path.fork {
+  stroke-dasharray: 5 5;
+}
+.cd-tree-edges path.lit {
+  stroke: var(--gold);
+  opacity: 1;
+  stroke-dasharray: none;
+  filter: drop-shadow(0 0 4px rgba(232, 191, 94, 0.55));
+}
+.cd-tree-node {
+  position: relative;
+  justify-self: center;
+  align-self: start;
+  width: 100%;
+  max-width: 260px;
+  background: var(--panel-solid);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 8px 10px;
-  opacity: 0.6;
-}
-.cd-nodes li {
+  border-radius: 12px;
+  padding: 10px 12px;
   cursor: pointer;
   user-select: none;
+  opacity: 0.7;
+  transition: opacity 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
-.cd-nodes li:hover:not(.locked) {
+.cd-tree-node:hover:not(.locked) {
+  opacity: 0.95;
   border-color: var(--gold-hi);
-  opacity: 0.85;
+  transform: translateY(-1px);
 }
-.cd-nodes li.on {
+.cd-tree-node.on {
   opacity: 1;
   border-color: var(--gold);
+  box-shadow: 0 0 0 1px rgba(232, 191, 94, 0.25), 0 6px 18px rgba(0, 0, 0, 0.35);
 }
-.cd-nodes li.locked {
+.cd-tree-node.major {
+  border-width: 2px;
+}
+.cd-tree-node.major.on {
+  background: linear-gradient(180deg, rgba(232, 191, 94, 0.12), transparent 60%), var(--panel-solid);
+}
+.cd-tree-node.rivalled {
+  opacity: 0.4;
+}
+.cd-tree-node.locked {
   cursor: default;
 }
-.cd-nodes li:focus-visible {
+.cd-tree-node:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 2px;
 }
-.cd-nodes input {
-  pointer-events: none;
-}
-.cd-node-head {
-  display: flex;
-  gap: 6px;
-  align-items: baseline;
-  flex-wrap: wrap;
-}
-.cd-major {
+.cd-tree-fork {
+  position: absolute;
+  top: -9px;
+  right: 10px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--gold);
+  background: var(--panel-solid);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+}
+.cd-tree-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cd-tree-dot {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+}
+.cd-tree-node.on .cd-tree-dot {
+  background: var(--gold);
+  border-color: var(--gold-hi);
+  box-shadow: 0 0 6px rgba(232, 191, 94, 0.7);
+}
+.cd-tree-name {
+  flex: 1;
+  font-weight: 700;
+  color: var(--text);
+}
+.cd-tree-node.major .cd-tree-name {
+  color: var(--gold);
+}
+.cd-tree-cost {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.cd-tree-desc {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-dim);
 }
 .cd-tags {
   display: flex;

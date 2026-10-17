@@ -209,15 +209,20 @@ export const ENEMY_KILLS_TO_UNLOCK = 1;
 /**
  * Damage multiplier (in [0,1]) an enemy's resistances apply to one hit of the
  * given damage type. `undefined` damage type (e.g. sourceless/support hits) is
- * never resisted. This is the single place resistances turn into a multiplier —
- * the engine calls it at the damage choke point.
+ * never resisted. `magicPen` is the share of magic resistance the attacker
+ * ignores (the Frost Witch's Rimepiercer). This is the single place resistances
+ * turn into a multiplier — the engine calls it at the damage choke point.
  */
-export function resistMultiplier(def: EnemyDef, damageType?: 'physical' | 'magic'): number {
+export function resistMultiplier(
+  def: EnemyDef,
+  damageType?: 'physical' | 'magic',
+  magicPen = 0,
+): number {
   const resist =
     damageType === 'physical'
       ? def.physicalResist
       : damageType === 'magic'
-        ? def.magicResist
+        ? (def.magicResist ?? 0) * (1 - Math.min(1, Math.max(0, magicPen)))
         : 0;
   // Clamp defensively so authored data can't heal the enemy or invert damage.
   return 1 - Math.min(1, Math.max(0, resist ?? 0));
@@ -239,16 +244,16 @@ const REGULAR: Record<string, EnemyDef> = {
   cas_brute: { id: 'cas_brute', name: 'Siege Ram', health: 245, speed: 30, reward: 8, mana: 3, damageToBase: 3, visual: { color: '#8a93a8', icon: '🐏' }, boss: false, radius: 17, physicalResist: 0.2 },
 
   // Capital
-  cap_grunt: { id: 'cap_grunt', name: 'Man-at-Arms', health: 185, speed: 40, reward: 6, mana: 3, damageToBase: 2, visual: { color: '#a3adbb', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2, shieldHits: 5, mechanic: 'His shield turns aside the first 5 hits completely, only once it breaks does he take damage.' },
+  cap_grunt: { id: 'cap_grunt', name: 'Man-at-Arms', health: 185, speed: 40, reward: 7, mana: 3, damageToBase: 2, visual: { color: '#a3adbb', icon: '🛡️' }, boss: false, radius: 14, physicalResist: 0.2, shieldHits: 5, mechanic: 'His shield turns aside the first 5 hits completely, only once it breaks does he take damage.' },
   cap_grunt2: { id: 'cap_grunt2', name: 'Sludgeborn', health: 280, speed: 38, reward: 8, mana: 3, damageToBase: 2, visual: { color: '#6f9a2e', icon: '🫠' }, boss: false, radius: 15, regen: 0.04, mechanic: 'Its sludge knits back together regenerating health every moment its alive.' },
-  cap_brute: { id: 'cap_brute', name: 'Sludge Behemoth', health: 860, speed: 26, reward: 12, mana: 5, damageToBase: 3, visual: { color: '#56742a', icon: '👹' }, boss: false, radius: 18, regen: 0.03, mechanic: 'Its sludge knits back together regenerating health every moment its alive.' },
+  cap_brute: { id: 'cap_brute', name: 'Sludge Behemoth', health: 860, speed: 26, reward: 13, mana: 5, damageToBase: 3, visual: { color: '#56742a', icon: '👹' }, boss: false, radius: 18, regen: 0.03, mechanic: 'Its sludge knits back together regenerating health every moment its alive.' },
   cap_brute2: {
     id: 'cap_brute2', name: 'Paladin', health: 680, speed: 46, reward: 9, mana: 4, damageToBase: 3, visual: { color: '#d9ad45', icon: '⚜️' }, boss: false, radius: 16,
     physicalResist: 0.2, magicResist: 0.2,
     heal: { every: 6, duration: 1.6, at: 0.55, radius: 140, amount: 0.35 },
     mechanic: 'Every few seconds she raises her sword in a golden aura and heals her allies for some of their health.',
   },
-  cap_runner: { id: 'cap_runner', name: 'Bloodhound', health: 115, speed: 120, reward: 3, mana: 2, damageToBase: 1, visual: { color: '#2e2624', icon: '🐕' }, boss: false, radius: 13, lightSlow: 0.4, mechanic: 'Runs you down fast in the mist, a lit lantern\'s burning smell makes it lose your scent and slows down.' },
+  cap_runner: { id: 'cap_runner', name: 'Bloodhound', health: 115, speed: 120, reward: 4, mana: 2, damageToBase: 1, visual: { color: '#2e2624', icon: '🐕' }, boss: false, radius: 13, lightSlow: 0.4, mechanic: 'Runs you down fast in the mist, a lit lantern\'s burning smell makes it lose your scent and slows down.' },
 
   // Forest
   for_grunt: { id: 'for_grunt', name: 'Goblin Forager', health: 96, speed: 48, reward: 6, mana: 6, damageToBase: 1, visual: { color: '#7bb86f', icon: '👺' }, boss: false, radius: 13 },
@@ -269,7 +274,7 @@ const REGULAR: Record<string, EnemyDef> = {
  * explicit value to hand-tune that boss like a regular unit — e.g. a slow,
  * tanky wall or a fast, fragile rush boss — instead of the calculated value.
  */
-interface BossMeta {
+export interface BossMeta {
   /** Global level this boss belongs to (1..15). Its enemy id is `boss<level>`. */
   level: number;
   name: string;
@@ -303,6 +308,12 @@ interface BossMeta {
   summon?: SummonDef;
   /** Periodic sludge spit stunning champions (see `EnemyDef.spit`). */
   spit?: SpitDef;
+  /** Periodic heal of the foes around it (see `EnemyDef.heal`). */
+  heal?: HealDef;
+  /** Fraction of max health regenerated per second (see `EnemyDef.regen`). */
+  regen?: number;
+  /** Speed multiplier inside a lit lantern's light (see `EnemyDef.lightSlow`). */
+  lightSlow?: number;
   /** Never drops below 1 HP (see `EnemyDef.unkillable`). */
   unkillable?: boolean;
   /** A set-piece entrance (see `EnemyDef.entrance`). */
@@ -321,7 +332,7 @@ interface BossMeta {
 
 // Ordered by global level. Any stat
 // field may be added to an entry to override its calculated default.
-const BOSS_META: BossMeta[] = [
+export const BOSS_META: BossMeta[] = [
   { level: 1, name: 'Captain Aldric', icon: '🗡️', color: '#c3ccdc', health: 400, speed: 40, radius: 25 },
   { level: 2, name: 'Garrick Vane', icon: '🔪', color: '#8a94a8', health: 600, speed: 60, radius: 20, dodgeChance: 0.20, mechanic: 'Sidesteps a fifth of all incoming hits, taking no damage from them.' },
   { level: 3, name: 'The Iron Warden', icon: '🛡️', color: '#c05a6a', health: 350, speed: 30, radius: 30, physicalResist: 0.4, damageAura: { reduction: 0.3, radius: 96 }, mechanic: 'Every other enemy near the Warden takes 30% less damage.' },
@@ -361,38 +372,51 @@ const BOSS_META: BossMeta[] = [
 
 ];
 
+/**
+ * The boss `BOSS_META[index]` describes, as an enemy: every stat it leaves out
+ * comes from the escalating default curve, keyed by its position `index` in
+ * `BOSS_META` (not its level).
+ */
+export function bossDefFromMeta(m: BossMeta, index: number): EnemyDef {
+  const i = index;
+  const tier = m.level; // global level (1..15); its enemy id is `boss<level>`
+  // Calculated defaults; any field the boss meta specifies overrides these.
+  return {
+    id: `boss${tier}`,
+    name: m.name,
+    health: m.health ?? Math.round(650 * Math.pow(1.135, i)),
+    speed: m.speed ?? 28 + (i % 4) * 2,
+    reward: m.reward ?? Math.round(30 * Math.pow(1.12, i)),
+    mana: m.mana ?? 20,
+    damageToBase: m.damageToBase ?? 4 + Math.floor(i / 3),
+    visual: { color: m.color, icon: m.icon },
+    boss: true,
+    radius: m.radius ?? Math.min(32, 23 + Math.floor(i / 3)),
+    dodgeChance: m.dodgeChance,
+    physicalResist: m.physicalResist,
+    magicResist: m.magicResist,
+    damageAura: m.damageAura,
+    shieldHits: m.shieldHits,
+    rally: m.rally,
+    summon: m.summon,
+    spit: m.spit,
+    heal: m.heal,
+    regen: m.regen,
+    lightSlow: m.lightSlow,
+    unkillable: m.unkillable,
+    entrance: m.entrance,
+    mechanic: m.mechanic,
+    lore: m.lore,
+    spawnLines: m.spawnLines,
+    deathAnimation: m.deathAnimation,
+    deathLine: m.deathLine,
+  };
+}
+
 function buildBosses(): Record<string, EnemyDef> {
   const out: Record<string, EnemyDef> = {};
   BOSS_META.forEach((m, i) => {
-    const tier = m.level; // global level (1..15); its enemy id is `boss<level>`
-    // Calculated defaults; any field the boss meta specifies overrides these.
-    out[`boss${tier}`] = {
-      id: `boss${tier}`,
-      name: m.name,
-      health: m.health ?? Math.round(650 * Math.pow(1.135, i)),
-      speed: m.speed ?? 28 + (i % 4) * 2,
-      reward: m.reward ?? Math.round(30 * Math.pow(1.12, i)),
-      mana: m.mana ?? 20,
-      damageToBase: m.damageToBase ?? 4 + Math.floor(i / 3),
-      visual: { color: m.color, icon: m.icon },
-      boss: true,
-      radius: m.radius ?? Math.min(32, 23 + Math.floor(i / 3)),
-      dodgeChance: m.dodgeChance,
-      physicalResist: m.physicalResist,
-      magicResist: m.magicResist,
-      damageAura: m.damageAura,
-      shieldHits: m.shieldHits,
-      rally: m.rally,
-      summon: m.summon,
-      spit: m.spit,
-      unkillable: m.unkillable,
-      entrance: m.entrance,
-      mechanic: m.mechanic,
-      lore: m.lore,
-      spawnLines: m.spawnLines,
-      deathAnimation: m.deathAnimation,
-      deathLine: m.deathLine,
-    };
+    out[`boss${m.level}`] = bossDefFromMeta(m, i);
   });
   return out;
 }

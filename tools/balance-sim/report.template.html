@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Campaign Balance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Layout: a single war-ledger column; a chapter switch up top re-draws every folio below it. Dark-first by choice, like the game. */
+:root {
+  --bg: #0b0d1a;
+  --panel: #12152a;
+  --well: #090a14;
+  --line: rgba(201, 162, 74, 0.22);
+  --hair: rgba(255, 240, 210, 0.08);
+  --gold: #e8bf5e;
+  --gold-hi: #fff0bf;
+  --text: #f2ebda;
+  --dim: #b8ae98;
+  --faint: #7f7867;
+  --none: #9fb2c8;   /* series: no mastery */
+  --full: #e8bf5e;   /* series: full mastery */
+  --good: #7fd38a;
+  --warn: #f2b23c;
+  --bad: #ff6a5a;
+  --f-display: 'Cinzel', 'Trajan Pro', Georgia, serif;
+  --f-body: 'EB Garamond', Garamond, Georgia, serif;
+  --f-data: 'Inter', system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--f-body); font-size: 18px; line-height: 1.55; }
+.wrap { max-width: 980px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 64px; display: flex; flex-direction: column; gap: 44px; }
+header { display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--line); padding-bottom: 28px; }
+.eyebrow { font-family: var(--f-data); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); }
+h1 { font-family: var(--f-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.1; margin: 0; color: var(--gold-hi); text-wrap: balance; }
+h2 { font-family: var(--f-display); font-weight: 600; font-size: 24px; margin: 0; color: var(--gold-hi); text-wrap: balance; }
+.lede { max-width: 66ch; color: var(--dim); margin: 0; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 22px; font-family: var(--f-data); font-size: 13px; color: var(--faint); }
+.meta b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+section { display: flex; flex-direction: column; gap: 16px; }
+section > p, .notes { max-width: 70ch; margin: 0; color: var(--dim); }
+.notes { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.notes b { color: var(--text); font-weight: 600; }
+.folio { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; min-width: 0; }
+.scroll { overflow-x: auto; }
+svg text { font-family: var(--f-data); }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-family: var(--f-data); font-size: 13px; color: var(--dim); margin-bottom: 8px; }
+.sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
+table { border-collapse: collapse; width: 100%; font-family: var(--f-data); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--hair); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th { color: var(--faint); font-weight: 500; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; border-bottom: 1px solid var(--line); }
+td.cell { border-radius: 4px; }
+.chip { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 99px; margin-left: 4px; }
+.chip.bad { background: rgba(255, 106, 90, 0.16); color: var(--bad); }
+.chip.warn { background: rgba(242, 178, 60, 0.16); color: var(--warn); }
+.chip.good { background: rgba(127, 211, 138, 0.14); color: var(--good); }
+.tabs { display: inline-flex; flex-wrap: wrap; gap: 4px; background: var(--well); border: 1px solid var(--line); border-radius: 8px; padding: 3px; font-family: var(--f-data); font-size: 13px; align-self: flex-start; }
+.tabs button { background: none; border: 0; color: var(--dim); padding: 6px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
+.tabs button[aria-pressed="true"] { background: var(--gold); color: #1a1406; font-weight: 600; }
+.tabs button:focus-visible { outline: 2px solid var(--gold-hi); outline-offset: 2px; }
+.tabs.big { font-size: 15px; padding: 4px; }
+.tabs.big button { padding: 9px 18px; font-family: var(--f-display); font-weight: 600; letter-spacing: 0.04em; }
+.caveat { border-top: 1px solid var(--line); padding-top: 20px; }
+@media (max-width: 520px) { body { font-size: 17px; } .folio { padding: 12px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="eyebrow" id="eyebrow">Balance ledger</span>
+    <h1>Campaign Balance</h1>
+    <p class="lede">An automated bot played each stage on the real game engine with different heroes, teams and mastery levels. Each setup was played at the normal starting gold, and searched for the lowest starting gold that still wins. That number is the main yardstick here: lower means an easier stage or a stronger setup.</p>
+    <div class="tabs big" role="group" aria-label="Chapter" id="chapters"></div>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <section>
+    <h2>Difficulty curve</h2>
+    <p>Lowest starting gold needed to win, averaged over every hero and team that can win at all. The dashed line is the 200 gold every stage gives you.</p>
+    <div class="folio">
+      <div class="legend"><span><i class="sw" style="background:var(--none)"></i>No mastery</span><span><i class="sw" style="background:var(--full)"></i>Full mastery</span><span><i class="sw" style="background:var(--bad);height:2px;vertical-align:3px"></i>Starting gold (200)</span></div>
+      <div class="scroll"><svg id="curve" viewBox="0 0 640 260" width="100%" role="img" aria-label="Minimum gold to win by stage"></svg></div>
+    </div>
+    <div class="folio scroll"><table id="stageTable"></table></div>
+    <ul class="notes" id="fCurve"></ul>
+  </section>
+
+  <section>
+    <h2>Where base HP is lost</h2>
+    <p>Average base HP lost per wave, no mastery. The last wave is the boss wave, and a boss reaching the castle ends the stage on the spot. Later waves can look calm because many runs end before reaching them.</p>
+    <div class="folio scroll"><table id="leakTable"></table></div>
+    <ul class="notes" id="fLeaks"></ul>
+  </section>
+
+  <section>
+    <h2>Heroes</h2>
+    <p>Average lowest winning gold across all teams (shorter bar is stronger), with the hero's average damage per run and share of the team's damage. Base heroes have no mastery; the capstone builds have the full tree.</p>
+    <div class="folio">
+      <div class="legend"><span><i class="sw" style="background:var(--none)"></i>Base hero, no mastery</span><span><i class="sw" style="background:var(--full)"></i>Capstone build, full mastery</span></div>
+      <div class="scroll"><svg id="heroes" viewBox="0 0 640 330" width="100%" role="img" aria-label="Hero strength"></svg></div>
+    </div>
+    <ul class="notes" id="fHeroes"></ul>
+  </section>
+
+  <section>
+    <h2>Champions</h2>
+    <p>Damage dealt per gold spent on the unit (placing it plus upgrades), across every run where it was deployed.</p>
+    <div class="folio">
+      <div class="legend"><span><i class="sw" style="background:var(--none)"></i>No mastery</span><span><i class="sw" style="background:var(--full)"></i>Full mastery</span></div>
+      <div class="scroll"><svg id="units" viewBox="0 0 640 250" width="100%" role="img" aria-label="Damage per gold by unit"></svg></div>
+    </div>
+    <ul class="notes" id="fUnits"></ul>
+  </section>
+
+  <section>
+    <h2>Teams by stage</h2>
+    <p>Lowest starting gold to win each stage (seed 1, averaged over the heroes at that mastery level). <span class="chip bad">✕3</span> marks hero builds that could not win even with 600 gold.</p>
+    <div class="tabs" role="group" aria-label="Mastery level">
+      <button id="tabNone" aria-pressed="true">No mastery</button>
+      <button id="tabFull" aria-pressed="false">Full mastery</button>
+    </div>
+    <div class="folio scroll"><table id="teamTable"></table></div>
+  </section>
+
+  <section class="caveat">
+    <h2>How much to trust this</h2>
+    <p>The bot is a decent player, not a human. It places units where they cover the most path, spends gold greedily on whatever its damage estimate favours, lights a lantern when it gives placed champions their range back, and casts hero abilities as soon as they're ready. It wears no armor. Random seeds only change crits, dodges and Bard targets. Damage per gold also depends on how much enemy HP a stage has, so compare units within a stage rather than across stages. Trust the rankings more than the exact numbers.</p>
+  </section>
+</div>
+
+<script>
+const DATA = /*DATA*/null;
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; parent.appendChild(e); return e; };
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const clear = (id) => { const n = document.getElementById(id); n.replaceChildren(); return n; };
+const niceMax = (v, step) => Math.ceil(v / step) * step;
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const chip = (w) => w == null ? '' : `<span class="chip ${w >= 85 ? 'good' : w >= 60 ? 'warn' : 'bad'}">${w}%</span>`;
+let chapter = Math.max(0, DATA.chapters.findIndex((c) => '#' + c.id === location.hash));
+let mastery = 'none';
+
+function notes(id, list) {
+  document.getElementById(id).innerHTML = list.map(([head, detail]) => `<li><b>${esc(head)}</b>${detail ? ' ' + esc(detail) : ''}</li>`).join('');
+}
+
+function drawCurve(D) {
+  const svg = clear('curve');
+  const W = 640, H = 260, l = 46, r = 24, t = 14, b = 34, n = D.stages.length;
+  const max = niceMax(Math.max(250, ...D.stages.map((s) => s.none.minGold ?? 0)) + 20, 50);
+  const step = max > 300 ? 100 : 50;
+  const x = (i) => (n === 1 ? (l + W - r) / 2 : l + (i * (W - l - r)) / (n - 1)), y = (v) => t + (1 - v / max) * (H - t - b);
+  for (let v = 0; v <= max; v += step) {
+    el('line', { x1: l, x2: W - r, y1: y(v), y2: y(v), stroke: css('--hair') }, svg);
+    el('text', { x: l - 8, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: css('--faint') }, svg, v);
+  }
+  el('line', { x1: l, x2: W - r, y1: y(200), y2: y(200), stroke: css('--bad'), 'stroke-dasharray': '5 4', 'stroke-width': 1.5 }, svg);
+  D.stages.forEach((s, i) => el('text', { x: x(i), y: H - 10, 'text-anchor': 'middle', 'font-size': 12, fill: css('--dim') }, svg, 'Stage ' + s.lv));
+  for (const m of ['none', 'full']) {
+    const col = css(m === 'none' ? '--none' : '--full');
+    const pts = D.stages.map((s, i) => (s[m].minGold == null ? null : `${x(i)},${y(s[m].minGold)}`)).filter(Boolean).join(' ');
+    el('polyline', { points: pts, fill: 'none', stroke: col, 'stroke-width': 2.5 }, svg);
+    D.stages.forEach((s, i) => {
+      if (s[m].minGold == null) return;
+      el('circle', { cx: x(i), cy: y(s[m].minGold), r: 4.5, fill: col }, svg);
+      el('text', { x: x(i), y: y(s[m].minGold) + (m === 'none' ? -10 : 18), 'text-anchor': 'middle', 'font-size': 11.5, 'font-weight': 600, fill: col }, svg, s[m].minGold);
+    });
+  }
+}
+
+function drawStageTable(D) {
+  let h = '<thead><tr><th>Stage</th><th>Win @200, none</th><th>Win @200, full</th><th>Base HP left, none</th><th>Base HP left, full</th></tr></thead><tbody>';
+  for (const s of D.stages) h += `<tr><td>${s.lv}. ${esc(s.name)}</td><td>${chip(s.none.win)}</td><td>${chip(s.full.win)}</td><td>${s.none.hp ?? '-'} / 10</td><td>${s.full.hp ?? '-'} / 10</td></tr>`;
+  document.getElementById('stageTable').innerHTML = h + '</tbody>';
+}
+
+function drawLeaks(D) {
+  const n = Math.max(...D.stages.map((s) => s.leaks.length));
+  let h = '<thead><tr><th>Stage</th>' + Array.from({ length: n }, (_, i) => `<th>Wave ${i + 1}</th>`).join('') + '</tr></thead><tbody>';
+  for (const s of D.stages) {
+    h += `<tr><td>${s.lv}. ${esc(s.name)}</td>` + Array.from({ length: n }, (_, i) => {
+      const v = s.leaks[i];
+      if (v == null) return '<td></td>';
+      const boss = i === s.leaks.length - 1 ? ' · boss' : '';
+      return `<td class="cell" title="${s.reached[i]}% of runs reached this wave${boss}" style="background:rgba(255,106,90,${Math.min(0.75, v / 4).toFixed(2)})">${v.toFixed(1)}</td>`;
+    }).join('') + '</tr>';
+  }
+  document.getElementById('leakTable').innerHTML = h + '</tbody>';
+}
+
+function drawHeroes(D) {
+  const svg = clear('heroes');
+  const hs = D.heroes.filter((h) => h.minGold != null).sort((a, b) => a.minGold - b.minGold);
+  const W = 640, l = 150, barMax = 300, rowH = 34, t = 26, max = niceMax(Math.max(...hs.map((h) => h.minGold)) * 1.08, 20);
+  svg.setAttribute('viewBox', `0 0 640 ${t + hs.length * rowH + 8}`);
+  el('text', { x: l, y: 14, 'font-size': 11, fill: css('--faint') }, svg, 'AVG LOWEST GOLD TO WIN');
+  el('text', { x: W - 10, y: 14, 'text-anchor': 'end', 'font-size': 11, fill: css('--faint') }, svg, 'DAMAGE · SHARE');
+  hs.forEach((h, i) => {
+    const yy = t + i * rowH, col = css(h.mastery === 'none' ? '--none' : '--full');
+    el('text', { x: l - 10, y: yy + 17, 'text-anchor': 'end', 'font-size': 13, fill: css('--text') }, svg, h.h.replace('+', ' + '));
+    el('rect', { x: l, y: yy + 5, width: (h.minGold / max) * barMax, height: 18, rx: 3, fill: col, opacity: 0.9 }, svg);
+    el('text', { x: l + (h.minGold / max) * barMax + 8, y: yy + 18, 'font-size': 12, 'font-weight': 600, fill: col }, svg, h.minGold + 'g');
+    el('text', { x: W - 10, y: yy + 18, 'text-anchor': 'end', 'font-size': 12, fill: css('--dim') }, svg, `${h.dmg.toLocaleString()} · ${h.share}%`);
+  });
+}
+
+function drawUnits(D) {
+  const svg = clear('units');
+  const us = [...D.units].sort((a, b) => ((b.none ?? 0) + (b.full ?? 0)) - ((a.none ?? 0) + (a.full ?? 0)));
+  const W = 640, l = 46, r = 14, t = 14, b = 34, H = 250, max = niceMax(Math.max(...us.flatMap((u) => [u.none ?? 0, u.full ?? 0])) + 1, 2);
+  const y = (v) => t + (1 - v / max) * (H - t - b);
+  for (let v = 0; v <= max; v += 2) {
+    el('line', { x1: l, x2: W - r, y1: y(v), y2: y(v), stroke: css('--hair') }, svg);
+    el('text', { x: l - 8, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: css('--faint') }, svg, v);
+  }
+  const slot = (W - l - r) / us.length, bw = Math.min(30, slot / 3.2);
+  us.forEach((u, i) => {
+    const cx = l + slot * (i + 0.5);
+    [['none', -1], ['full', 1]].forEach(([m, s]) => {
+      const v = u[m];
+      if (v == null) return;
+      const col = css(m === 'none' ? '--none' : '--full');
+      const x0 = cx + (s < 0 ? -bw - 2 : 2);
+      el('rect', { x: x0, y: y(v), width: bw, height: y(0) - y(v), rx: 3, fill: col, opacity: 0.9 }, svg);
+      el('text', { x: x0 + bw / 2, y: y(v) - 5, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 600, fill: col }, svg, v.toFixed(1));
+    });
+    el('text', { x: cx, y: H - 12, 'text-anchor': 'middle', 'font-size': 12.5, fill: css('--text') }, svg, u.u[0].toUpperCase() + u.u.slice(1));
+  });
+}
+
+function drawTeams(D) {
+  const label = (t) => t.replace('mono ', '').replace(/^./, (c) => c.toUpperCase()) + (t.startsWith('mono') ? ' only' : '');
+  const desc = { starter: 'Swordsman, Archer', commons: 'Farmer, Archer, Crossbow, Swordsman, Spearman', 'commons no farmer': 'Archer, Crossbow, Swordsman, Spearman', rares: 'Wizard, Elf, Archer, Crossbow, Bard' };
+  const hi = Math.max(260, ...D.teams.flatMap((t) => t[mastery].map((c) => c.g ?? 0)));
+  let h = '<thead><tr><th>Team (plus hero)</th>' + D.stages.map((s) => `<th>Stage ${s.lv}</th>`).join('') + '<th>Win @200</th></tr></thead><tbody>';
+  for (const t of D.teams) {
+    h += `<tr><td title="${desc[t.t] ?? ''}">${label(t.t)}</td>`;
+    for (const c of t[mastery]) {
+      const fail = c.fail ? `<span class="chip bad">✕${c.fail}</span>` : '';
+      if (c.n === 0) { h += '<td></td>'; continue; }
+      if (c.g == null) { h += `<td class="cell" style="background:rgba(255,106,90,0.28)">${fail}</td>`; continue; }
+      const a = Math.max(0, Math.min(1, (c.g - 40) / (hi - 40)));
+      h += `<td class="cell" style="background:rgba(${c.g > 200 ? '255,106,90' : '232,191,94'},${(0.06 + a * 0.32).toFixed(2)})">${c.g}g${fail}</td>`;
+    }
+    h += `<td>${chip(t[mastery + 'Win'])}</td></tr>`;
+  }
+  document.getElementById('teamTable').innerHTML = h + '</tbody>';
+  document.getElementById('tabNone').setAttribute('aria-pressed', mastery === 'none');
+  document.getElementById('tabFull').setAttribute('aria-pressed', mastery === 'full');
+}
+
+function render() {
+  const D = DATA.chapters[chapter];
+  document.getElementById('eyebrow').textContent = `Balance ledger · simulated ${DATA.generated}`;
+  document.getElementById('meta').innerHTML =
+    `<span><b>${D.runs.toLocaleString()}</b> battles simulated in ${D.name}</span><span><b>${D.heroes.length}</b> hero builds</span><span><b>${D.teams.length + 1}</b> teams</span><span>Plus a lowest-gold search per setup</span>`;
+  document.querySelectorAll('#chapters button').forEach((b, i) => b.setAttribute('aria-pressed', i === chapter));
+  drawCurve(D); drawStageTable(D); drawLeaks(D); drawHeroes(D); drawUnits(D); drawTeams(D);
+  notes('fCurve', D.findings.curve); notes('fLeaks', D.findings.leaks); notes('fHeroes', D.findings.heroes); notes('fUnits', D.findings.units);
+}
+
+const tabs = document.getElementById('chapters');
+DATA.chapters.forEach((c, i) => {
+  const b = document.createElement('button');
+  b.textContent = `${c.name} · ${c.range}`;
+  b.onclick = () => { chapter = i; render(); };
+  tabs.appendChild(b);
+});
+document.getElementById('tabNone').onclick = () => { mastery = 'none'; drawTeams(DATA.chapters[chapter]); };
+document.getElementById('tabFull').onclick = () => { mastery = 'full'; drawTeams(DATA.chapters[chapter]); };
+render();
+</script>
+</body>
+</html>

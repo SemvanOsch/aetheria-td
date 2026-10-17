@@ -265,6 +265,18 @@ const VOICES: Record<SfxName, (ac: AudioContext) => void> = {
     noiseSweep(ac, jit(2400, 250), 1600, 0.03, 0.008, 1.2, 'highpass');
   },
 
+  // Frost Witch — a cold, crisp hiss with a glassy ping as the ice leaves her
+  // staff, and a brittle glass crack with tinkling shards when it shatters.
+  frostCast: (ac) => {
+    noiseSweep(ac, jit(3200, 300), jit(5200, 400), 0.14, 0.012, 1.2, 'highpass');
+    toneGlide(ac, jit(1900, 120), 2300, 0.16, 0.012, 'sine');
+  },
+  frostShatter: (ac) => {
+    noiseSweep(ac, jit(4200, 300), 2600, 0.06, 0.022, 2.2, 'bandpass');
+    toneGlide(ac, jit(240, 25), 140, 0.08, 0.018, 'triangle');
+    sparkle(ac, 4, 2600, 5200, 0.12, 0.007, 0.02);
+  },
+
   // Magic adventurer — a soft rising arcane hum as the orb gathers, and a deep
   // muffled boom when it bursts over the pack.
   orbCast: (ac) => {

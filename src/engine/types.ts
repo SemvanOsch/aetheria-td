@@ -6,7 +6,7 @@
  */
 
 import type { EnemyDef } from '../domain/enemies';
-import type { AbilityDef, AoeType, UnitDef } from '../domain/units';
+import type { AbilityDef, AoeType, ShatterDef, UnitDef } from '../domain/units';
 import type { Vec2 } from '../domain/grid';
 import type { TargetingType } from '../domain/targeting';
 
@@ -24,9 +24,27 @@ export interface Enemy {
    * the walk-sprite's side/front/back view and facing; updated every tick.
    */
   heading: Vec2;
-  /** Multiplicative slow (1 = normal speed); reserved for future effects. */
+  /**
+   * Multiplicative slow (1 = normal speed) and the seconds it has left: the
+   * Frost Witch's chill (`GameEngine.chill`). The renderer frosts a foe over
+   * while `slowTimer` runs, thawing it over the last `CHILL_FADE`.
+   */
   slowFactor: number;
   slowTimer: number;
+  /**
+   * Ice Storm (the Frost Witch's `iceStorm` upgrade): `storm` eases 0→1 while
+   * the foe is inside a storming witch's range and back down outside it;
+   * `stormSlow` is that storm's slow fraction. Its speed is multiplied by
+   * `1 − stormSlow × storm`, on top of any chill (see `speedFactor`).
+   */
+  storm: number;
+  stormSlow: number;
+  /**
+   * Brittle (the Frost Witch's Icebreak): seconds left, and the damage
+   * multiplier every hit on it takes meanwhile (applied in `damageEnemy`).
+   */
+  brittle: number;
+  brittleMult: number;
   /**
    * A light-shy foe (`EnemyDef.lightSlow`) losing the scent in lantern light,
    * 0→1: eases up while it is in the light and back down out of it. Blends its
@@ -160,6 +178,7 @@ export function attackAnimTime(shape: string): number {
   if (shape === 'player-longbow') return 0.5;
   if (shape === 'player-magic') return 0.35;
   if (shape === 'player-staff') return 0.42;
+  if (shape === 'frostWitch') return 0.3;
   return 0.18;
 }
 
@@ -428,6 +447,18 @@ export interface Tower {
   bardTimer: number;
   /** How many random allies in range each performance buffs (Bard units only). */
   bardTargets: number;
+  /** Share of a foe's magic resistance this champion's hits ignore (`effectiveMagicPen`). */
+  magicPen: number;
+  /** This tower's ice-missile shatter with its upgrades and mastery folded in (`masteryShatter`); null if it doesn't shatter. */
+  shatter: ShatterDef | null;
+  /** The chill its hits lay, mastery applied (`masteryChill`); null if they don't slow. */
+  chill: { slow: number; duration: number } | null;
+  /** Icebreak (`masteryBrittle`): the Brittle its hits on slowed foes inflict; null for none. */
+  brittle: { mult: number; duration: number } | null;
+  /** Shatter Storm (`masteryShardSplit`): damage share of the splinters a killing shard bursts into; 0 for none. */
+  shardSplit: number;
+  /** Ice Storm slow over this tower's range (`effectiveIceStorm`); 0 for none. */
+  iceStorm: number;
   /** Attack-speed multiplier a buffed ally receives from this Bard. */
   bardSpeedMult: number;
   /** How long (seconds) a buff this Bard grants lasts on an ally. */
@@ -779,10 +810,37 @@ export interface Projectile {
    * the current heading (for drawing). Undefined for an ordinary shot.
    */
   rain?: { from: Vec2; lift: number; spread: number; age: number; time: number; dir: Vec2 };
+  /**
+   * An ice missile that shatters on impact (the Frost Witch): after striking
+   * its target it bursts into `count` shards (see `ShatterDef`). Undefined for
+   * every other shot.
+   */
+  shatter?: ShatterDef;
+  /**
+   * An ice shard thrown off a shattering missile: it doesn't home, but flies
+   * straight along `dir` for `travelLeft` more pixels and strikes the first foe
+   * it touches (never `skip`, the missile's own target), then melts away.
+   */
+  shard?: {
+    dir: Vec2;
+    travelLeft: number;
+    skip: number;
+    /**
+     * Shatter Storm: if this shard kills, it bursts into `count` splinters from
+     * the fallen foe, each for `mult` of its damage and flying `reach` px.
+     * Undefined for a splinter, which never bursts again.
+     */
+    split?: { count: number; mult: number; reach: number };
+  };
+  /** Chill laid on every foe this shot strikes: speed × (1 − `slow`) for `duration` s. */
+  chill?: { slow: number; duration: number };
 }
 
 /** How a projectile is drawn in flight. */
-export type ProjectileStyle = 'arrow' | 'wind' | 'magic' | 'orb' | 'pierce' | 'mana';
+export type ProjectileStyle = 'arrow' | 'wind' | 'magic' | 'orb' | 'pierce' | 'mana' | 'ice' | 'shard';
+
+/** How long a chilled foe takes to thaw visually after its slow wears off (s). */
+export const CHILL_FADE = 0.35;
 
 /**
  * Elemental family of an attack, for VFX only (sparks vs. gusts vs. arcane
@@ -897,6 +955,11 @@ export type FxEvent =
       length: number;
     }
   | { kind: 'dodge'; x: number; y: number }
+  /**
+   * The Frost Witch's ice missile shattering at `x`,`y`: a burst of ice chips
+   * and frost; `angles` are the directions its shards fly off in (radians).
+   */
+  | { kind: 'shatter'; x: number; y: number; angles: number[]; crit: boolean; small?: boolean }
   | {
       /** A shielded foe turned a hit aside; `broke` when that was its last shield point. */
       kind: 'block';

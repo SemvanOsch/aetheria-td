@@ -121,6 +121,8 @@ export const FEEDBACK = {
   /** A shielded foe's remaining shield points (pips) and the spent ones. */
   shield: '#8fb4ff',
   shieldSpent: 'rgba(70,80,100,0.55)',
+  /** The frost wash over a chilled (slowed) foe. */
+  chill: '#8fd0ff',
 } as const;
 
 // ---------------------------------------------------------------------------

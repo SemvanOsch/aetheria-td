@@ -151,7 +151,7 @@ export interface LevelDef {
 const DEFAULT_SPACING = 0.85;
 
 /** Every stage starts the player with this much gold (per-stage resource). */
-const STARTING_GOLD = 200;
+export const STARTING_GOLD = 200;
 
 // Shorthand enemy ids per section.
 const CAS = { g: 'cas_grunt', g2: 'cas_grunt2', r: 'cas_runner', b: 'cas_brute', m: 'cas_mage' };
@@ -202,6 +202,12 @@ interface LevelSpec {
   victoryLine?: string;
   /** The stage lies in mist (see `LevelDef.mist`). */
   mist?: boolean;
+  /** Gold the stage starts with, when it differs from `STARTING_GOLD`. */
+  startingGold?: number;
+  /** The stage card's accent colour, when it differs from its chapter's. */
+  color?: string;
+  /** The stage's boss, when it isn't its own `boss<id>` (see `bossIdForLevel`). */
+  bossId?: string;
 }
 
 /**
@@ -380,8 +386,8 @@ const CASTLE_SPECS: LevelSpec[] = [
         // the boss's escort; the boss itself arrives on the throne lane below.
         path: [{ col: 3, row: 10 }, { col: 3, row: 6 }, { col: 13, row: 6 }, { col: 13, row: 3 }, { col: 16, row: 3 }],
         waves: [
-          { groups: [{ enemyId: CAS.g, count: 6 }, { enemyId: CAS.m, count: 3, delay: 4 }] },
-          { groups: [{ enemyId: CAS.r, count: 8, spacing: 0.5 }] },
+          { groups: [{ enemyId: CAS.g, count: 5 }, { enemyId: CAS.m, count: 3, delay: 4 }] },
+          { groups: [{ enemyId: CAS.r, count: 7, spacing: 0.5 }] },
           { groups: [{ enemyId: CAS.m, count: 3 }, { enemyId: CAS.g2, count: 4, delay: 1 }] },
           { groups: [{ enemyId: CAS.g2, count: 12, spacing: 2 }] },
           { groups: [{ enemyId: CAS.g, count: 3 }, { enemyId: CAS.m, count: 2, delay: 3 }] },
@@ -758,8 +764,8 @@ function specLanes(s: LevelSpec): LaneDef[] {
 /** Stages temporarily pulled from the campaign (still authored above). */
 const DISABLED_LEVEL_IDS = new Set<number>([]); // Capital 5, The Getaway
 
-function buildLevels(specs: LevelSpec[], section: SectionId, color: string): LevelDef[] {
-  return specs.filter((s) => !DISABLED_LEVEL_IDS.has(s.id)).map((s, i) => ({
+function buildLevels(specs: LevelSpec[], section: SectionId, color: string, archived = false): LevelDef[] {
+  return specs.filter((s) => DISABLED_LEVEL_IDS.has(s.id) === archived).map((s, i) => ({
     id: s.id,
     section,
     order: i + 1,
@@ -767,10 +773,10 @@ function buildLevels(specs: LevelSpec[], section: SectionId, color: string): Lev
     subtitle: s.subtitle,
     lanes: specLanes(s),
     baseHealth: s.baseHealth,
-    startingGold: STARTING_GOLD,
+    startingGold: s.startingGold ?? STARTING_GOLD,
     gemReward: s.gem,
-    bossId: bossIdForLevel(s.id),
-    color,
+    bossId: s.bossId ?? bossIdForLevel(s.id),
+    color: s.color ?? color,
     theme: s.theme,
     decor: s.decor,
     mood: s.mood,
@@ -786,6 +792,18 @@ export const LEVELS: LevelDef[] = [
   ...buildLevels(CAPITAL_SPECS, 'capital', '#f86262'),
   ...buildLevels(FOREST_SPECS, 'forest', '#5fd38a'),
   ...buildLevels(INN_SPECS, 'inn', '#f2b23c'),
+];
+
+/**
+ * Stages authored above but pulled from the campaign (`DISABLED_LEVEL_IDS`),
+ * built the same way. The game never reads these; the content editor
+ * (`tools/editor`) lists them as archived.
+ */
+export const ARCHIVED_LEVELS: LevelDef[] = [
+  ...buildLevels(CASTLE_SPECS, 'castle', '#8fa6c8', true),
+  ...buildLevels(CAPITAL_SPECS, 'capital', '#f86262', true),
+  ...buildLevels(FOREST_SPECS, 'forest', '#5fd38a', true),
+  ...buildLevels(INN_SPECS, 'inn', '#f2b23c', true),
 ];
 
 export function getLevel(id: number): LevelDef | undefined {

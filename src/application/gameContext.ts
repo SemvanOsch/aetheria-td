@@ -66,6 +66,8 @@ export interface GameStore {
   resetAccount: () => void;
   /** Add gems (the settings grant button; endless boss-wave payouts). */
   grantGems: (amount: number) => void;
+  /** Own every catalog champion (the Developer menu's unlock). */
+  unlockAllUnits: () => void;
   summonCost: number;
 }
 

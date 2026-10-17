@@ -40,6 +40,9 @@ import {
   effectiveAbility,
   effectiveAoe,
   effectiveBounces,
+  effectiveMagicPen,
+  effectiveIceStorm,
+  withUpgradeChoice,
   effectiveGenerate,
   getUnit,
   nextUpgrade,
@@ -55,6 +58,10 @@ import {
   masteryGreaterOrb,
   masteryBard,
   masteryBounceDamageMult,
+  masteryBrittle,
+  masteryChill,
+  masteryShardSplit,
+  masteryShatter,
   masteryFinalBounceDamageMult,
   masteryHarvest,
   masteryHeroExpMult,
@@ -157,6 +164,7 @@ function isHeroTower(tower: Tower): boolean {
 function fxElementFor(tower: Tower): FxElement {
   const shape = tower.def.visual.shape;
   if (shape === 'wizard') return 'wind';
+  if (shape === 'frostWitch') return 'frost';
   if (shape === 'elf' || shape === 'player-magic' || shape === 'player-staff') return 'arcane';
   if (shape === 'bard') return 'holy';
   return tower.def.damageType === 'magic' ? 'arcane' : 'steel';
@@ -251,6 +259,30 @@ const LONGBOW_ARROW_SPEED = 640;
 const PIERCE_ARROW_SPEED = 760;
 // Half-width of a piercing arrow's strike corridor (plus each foe's own radius).
 export const PIERCE_HALF_WIDTH = 8;
+// The Frost Witch's ice missile leaves the ice on her thrust staff (local
+// ~(14.3, -14.9) facing +x at the top of her cast, see `drawFrostWitch`) at the
+// board's figure scale. It flies a little slower than an arrow so it reads as a
+// thrown lump of ice; its shards fly out slower still, so each can be followed.
+const FROST_MUZZLE = { x: 16, y: -18 };
+const ICE_MISSILE_SPEED = 430;
+const ICE_SHARD_SPEED = 240;
+// Half-width of a shard's strike corridor (plus each foe's own radius).
+const SHARD_HALF_WIDTH = 3;
+// Shatter Storm's splinters: drawn smaller than a shard and flying a shorter way.
+const SPLINTER_SCALE = 0.65;
+const SPLINTER_REACH = 0.75;
+/** Seconds a foe takes to fall fully under (or come fully out of) an Ice Storm's slow. */
+const STORM_EASE_TIME = 0.35;
+
+/**
+ * A foe's current speed multiplier from cold: its chill (`slowFactor`) and the
+ * Ice Storm it stands in stack multiplicatively (30% chill × 15% storm = 0.595).
+ */
+function speedFactor(e: Enemy): number {
+  return e.slowFactor * (1 - e.stormSlow * e.storm);
+}
+// The ice missile's colour (its shards' too): pale glacier blue.
+export const ICE_COLOR = '#bfe9ff';
 // The charged orb drifts slowly toward its target so its flight (and the coming
 // detonation) reads clearly, unlike the quick arrows/bolts.
 export const ORB_SPEED = 235;
@@ -354,6 +386,9 @@ export type SfxName =
   | 'windSliceHit'
   | 'elfShot'
   | 'elfHit'
+  // The Frost Witch: her ice missile loosed, and shattering on impact.
+  | 'frostCast'
+  | 'frostShatter'
   | 'orbCast'
   | 'orbBurst'
   | 'greaterOrbCast'
@@ -868,6 +903,12 @@ export class GameEngine {
       mistMult: 1,
       knockback: masteryKnockback(def.id, purchased),
       bounces: effectiveBounces(def, 0),
+      magicPen: effectiveMagicPen(def, 0),
+      shatter: masteryShatter(def, 0, purchased),
+      chill: masteryChill(def, purchased),
+      brittle: masteryBrittle(def.id, purchased) ?? null,
+      shardSplit: masteryShardSplit(def.id, purchased),
+      iceStorm: effectiveIceStorm(def, 0),
       bounceDamageMult: masteryBounceDamageMult(def.id, purchased),
       finalBounceMult: masteryFinalBounceDamageMult(def.id, purchased),
       preloadMax,
@@ -1573,9 +1614,11 @@ export class GameEngine {
 
   /**
    * Buy the next upgrade tier for a deployed tower. Upgrades are per-stage and
-   * paid in gold. Returns true on success.
+   * paid in gold. If that tier is a fork (`UpgradeDef.choices`), `choice`
+   * picks which option to buy; the tower's `def` then swaps for one with the
+   * fork resolved, locking the other options out. Returns true on success.
    */
-  upgradeTower(uid: number): boolean {
+  upgradeTower(uid: number, choice?: number): boolean {
     if (this.outcome !== 'playing') return false;
     const tower = this.towers.find((t) => t.uid === uid);
     if (!tower) return false;
@@ -1584,18 +1627,21 @@ export class GameEngine {
     if (isHeroTower(tower)) return false;
     const up = nextUpgrade(tower.def, tower.upgradeTier);
     if (!up) return false; // already maxed
+    if (up.choices && (choice == null || !up.choices[choice])) return false; // a fork needs a pick
     // Cost after any permanent mastery discount (e.g. Magical Bargaining). The
     // next upgrade's 1-based tier is the current tier + 1.
     const cost = masteryUpgradeCost(
       tower.def,
       tower.upgradeTier + 1,
       this.masteryUpgrades[tower.def.id] ?? [],
+      up.choices ? choice : undefined,
     );
     if (this.currency < cost) return false;
 
     this.currency -= cost;
     this.currencyEarned -= cost;
     tower.invested += cost;
+    if (up.choices) tower.def = withUpgradeChoice(tower.def, tower.upgradeTier + 1, choice!);
     tower.upgradeTier += 1;
     this.applyTierStats(tower);
     // A higher base damage rescales this tower's adjacency aura.
@@ -1617,6 +1663,9 @@ export class GameEngine {
     tower.range = s.range;
     tower.aoe = effectiveAoe(tower.def, tower.upgradeTier);
     tower.bounces = effectiveBounces(tower.def, tower.upgradeTier);
+    tower.magicPen = effectiveMagicPen(tower.def, tower.upgradeTier);
+    tower.shatter = masteryShatter(tower.def, tower.upgradeTier, this.masteryUpgrades[tower.def.id] ?? []);
+    tower.iceStorm = effectiveIceStorm(tower.def, tower.upgradeTier);
     tower.genAmount = this.genAmountFor(tower.def, tower.upgradeTier);
     // A Bard's performance widens/strengthens with its upgrades (its reach
     // already refolded above via `range`); keep the cadence timer running.
@@ -1654,7 +1703,8 @@ export class GameEngine {
       t.heroExp += exp * masteryHeroExpMult(t.def.id, this.masteryUpgrades[t.def.id] ?? []);
       // Drain the pool into as many tiers as it now affords.
       let up = nextUpgrade(t.def, t.upgradeTier);
-      while (up && t.heroExp >= up.cost) {
+      // Heroes have no forks; should one ever get one, it waits rather than guessing.
+      while (up && !up.choices && t.heroExp >= up.cost) {
         t.heroExp -= up.cost;
         t.upgradeTier += 1;
         this.applyTierStats(t);
@@ -1859,6 +1909,7 @@ export class GameEngine {
     this.advanceLaneReveals(dt);
     this.updateSewerStir(dt);
 
+    this.updateIceStorms(dt);
     this.updateEnemies(dt);
     this.recomputeWards();
     this.updateTowers(dt);
@@ -1921,6 +1972,10 @@ export class GameEngine {
       heading: this.headingAtDistance(this.lanes[laneIndex], dist),
       slowFactor: 1,
       slowTimer: 0,
+      storm: 0,
+      stormSlow: 0,
+      brittle: 0,
+      brittleMult: 1,
       cower: 0,
       dead: false,
       hitFlash: 0,
@@ -1970,6 +2025,10 @@ export class GameEngine {
         e.slowTimer -= dt;
         if (e.slowTimer <= 0) e.slowFactor = 1;
       }
+      if (e.brittle > 0) {
+        e.brittle -= dt;
+        if (e.brittle <= 0) e.brittleMult = 1;
+      }
       // Tick down this enemy's shared knockback cooldown.
       if (e.knockbackCooldown > 0) e.knockbackCooldown -= dt;
       const lane = this.lanes[e.laneIndex];
@@ -2014,7 +2073,7 @@ export class GameEngine {
       // A healer (the Paladin) halts every so often to heal the foes around it.
       if (e.def.heal && this.updateHeal(e, dt)) continue;
       const lightSlow = e.def.lightSlow ? this.updateCower(e, dt) : 1;
-      e.dist += e.def.speed * e.slowFactor * lightSlow * dt;
+      e.dist += e.def.speed * speedFactor(e) * lightSlow * dt;
       // Bleed off any pending knockback as a smooth slide back down the path,
       // capped per frame so it reads as a shove rather than a teleport. Runs
       // after forward motion so a well-timed shove can still deny a base hit.
@@ -2074,6 +2133,30 @@ export class GameEngine {
     // Remove dead enemies (after towers may have referenced them this frame is
     // fine — towers re-scan each tick).
     this.enemies = this.enemies.filter((e) => !e.dead);
+  }
+
+  /**
+   * Ice Storm: every living foe inside the range of an unstunned Frost Witch
+   * with the `iceStorm` upgrade eases its `storm` up (and back down once
+   * clear), slowed by the strongest storm reaching it. Measured like an attack
+   * (range plus the foe's body radius), so a foe in reach is a foe in the storm.
+   */
+  private updateIceStorms(dt: number): void {
+    const storms = this.towers.filter((t) => t.iceStorm > 0 && t.stun <= 0);
+    for (const e of this.enemies) {
+      if (e.dead || e.dying) continue;
+      let slow = 0;
+      for (const t of storms) {
+        const d = Math.hypot(e.pos.x - t.pos.x, e.pos.y - t.pos.y);
+        if (d <= t.range + e.def.radius) slow = Math.max(slow, t.iceStorm);
+      }
+      if (slow > 0) {
+        e.stormSlow = slow;
+        e.storm = Math.min(1, e.storm + dt / STORM_EASE_TIME);
+      } else if (e.storm > 0) {
+        e.storm = Math.max(0, e.storm - dt / STORM_EASE_TIME);
+      }
+    }
   }
 
   /**
@@ -2471,6 +2554,10 @@ export class GameEngine {
       this.fireStaff(tower, target);
       return;
     }
+    if (tower.def.shatter) {
+      this.fireIceMissile(tower, target);
+      return;
+    }
     const crit = this.rollCrit(tower);
     const dmg = tower.damage * (crit ? tower.critMultiplier : 1);
 
@@ -2630,7 +2717,7 @@ export class GameEngine {
       // Lead the target by its walk over the arrow's flight so the straight shot
       // still finds it.
       const flight = Math.hypot(target.pos.x - origin.x, target.pos.y - origin.y) / PIERCE_ARROW_SPEED;
-      const lead = target.def.speed * target.slowFactor * flight;
+      const lead = target.def.speed * speedFactor(target) * flight;
       const aim = { x: target.pos.x + target.heading.x * lead, y: target.pos.y + target.heading.y * lead };
       let ux = aim.x - tower.pos.x;
       let uy = aim.y - tower.pos.y;
@@ -2776,6 +2863,11 @@ export class GameEngine {
         if (this.advanceRain(p, dt)) survivors.push(p);
         continue;
       }
+      // An ice shard flies straight out until it cuts a foe or melts away.
+      if (p.shard) {
+        if (this.advanceShard(p, dt)) survivors.push(p);
+        continue;
+      }
       const target = this.enemies.find((e) => e.uid === p.targetUid && !e.dead);
       if (target) p.last = { ...target.pos }; // track the live target
       const dest = target ? target.pos : p.last;
@@ -2790,6 +2882,12 @@ export class GameEngine {
         // died, and skips the single-target/bounce paths below.
         if (p.burstRadius) {
           this.detonateOrb(dest, p);
+          continue;
+        }
+        // An ice missile shatters where it lands, throwing shards whether or
+        // not its target still lives.
+        if (p.shatter) {
+          this.shatterIce(dest, p, target);
           continue;
         }
         // Impact: deal the carried damage (if the target still lives) and pop a
@@ -2915,6 +3013,182 @@ export class GameEngine {
       maxTtl: 0.18,
       radius: radius * 0.4,
     });
+  }
+
+  /**
+   * The Frost Witch's attack: one homing ice missile from her raised staff,
+   * carrying its pre-rolled damage, her shatter and her chill. It shatters on
+   * impact (see `shatterIce`).
+   */
+  private fireIceMissile(tower: Tower, target: Enemy): void {
+    const crit = this.rollCrit(tower);
+    const dir = target.pos.x >= tower.pos.x ? 1 : -1;
+    this.sfx.push('frostCast');
+    this.projectiles.push({
+      pos: { x: tower.pos.x + dir * FROST_MUZZLE.x, y: tower.pos.y + FROST_MUZZLE.y },
+      targetUid: target.uid,
+      last: { ...target.pos },
+      speed: ICE_MISSILE_SPEED,
+      damage: tower.damage * (crit ? tower.critMultiplier : 1),
+      crit,
+      color: ICE_COLOR,
+      scale: 1,
+      style: 'ice',
+      source: tower,
+      bounces: 0,
+      shatter: tower.shatter ?? undefined,
+      chill: tower.chill ?? undefined,
+    });
+  }
+
+  /**
+   * An ice missile landing at `pos`: it strikes (and chills) its target if that
+   * still lives, then bursts into its shards, spread evenly around the impact
+   * and turned so one flies on along the missile's own path. Each shard carries
+   * the shatter's share of the missile's damage and the same chill.
+   */
+  private shatterIce(pos: Vec2, p: Projectile, target: Enemy | undefined): void {
+    const sh = p.shatter!;
+    if (target && this.damageEnemy(target, p.damage, p.source)) {
+      this.frostHit(target, p);
+      if (p.crit) this.critFloater(target.pos);
+    }
+    const split = p.source.shardSplit;
+    this.sfx.push('frostShatter');
+    // The missile's heading at impact (from its last step to the landing point).
+    const back = p.pos.x !== pos.x || p.pos.y !== pos.y ? p.pos : p.source.pos;
+    const heading = Math.atan2(pos.y - back.y, pos.x - back.x);
+    const angles: number[] = [];
+    for (let i = 0; i < sh.count; i++) {
+      const a = heading + (i / sh.count) * Math.PI * 2;
+      angles.push(a);
+      this.projectiles.push({
+        pos: { ...pos },
+        targetUid: -1,
+        last: { ...pos },
+        speed: ICE_SHARD_SPEED,
+        damage: p.damage * sh.damageMult,
+        crit: p.crit,
+        color: p.color,
+        scale: 1,
+        style: 'shard',
+        source: p.source,
+        bounces: 0,
+        shard: {
+          dir: { x: Math.cos(a), y: Math.sin(a) },
+          travelLeft: sh.reach,
+          skip: target?.uid ?? -1,
+          split: split > 0 ? { count: sh.count, mult: split, reach: sh.reach * SPLINTER_REACH } : undefined,
+        },
+        chill: p.chill,
+      });
+    }
+    this.emitFx({ kind: 'shatter', x: pos.x, y: pos.y, angles, crit: p.crit });
+  }
+
+  /**
+   * Shatter Storm: a shard `p` that killed `fallen` bursts from its body into a
+   * ring of smaller splinters, turned so one flies on along the shard's own
+   * line. Each carries the split's share of the shard's damage and its chill,
+   * and never bursts again.
+   */
+  private splinterIce(p: Projectile, fallen: Enemy): void {
+    const sd = p.shard!;
+    const sp = sd.split!;
+    const pos = { ...fallen.pos };
+    const heading = Math.atan2(sd.dir.y, sd.dir.x);
+    const angles: number[] = [];
+    for (let i = 0; i < sp.count; i++) {
+      const a = heading + (i / sp.count) * Math.PI * 2;
+      angles.push(a);
+      this.projectiles.push({
+        pos: { ...pos },
+        targetUid: -1,
+        last: { ...pos },
+        speed: ICE_SHARD_SPEED,
+        damage: p.damage * sp.mult,
+        crit: p.crit,
+        color: p.color,
+        scale: SPLINTER_SCALE,
+        style: 'shard',
+        source: p.source,
+        bounces: 0,
+        shard: { dir: { x: Math.cos(a), y: Math.sin(a) }, travelLeft: sp.reach, skip: fallen.uid },
+        chill: p.chill,
+      });
+    }
+    this.sfx.push('frostShatter');
+    this.emitFx({ kind: 'shatter', x: pos.x, y: pos.y, angles, crit: false, small: true });
+  }
+
+  /**
+   * Fly an ice shard straight on by one step, striking (and chilling) the first
+   * living, targetable foe whose body the step passes within `SHARD_HALF_WIDTH`
+   * of. Returns false once it has struck or flown its full reach.
+   */
+  private advanceShard(p: Projectile, dt: number): boolean {
+    const sd = p.shard!;
+    const step = Math.min(p.speed * dt, sd.travelLeft);
+    const ax = p.pos.x;
+    const ay = p.pos.y;
+    let hit: Enemy | undefined;
+    let hitK = Infinity;
+    for (const e of this.enemies) {
+      if (e.dead || e.dying || e.rise > 0 || isSpeaking(e) || e.uid === sd.skip) continue;
+      const k = Math.max(0, Math.min(step, (e.pos.x - ax) * sd.dir.x + (e.pos.y - ay) * sd.dir.y));
+      const d = Math.hypot(e.pos.x - (ax + sd.dir.x * k), e.pos.y - (ay + sd.dir.y * k));
+      if (d <= SHARD_HALF_WIDTH + e.def.radius && k < hitK) {
+        hit = e;
+        hitK = k;
+      }
+    }
+    if (hit) {
+      if (this.damageEnemy(hit, p.damage, p.source)) {
+        this.frostHit(hit, p);
+        if (sd.split && (hit.dead || hit.dying)) this.splinterIce(p, hit);
+      }
+      this.bursts.push({ pos: { ...hit.pos }, color: p.color, ttl: 0.22, maxTtl: 0.22, radius: 4 });
+      return false;
+    }
+    p.pos = { x: ax + sd.dir.x * step, y: ay + sd.dir.y * step };
+    sd.travelLeft -= step;
+    return sd.travelLeft > 0.01;
+  }
+
+  /**
+   * Chill a foe struck by ice: slow it to `1 − slow` of its speed for
+   * `duration` seconds. A stronger slow wins and a fresh one refreshes the
+   * timer, so repeated hits keep it chilled without stacking deeper.
+   */
+  private chill(e: Enemy, c: Projectile['chill']): void {
+    if (!c || e.dead || e.dying) return;
+    e.slowFactor = Math.min(e.slowFactor, 1 - c.slow);
+    e.slowTimer = Math.max(e.slowTimer, c.duration);
+  }
+
+  /**
+   * An ice missile or shard `p` landing on a living foe. With Icebreak, a foe
+   * already slowed (chill or Ice Storm) or already Brittle turns (or stays)
+   * Brittle for its full duration; judged before this hit's own chill lands,
+   * so the first hit on a fresh foe only slows it. Then it is chilled.
+   */
+  private frostHit(e: Enemy, p: Projectile): void {
+    if (e.dead || e.dying) return;
+    const br = p.source.brittle;
+    if (br && (speedFactor(e) < 1 || e.brittle > 0)) {
+      if (e.brittle <= 0) {
+        this.floaters.push({
+          pos: { x: e.pos.x, y: e.pos.y - 6 },
+          text: 'Brittle',
+          color: '#bfe9ff',
+          ttl: 0.8,
+          maxTtl: 0.8,
+        });
+      }
+      e.brittle = br.duration;
+      e.brittleMult = br.mult;
+    }
+    this.chill(e, p.chill);
   }
 
   /** A small spark ring where an arrow lands. */
@@ -3211,9 +3485,10 @@ export class GameEngine {
   /**
    * Advance a Staff's seeking mana bolt one tick (see `Projectile.seek` and the
    * `STAFF_BOLT_*` tuning): coast, then turn toward the target ever harder while
-   * accelerating, and strike on contact. A bolt whose foe has died flies on to
-   * where it fell and fizzles there, like any homing shot. Returns false once the
-   * bolt is spent.
+   * accelerating, and strike on contact. A bolt whose foe has died seeks out the
+   * foe nearest it within its champion's reach instead; with none left it flies
+   * on to where its foe fell and fizzles there. Returns false once the bolt is
+   * spent.
    */
   private advanceSeek(p: Projectile, dt: number): boolean {
     const s = p.seek!;
@@ -3223,7 +3498,21 @@ export class GameEngine {
       return true;
     }
     s.age += dt;
-    const target = this.enemies.find((e) => e.uid === p.targetUid && !e.dead);
+    let target = this.enemies.find((e) => e.uid === p.targetUid && !e.dead);
+    if (!target && p.source) {
+      const t = p.source;
+      let best = Infinity;
+      for (const e of this.enemies) {
+        if (e.dead || e.dying || e.rise > 0 || isSpeaking(e)) continue;
+        if (Math.hypot(e.pos.x - t.pos.x, e.pos.y - t.pos.y) > t.range) continue;
+        const d = Math.hypot(e.pos.x - p.pos.x, e.pos.y - p.pos.y);
+        if (d < best) {
+          best = d;
+          target = e;
+        }
+      }
+      if (target) p.targetUid = target.uid;
+    }
     if (target) p.last = { ...target.pos };
     const dest = p.last;
     const dx = dest.x - p.pos.x;
@@ -3421,10 +3710,12 @@ export class GameEngine {
     // by the enemy's matching resistance. resistMultiplier is the single source
     // for turning authored resist fractions into a multiplier. A nearby
     // protective aura (The Iron Warden's Aegis) then softens it further.
+    // A Brittle foe (the Frost Witch's Icebreak) takes extra from every hit.
     const dealt =
       amount *
-      resistMultiplier(enemy.def, source?.def.damageType) *
-      (1 - enemy.wardReduction);
+      resistMultiplier(enemy.def, source?.def.damageType, source?.magicPen) *
+      (1 - enemy.wardReduction) *
+      (enemy.brittle > 0 ? enemy.brittleMult : 1);
     // A foe that can't die (Captain Draven) takes every hit, but never drops
     // below 1 HP.
     enemy.health = enemy.def.unkillable ? Math.max(1, enemy.health - dealt) : enemy.health - dealt;

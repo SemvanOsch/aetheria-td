@@ -65,7 +65,9 @@ export type IconName =
   | 'undo'
   | 'quill'
   | 'lantern'
-  | 'expand';
+  | 'expand'
+  | 'snowflake'
+  | 'crack';
 
 const F = 'ic-fill';
 
@@ -386,6 +388,20 @@ const GLYPHS: Record<IconName, ReactNode> = {
     <>
       <rect className={F} x="7.4" y="7.4" width="9.2" height="9.2" rx="1.4" />
       <path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5M4 4l4.6 4.6M20 4l-4.6 4.6M20 20l-4.6-4.6M4 20l4.6-4.6" />
+    </>
+  ),
+  snowflake: (
+    <>
+      <path className={F} d="M12 9.4l2.3 1.3v2.6L12 14.6l-2.3-1.3v-2.6z" />
+      <path d="M12 2.8v18.4M4 7.4l16 9.2M4 16.6l16-9.2" />
+      <path d="M9.6 4.4L12 6.2l2.4-1.8M9.6 19.6L12 17.8l2.4 1.8M4.6 10.6l2.8-1.2-.4-3M19.4 13.4l-2.8 1.2.4 3M4.6 13.4l2.8 1.2-.4 3M19.4 10.6l-2.8-1.2.4-3" />
+    </>
+  ),
+  crack: (
+    <>
+      <path className={F} d="M12 2.8l6.8 9.2L12 21.2 5.2 12z" />
+      <path d="M12 2.8l6.8 9.2L12 21.2 5.2 12z" />
+      <path d="M12 2.8l-1.2 4.6 2.4 2.2-2.2 3.2 1.6 2.6-.6 5.8M13.2 9.6l2.6 1M10.8 12.8l-2.4.6" />
     </>
   ),
 };

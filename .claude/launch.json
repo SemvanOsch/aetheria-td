@@ -9,6 +9,13 @@
       "autoPort": true
     },
     {
+      "name": "editor",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "editor"],
+      "port": 5175,
+      "autoPort": true
+    },
+    {
       "name": "aetheria",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "../Aetheria", "run", "dev"],

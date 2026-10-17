@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { masteryTree, type MasteryUpgradeDef } from '../../domain/mastery';
 import type { UnitDef } from '../../domain/units';
@@ -34,6 +34,22 @@ interface Props {
 const COL = 150;
 const ROW = 116;
 const PAD_Y = 52;
+/** Pointer travel (px) before a press on the board becomes a drag, not a click. */
+const DRAG_SLOP = 4;
+
+interface Pan {
+  x: number;
+  y: number;
+}
+
+/**
+ * Offset of a `size`-long canvas inside a `view`-long window: centred when it
+ * fits, else kept from showing empty space past either edge.
+ */
+function clampAxis(offset: number, size: number, view: number): number {
+  if (size <= view) return (view - size) / 2;
+  return Math.min(0, Math.max(view - size, offset));
+}
 
 /** A glyph for a node, picked from the first effect it carries. */
 function nodeIcon(up: MasteryUpgradeDef): IconName {
@@ -84,7 +100,8 @@ export function MasteryTree({
   const byId = new Map(tree.map((n) => [n.id, n]));
 
   const stateOf = (up: MasteryUpgradeDef): NodeState => {
-    if (purchased.includes(up.id)) return up.exclusiveGroup && !active.includes(up.id) ? 'inactive' : 'learned';
+    // Learned but not live: a swapped-out exclusive member, or a node after one.
+    if (purchased.includes(up.id)) return active.includes(up.id) ? 'learned' : 'inactive';
     if (up.requires && byId.has(up.requires) && !purchased.includes(up.requires)) return 'locked';
     return availableExp >= up.cost ? 'open' : 'short';
   };
@@ -126,6 +143,92 @@ export function MasteryTree({
   const boardH = PAD_Y * 2 + maxDepth * ROW + 20;
   const rootPos = { x: boardW / 2, y: PAD_Y };
 
+  // The board is a fixed window (sized for a common champion's tree) that the
+  // player drags around to look over bigger trees.
+  const boardRef = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState<{ w: number; h: number } | null>(null);
+  const [pan, setPan] = useState<Pan | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const drag = useRef<{ id: number; sx: number; sy: number; from: Pan; moved: boolean } | null>(null);
+  const swallowClick = useRef(false);
+
+  useLayoutEffect(() => {
+    const el = boardRef.current;
+    if (!el) return;
+    const measure = () => setView({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [tree.length > 0]);
+
+  const clampPan = (p: Pan): Pan =>
+    view ? { x: clampAxis(p.x, boardW, view.w), y: clampAxis(p.y, boardH, view.h) } : p;
+  // Open centred on the selected node (the one to act on), clamped to the board.
+  const shown: Pan = clampPan(
+    pan ??
+      (() => {
+        const focus = (selectedId && pos.get(selectedId)) || rootPos;
+        return view ? { x: view.w / 2 - focus.x, y: view.h / 2 - focus.y } : { x: 0, y: 0 };
+      })(),
+  );
+  const pannable = !!view && (boardW > view.w || boardH > view.h);
+
+  // Wheel / trackpad scrolling pans too; it only claims the wheel while the
+  // tree can still move that way, so the page scrolls otherwise.
+  const panRef = useRef(shown);
+  panRef.current = shown;
+  const clampRef = useRef(clampPan);
+  clampRef.current = clampPan;
+  useEffect(() => {
+    const el = boardRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      const swap = e.shiftKey && !e.deltaX;
+      const dx = swap ? e.deltaY : e.deltaX;
+      const dy = swap ? 0 : e.deltaY;
+      const cur = panRef.current;
+      const next = clampRef.current({ x: cur.x - dx, y: cur.y - dy });
+      if (next.x === cur.x && next.y === cur.y) return;
+      e.preventDefault();
+      setPan(next);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [tree.length > 0]);
+
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || !pannable) return;
+    drag.current = { id: e.pointerId, sx: e.clientX, sy: e.clientY, from: shown, moved: false };
+  };
+  const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    const dx = e.clientX - d.sx;
+    const dy = e.clientY - d.sy;
+    if (!d.moved) {
+      if (Math.hypot(dx, dy) < DRAG_SLOP) return;
+      d.moved = true;
+      setDragging(true);
+      // Keep the drag going if the pointer leaves the board (best-effort: it
+      // throws for a pointer the browser no longer considers pressed).
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* drag still works while over the board */
+      }
+    }
+    setPan(clampPan({ x: d.from.x + dx, y: d.from.y + dy }));
+  };
+  const onPointerUp = (e: PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    // A drag that ends over a node must not also select it.
+    if (d.moved) swallowClick.current = true;
+    drag.current = null;
+    setDragging(false);
+  };
+
   // Whether a node sits on a learned-but-switched-off exclusive path (it, or a
   // node above it, is an inactive member of its group).
   const onInactivePath = (n: MasteryUpgradeDef | undefined): boolean =>
@@ -148,8 +251,6 @@ export function MasteryTree({
     return <path key={n.id} d={d} className={`mt-edge${cls}`} />;
   });
 
-  const learnedActive = tree.filter((n) => active.includes(n.id));
-
   const detail = selected && (() => {
     const st = stateOf(selected);
     const prereq = selected.requires ? byId.get(selected.requires) : undefined;
@@ -161,8 +262,14 @@ export function MasteryTree({
         </button>
       );
     } else if (st === 'inactive') {
+      // Activating a node after a swapped-out member activates that member.
+      let rival: MasteryUpgradeDef | undefined = selected;
+      while (rival && !(rival.exclusiveGroup && !active.includes(rival.id))) {
+        rival = rival.requires ? byId.get(rival.requires) : undefined;
+      }
+      const target = rival ?? selected;
       action = (
-        <button className="btn primary mt-action" onClick={() => onSetActive(selected.id)}>
+        <button className="btn primary mt-action" onClick={() => onSetActive(target.id)}>
           <Icon name="forward" /> Activate path
         </button>
       );
@@ -253,8 +360,24 @@ export function MasteryTree({
           <div className="mt-empty">No mastery upgrades for this champion yet — more are on the way.</div>
         ) : (
           <div className="mt-body">
-            <div className={`mt-board${disabled ? ' mt-disabled' : ''}`}>
-              <div className="mt-canvas" style={{ width: boardW, height: boardH }}>
+            <div
+              ref={boardRef}
+              className={`mt-board${disabled ? ' mt-disabled' : ''}${pannable ? ' pannable' : ''}${dragging ? ' dragging' : ''}`}
+              style={{ '--pan-x': `${shown.x}px`, '--pan-y': `${shown.y}px` } as CSSProperties}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+              onClickCapture={(e) => {
+                if (!swallowClick.current) return;
+                swallowClick.current = false;
+                e.stopPropagation();
+              }}
+            >
+              <div
+                className="mt-canvas"
+                style={{ width: boardW, height: boardH, transform: `translate(${shown.x}px, ${shown.y}px)` }}
+              >
                 <svg className="mt-edges" width={boardW} height={boardH} aria-hidden="true">
                   {edges}
                 </svg>
@@ -292,31 +415,15 @@ export function MasteryTree({
                   );
                 })}
               </div>
+              {pannable && (
+                <div className="mt-pan-hint" aria-hidden="true">
+                  Drag to look around
+                </div>
+              )}
             </div>
 
             <aside className="mt-side">
               {detail}
-              <div className="mt-totals">
-                <div className="mt-totals-title">
-                  Total bonuses{disabled && <span> · paused</span>}
-                </div>
-                {learnedActive.length === 0 ? (
-                  <p className="mt-totals-empty">
-                    Nothing learned yet. Champions earn EXP in battle and from duplicate summons.
-                  </p>
-                ) : (
-                  <ul className={disabled ? 'paused' : undefined}>
-                    {learnedActive.map((n) => (
-                      <li key={n.id}>
-                        <Icon name={nodeIcon(n)} />
-                        <span>
-                          <b>{n.name}</b> {n.description}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
             </aside>
           </div>
         )}

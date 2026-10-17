@@ -534,7 +534,7 @@ function buildStaffChampion(
       'A staff of refined magic, loosing three hardened mana bolts that seek out separate foes.',
     rarity: 'hero',
     // Per-bolt damage; every cast looses three.
-    damage: 9,
+    damage: 10,
     attackSpeed: 0.7,
     range: 128,
     targeting: 'first',

@@ -97,6 +97,7 @@ import {
   manaStormStance,
   PIERCING_CAST_ANIM_TIME,
   specialAnimTime,
+  CHILL_FADE,
 } from './types';
 import type { Enemy, SludgeGlob, Tower } from './types';
 
@@ -113,6 +114,8 @@ export interface RenderUiState {
   selectedTowerUid: number | null;
   /** Enemy under the cursor (outlined as a threat); optional. */
   hoverEnemyUid?: number | null;
+  /** Enemy clicked to inspect (outlined in the selection gold, bar shown); optional. */
+  selectedEnemyUid?: number | null;
   /** A cutscene directing the board (see `BoardScene`); optional. */
   scene?: BoardScene;
 }
@@ -354,6 +357,10 @@ export function drawBoard(
     if (q > 0) st.vfx.quickdraw(tw.pos.x, tw.pos.y, tw.def.visual.color, dt * q);
     const pool = manaPoolLevel(tw);
     if (pool > 0) st.vfx.manaPool(tw.pos.x, tw.pos.y + MANA_POOL_DY, MANA_POOL_RADIUS * pool, tw.def.visual.color, dt * pool);
+    // The Frost Witch's frozen aura, always on (not while a cutscene has the champions off the board).
+    if (tw.def.visual.shape === 'frostWitch' && !ui.scene?.hideTowers) st.vfx.frostAura(tw.pos.x, tw.pos.y, dt);
+    // Her Ice Storm: snow swirling over her whole range (stilled while she's smothered in sludge).
+    if (tw.iceStorm > 0 && tw.stun <= 0 && !ui.scene?.hideTowers) st.vfx.iceStorm(tw.pos.x, tw.pos.y, tw.range, dt);
   }
   animateSewerBurst(engine, st, dt);
 
@@ -878,6 +885,8 @@ function collectLights(engine: GameEngine, st: BoardState, time: number, scene?:
     else if (p.style === 'wind') out.push({ x: p.pos.x, y: p.pos.y, radius: 34, family: 'wind', intensity: 0.45 });
     else if (p.style === 'pierce') out.push({ x: p.pos.x, y: p.pos.y, radius: 64, family: 'arcane', intensity: 0.75, tint: p.color });
     else if (p.style === 'mana' && !(p.seek && p.seek.delay > 0)) out.push({ x: p.pos.x, y: p.pos.y, radius: 40, family: 'arcane', intensity: 0.55, tint: p.color });
+    else if (p.style === 'ice') out.push({ x: p.pos.x, y: p.pos.y, radius: 48, family: 'frost', intensity: 0.6 });
+    else if (p.style === 'shard') out.push({ x: p.pos.x, y: p.pos.y, radius: 18 * p.scale, family: 'frost', intensity: 0.35 });
   }
   for (const s of engine.slices) {
     const lx = s.pos.x + Math.cos(s.angle) * s.lead;
@@ -2190,6 +2199,121 @@ function fourPointStar(ctx: CanvasRenderingContext2D, x: number, y: number, s: n
   ctx.fill();
 }
 
+/**
+ * How chilled a foe looks, 0..1: full while its slow runs, thawing over its last
+ * `CHILL_FADE`; a foe standing in an Ice Storm frosts over most of the way.
+ */
+function chillLevel(e: Enemy): number {
+  const chill = e.slowTimer > 0 ? Math.min(1, e.slowTimer / CHILL_FADE) : 0;
+  return Math.max(chill, e.storm * 0.7);
+}
+
+const RIME = '#cfefff';
+const RIME_DEEP = '#7fb8e6';
+
+/**
+ * A chilled foe (the Frost Witch's slow), drawn in its ground space (origin at
+ * its position, feet near y = r × 0.7). The `back` layer, under the figure, is
+ * a patch of frost on the ground with spikes of rime splaying out from it; the
+ * `front` layer, over it, crusts ice crystals round the feet and sifts a few
+ * frost flecks down around the body. `seed` (its uid) varies the spikes and
+ * desyncs the flecks between foes.
+ */
+function drawChill(ctx: CanvasRenderingContext2D, r: number, level: number, seed: number, layer: 'back' | 'front'): void {
+  const fy = r * 0.7;
+  ctx.save();
+  if (layer === 'back') {
+    ctx.globalAlpha = level;
+    ctx.fillStyle = withAlpha(RIME, 0.4);
+    ctx.beginPath();
+    ctx.ellipse(0, fy, r * 1.05, r * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = withAlpha('#ffffff', 0.55);
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    ctx.strokeStyle = withAlpha(RIME, 0.75);
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2 + hash2(seed, i, 41) * 0.6;
+      const k = 0.75 + 0.45 * hash2(i, seed, 43);
+      ctx.moveTo(Math.cos(a) * r * 0.7, fy + Math.sin(a) * r * 0.28);
+      ctx.lineTo(Math.cos(a) * r * 1.25 * k, fy + Math.sin(a) * r * 0.5 * k);
+    }
+    ctx.stroke();
+  } else {
+    // Ice crusted round the feet: a little row of crystals pointing up.
+    ctx.globalAlpha = level;
+    const crystals: [number, number, number][] = [[-0.55, 0.32, 0.55], [-0.2, 0.22, 0.8], [0.15, 0.26, 0.65], [0.5, 0.2, 0.5]];
+    for (const [cx, w, h] of crystals) {
+      const x0 = cx * r;
+      const hh = h * r * (0.85 + 0.3 * hash2(seed, Math.round(cx * 10), 47));
+      ctx.fillStyle = RIME_DEEP;
+      ctx.beginPath();
+      ctx.moveTo(x0 - w * r, fy + 1);
+      ctx.lineTo(x0 + w * r * 0.1, fy + 1 - hh);
+      ctx.lineTo(x0 + w * r, fy + 1);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = withAlpha('#ffffff', 0.85); // lit face
+      ctx.beginPath();
+      ctx.moveTo(x0 - w * r * 0.7, fy + 1);
+      ctx.lineTo(x0 + w * r * 0.1, fy + 1 - hh);
+      ctx.lineTo(x0 - w * r * 0.05, fy + 1);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // Frost flecks sifting down around the body, each fading in and out.
+    const t = now() / 1000;
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < 4; i++) {
+      const u = (t * 0.6 + i / 4 + hash2(seed, i, 53)) % 1;
+      const px = (hash2(i, seed, 59) - 0.5) * r * 2 + Math.sin(t * 2 + i * 1.7) * 2;
+      const py = -r * 1.9 + u * (fy + r * 1.9);
+      ctx.globalAlpha = level * 0.85 * Math.sin(Math.PI * u);
+      ctx.beginPath();
+      ctx.arc(px, py, 0.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+/**
+ * A Brittle foe (the Frost Witch's Icebreak), drawn over its figure in its
+ * ground space: three jagged cracks of ice across the body, a dark seam under a
+ * bright one, with a glint running along them. `seed` (its uid) varies the
+ * cracks; `level` fades it out as Brittle ends.
+ */
+function drawBrittle(ctx: CanvasRenderingContext2D, r: number, level: number, seed: number): void {
+  const t = now() / 1000;
+  ctx.save();
+  ctx.lineJoin = 'miter';
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 3; i++) {
+    const cx = (hash2(seed, i, 61) - 0.5) * r * 1.1;
+    const cy = -r * (0.35 + 0.95 * hash2(i, seed, 67));
+    const a = hash2(seed, i, 71) * Math.PI;
+    const len = r * (0.55 + 0.35 * hash2(seed, i, 73));
+    const pts: [number, number][] = [];
+    for (let j = 0; j <= 4; j++) {
+      const u = j / 4 - 0.5;
+      const jag = j % 2 ? (hash2(seed, i * 5 + j, 79) - 0.5) * r * 0.35 : 0;
+      pts.push([cx + Math.cos(a) * len * u - Math.sin(a) * jag, cy + Math.sin(a) * len * u + Math.cos(a) * jag]);
+    }
+    const glint = 0.55 + 0.45 * Math.sin(t * 5 + i * 2.1 + seed);
+    for (const [w, col, alpha] of [[2, RIME_DEEP, 0.8], [0.9, '#ffffff', glint]] as const) {
+      ctx.globalAlpha = level * alpha;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      pts.forEach(([px, py], k) => (k ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
 function drawWardGlow(ctx: CanvasRenderingContext2D, r: number): void {
   const osc = moralePulse(); // 0..1 — share the morale oscillator for a matched pulse
   ctx.save();
@@ -2569,6 +2693,9 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
   if ((e.wardReduction ?? 0) > 0) drawWardGlow(ctx, R);
   if (surfacing) drawSurfaceRipples(ctx, R, 1 - e.rise, EMERGE_WATERLINE);
   else contactShadow(ctx, R * 0.7, R * (1 - 0.25 * (e.rise ?? 0)), R * 0.42, boss ? 1.1 : 0.9);
+  // Slowed by ice: frost spreads on the ground under it.
+  const chill = surfacing ? 0 : chillLevel(e);
+  if (chill > 0) drawChill(ctx, R, chill, e.uid, 'back');
   const aura = ROYAL_AURA.has(e.def.id);
   if (aura) drawRoyalAura(ctx, R, now() / 1000, 'back');
   const holy = PALADIN_AURA.has(e.def.id) && !surfacing;
@@ -2595,7 +2722,15 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
     const view = viewFor(e.heading);
     const style = boardStyle(st, e.def.visual.color, boss);
     style.flash = e.hitFlash > 0 ? Math.min(1, e.hitFlash / 0.12) * 0.75 : 0;
-    if (ui.hoverEnemyUid === e.uid) {
+    // Frosted over while chilled (quantized, as the tint is part of the cache key).
+    if (chill > 0) {
+      style.tint = FEEDBACK.chill;
+      style.tintAmount = Math.round(chill * 4) / 10;
+    }
+    if (ui.selectedEnemyUid === e.uid) {
+      style.ink = INK.select;
+      style.glow = 2;
+    } else if (ui.hoverEnemyUid === e.uid) {
       style.ink = INK.threat;
       style.glow = 2;
     }
@@ -2650,9 +2785,27 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(e.def.visual.icon, 0, 1);
+    if (chill > 0) {
+      ctx.fillStyle = withAlpha(FEEDBACK.chill, 0.4 * chill);
+      ctx.beginPath();
+      ctx.arc(0, 0, R, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   ctx.restore();
   ctx.restore();
+  if (chill > 0) {
+    ctx.save();
+    ctx.translate(x + dodgeX + rc.dx * 0.5, groundY + dodgeY + rc.dy * 0.5);
+    drawChill(ctx, R, chill, e.uid, 'front');
+    ctx.restore();
+  }
+  if (e.brittle > 0 && !surfacing) {
+    ctx.save();
+    ctx.translate(x + dodgeX + rc.dx * 0.5, groundY + dodgeY + rc.dy * 0.5);
+    drawBrittle(ctx, R, Math.min(1, e.brittle / CHILL_FADE), e.uid);
+    ctx.restore();
+  }
   if (aura) {
     ctx.save();
     ctx.translate(x + dodgeX + rc.dx * 0.5, groundY + dodgeY + rc.dy * 0.5);
@@ -3438,7 +3591,7 @@ function drawEnemyOverlays(ctx: CanvasRenderingContext2D, engine: GameEngine, ui
     let dodgeX = 0;
     if ((e.dodge ?? 0) > 0) dodgeX = -e.heading.y * Math.sin(Math.PI * (1 - e.dodge / DODGE_ANIM_TIME)) * DODGE_DIST;
     const pct = Math.max(0, e.health / e.def.health);
-    const hovered = ui.hoverEnemyUid === e.uid;
+    const hovered = ui.hoverEnemyUid === e.uid || ui.selectedEnemyUid === e.uid;
     const by = y - R - (e.def.boss ? 14 : 9);
     const showBar = pct < 0.999 || e.def.boss || hovered;
     // A shielded foe always shows its shield points, over the bar when it's up.
@@ -3796,7 +3949,7 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine, vfx:
     const dest = target ? target.pos : p.last;
     // A piercing arrow flies straight on rather than homing, and a Staff's mana
     // bolt (or Mana Storm bolt) along its own arcing heading.
-    const heading = p.pierce?.dir ?? p.seek?.dir ?? p.rain?.dir;
+    const heading = p.pierce?.dir ?? p.seek?.dir ?? p.rain?.dir ?? p.shard?.dir;
     const ang = heading ? Math.atan2(heading.y, heading.x) : Math.atan2(dest.y - p.pos.y, dest.x - p.pos.x);
     // Fading magical tail: draw the arrow's recent positions (world space, before
     // the local rotate/scale) as motes that shrink and dim into the distance. The
@@ -3806,6 +3959,7 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine, vfx:
     else if (p.style === 'magic' || p.style === 'mana') vfx.trail('arcane', p.pos.x, p.pos.y, p.color, dt);
     else if (p.style === 'wind') vfx.trail('wind', p.pos.x, p.pos.y, p.color, dt);
     else if (p.style === 'pierce') vfx.trail('arcane', p.pos.x, p.pos.y, p.color, dt);
+    else if (p.style === 'ice') vfx.trail('frost', p.pos.x, p.pos.y, p.color, dt);
     else if (quickdrawLevel(p.source) > 0) vfx.trail('arcane', p.pos.x, p.pos.y, p.color, dt);
     ctx.save();
     ctx.translate(p.pos.x, p.pos.y);
@@ -3826,6 +3980,13 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine, vfx:
       drawPiercingArrow(ctx, p.color);
     } else if (p.style === 'mana') {
       drawManaBolt(ctx, p.color);
+    } else if (p.style === 'ice') {
+      drawIceMissile(ctx, p.color);
+    } else if (p.style === 'shard') {
+      // Fade out over the last stretch of its reach as it melts away.
+      ctx.globalAlpha = Math.min(1, (p.shard?.travelLeft ?? 0) / 12);
+      if (p.scale !== 1) ctx.scale(p.scale, p.scale); // a Shatter Storm splinter
+      drawIceShard(ctx, p.color);
     } else {
       // An arrow loosed under Quickdraw streaks in as a bolt of the archer's colour.
       const q = quickdrawLevel(p.source);
@@ -3978,6 +4139,80 @@ function drawManaBolt(ctx: CanvasRenderingContext2D, color: string): void {
   ctx.fillStyle = 'rgba(255,255,255,0.9)';
   ctx.beginPath();
   ctx.arc(4, 0, 1, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/**
+ * The Frost Witch's ice missile in flight, in its local frame (+x forward): a
+ * cold streak behind it, a pale halo, then a jagged lump of glacier ice (a deep
+ * blue underside, the pale body, a white lit facet) with a sharp point.
+ */
+function drawIceMissile(ctx: CanvasRenderingContext2D, color: string): void {
+  const sg = ctx.createLinearGradient(-22, 0, -3, 0);
+  sg.addColorStop(0, withAlpha(color, 0));
+  sg.addColorStop(1, withAlpha(color, 0.55));
+  ctx.strokeStyle = sg;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-22, 0);
+  ctx.lineTo(-3, 0);
+  ctx.stroke();
+  ctx.fillStyle = withAlpha(color, 0.28);
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 7.5, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#4f86c6'; // deep underside
+  ctx.beginPath();
+  ctx.moveTo(6.5, 0);
+  ctx.lineTo(1.5, 3.4);
+  ctx.lineTo(-3.5, 2.6);
+  ctx.lineTo(-5, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = color; // pale body
+  ctx.beginPath();
+  ctx.moveTo(6.5, 0);
+  ctx.lineTo(1, -3.6);
+  ctx.lineTo(-3, -2.8);
+  ctx.lineTo(-5, 0);
+  ctx.lineTo(-1.5, 1.4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.92)'; // lit facet
+  ctx.beginPath();
+  ctx.moveTo(5.4, -0.4);
+  ctx.lineTo(1, -2.6);
+  ctx.lineTo(-0.6, -0.6);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/**
+ * An ice shard thrown off a shattering missile, in its local frame (+x
+ * forward): a thin splinter of ice, pale with a white edge, behind a short
+ * frosty streak.
+ */
+function drawIceShard(ctx: CanvasRenderingContext2D, color: string): void {
+  ctx.strokeStyle = withAlpha(color, 0.4);
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(-9, 0);
+  ctx.lineTo(-2, 0);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(4, 0);
+  ctx.lineTo(-0.5, -1.4);
+  ctx.lineTo(-3, 0);
+  ctx.lineTo(-0.5, 1.2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.beginPath();
+  ctx.moveTo(3.4, -0.2);
+  ctx.lineTo(-0.5, -1.1);
+  ctx.lineTo(-1, -0.2);
+  ctx.closePath();
   ctx.fill();
 }
 

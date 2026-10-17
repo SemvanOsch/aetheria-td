@@ -18,7 +18,7 @@
  */
 
 import { readJSON, writeJSON } from '../infrastructure/storage';
-import { DEFAULT_OWNED_UNIT_IDS } from '../domain/units';
+import { ALL_UNITS, DEFAULT_OWNED_UNIT_IDS } from '../domain/units';
 import {
   isValidPlayerName,
   normalizePlayerSprite,
@@ -456,6 +456,16 @@ export function addUnit(state: GameState, unitId: string): GameState {
     ownedUnits,
     team: normalizeTeam([...state.team, unitId], ownedUnits),
   };
+}
+
+/**
+ * Own every catalog champion (the Developer menu's unlock). The team is left
+ * as it is; newly owned champions wait on the roster.
+ */
+export function unlockAllUnits(state: GameState): GameState {
+  const missing = ALL_UNITS.map((u) => u.id).filter((id) => !state.ownedUnits.includes(id));
+  if (missing.length === 0) return state;
+  return { ...state, ownedUnits: [...state.ownedUnits, ...missing] };
 }
 
 export function ownsUnit(state: GameState, unitId: string): boolean {

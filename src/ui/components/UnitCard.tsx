@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { aoeLabel, formatAttackSpeed, rangeLabel, type UnitDef } from '../../domain/units';
+import { attackShapeLabel, formatAttackSpeed, rangeLabel, type UnitDef } from '../../domain/units';
 import { masteryBard, masteryHarvest } from '../../domain/mastery';
 import { RARITIES } from '../../domain/rarity';
 import { UnitSprite } from './UnitSprite';
@@ -51,7 +51,7 @@ export function UnitCard({
       <div className="rarity-row">
         <span className="rarity-tag">{rarity.name}</span>
         <span className={`aoe-tag ${unit.generator || unit.bard ? 'economy' : unit.aoe}`}>
-          {unit.generator ? 'Economy' : unit.bard ? 'Support' : aoeLabel(unit.aoe)}
+          {unit.generator ? 'Economy' : unit.bard ? 'Support' : attackShapeLabel(unit)}
         </span>
       </div>
       <p className="unit-desc">{unit.description}</p>

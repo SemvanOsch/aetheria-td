@@ -20,6 +20,21 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-10-17 · The Frost Witch',
+    changes: [
+      'Epic champions can now be summoned from the crystal ball.',
+      'New Epic champion, the Frost Witch: a witch of the long winter who hurls needles of ice. Each needle deals magic damage, slows its target by 30% for 2 seconds, and shatters on impact into 5 shards that fly out and strike the first other foe they meet for 40% of its damage. Up to 2 can be deployed.',
+      'Frost Witch in-stage upgrades: Winter’s Reach (more damage and range), Rimepiercer (more damage, and her hits ignore 40% of a foe’s magic resistance), then Winter’s Choice, a fork where you pick one: Shattering Cold (3 more shards that fly farther, more damage) or Ice Storm (a swirling snowstorm slows every foe in her range by 15%). Buying one locks the other out for that champion.',
+      'Frost Witch skill tree: Permafrost (+10% damage) and Glacial Sight (+10% range), then two rival paths. Deep Freeze (slow raised to 45%) leads to Lingering Rime (the slow lasts 0.5s longer) and Icebreak (hitting an already-slowed foe makes it Brittle: it takes 25% more damage from every champion for 3s). Shatterfrost (+80% damage, but no slow) leads to Splintering Cold (shards deal 50% instead of 40%) and Shatter Storm (a shard that kills bursts into a ring of splinters dealing 50% of its damage).',
+      'Skill trees: nodes learned after a switched-off path now go dark along with it. Bigger trees can be dragged (or scrolled) around, and the tree opens centred on the node you have selected.',
+      'Click a foe on the board to inspect it: a panel shows its health, shield, defences (resistances, dodge, ward, regeneration…) and the effects currently on it, such as Chilled, Ice Storm, Brittle, Knocked back and Cowering. Foes under the cursor are outlined. Press Esc or click elsewhere to close it.',
+      'Champion pages and the in-stage panel show the Frost Witch’s shards, slow, Brittle and Shatter Storm, and list both options of a fork side by side.',
+      'Balance: Cross Slash now hits for 2.2× damage (was 1.8×). The Arcane Staff’s base damage is 10 (was 9). The Man-at-Arms, Sludge Behemoth and Bloodhound each give 1 more gold. The Throne Room’s early waves are slightly smaller.',
+      'New sounds for the Frost Witch’s cast and her ice shattering.',
+      'Developer menu: a new Unlock all champions button.',
+    ],
+  },
+  {
     version: '2026-10-14 · A Bigger Battlefield',
     changes: [
       'New Battlefield size setting (in Settings and the pause menu): Classic keeps the original board, Large and Fill screen let it grow on a big window, as far as the battle still fits the window’s height. Fill screen is the new default.',

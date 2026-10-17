@@ -28,6 +28,7 @@ import {
   salvageArmor as salvageArmorTx,
   unequipArmor as unequipArmorTx,
   addGems,
+  unlockAllUnits as unlockAllUnitsTx,
   addMastery,
   addUnit,
   buyMasteryUpgrade as buyMasteryUpgradeTx,
@@ -263,6 +264,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
     [commit],
   );
 
+  const unlockAllUnits = useCallback(() => {
+    commit(unlockAllUnitsTx(stateRef.current));
+  }, [commit]);
+
   const value = useMemo<GameStore>(
     () => ({
       state,
@@ -289,9 +294,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
       salvageArmor,
       resetAccount,
       grantGems,
+      unlockAllUnits,
       summonCost: SUMMON_COST,
     }),
-    [state, summon, completeLevel, recordEndlessRun, awardMastery, awardEnemyKills, resetEnemyKills, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, reorderTeam, placeInTeam, setPrefs, setAudioSettings, setPlayerProfile, setPlayerChampionClass, markChapterRead, awardArmor, equipArmor, unequipArmor, salvageArmor, resetAccount, grantGems],
+    [state, summon, completeLevel, recordEndlessRun, awardMastery, awardEnemyKills, resetEnemyKills, buyMasteryUpgrade, setActiveMasteryUpgrade, setMasteryDisabled, toggleTeamMember, reorderTeam, placeInTeam, setPrefs, setAudioSettings, setPlayerProfile, setPlayerChampionClass, markChapterRead, awardArmor, equipArmor, unequipArmor, salvageArmor, resetAccount, grantGems, unlockAllUnits],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

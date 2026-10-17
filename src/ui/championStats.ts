@@ -1,5 +1,5 @@
 import {
-  aoeLabel,
+  attackShapeLabel,
   damageTypeLabel,
   formatAttackSpeed,
   rangeLabel,
@@ -13,6 +13,10 @@ import {
   masteryGenerateMult,
   masteryHarvest,
   masteryBard,
+  masteryBrittle,
+  masteryChill,
+  masteryShardSplit,
+  masteryShatter,
   masteryStats,
 } from '../domain/mastery';
 import { critChanceFor, critMultiplierFor } from '../domain/combat';
@@ -34,7 +38,7 @@ export const ordinal = (n: number) =>
 
 /** A champion's role word: Economy, Support, or its attack shape. */
 export function championRole(unit: UnitDef): string {
-  return unit.generator ? 'Economy' : unit.bard ? 'Support' : aoeLabel(unit.aoe);
+  return unit.generator ? 'Economy' : unit.bard ? 'Support' : attackShapeLabel(unit);
 }
 
 /**
@@ -61,6 +65,11 @@ export function championStatTiles(unit: UnitDef, purchased: string[]): StatTile[
   const finalBounceFraction = masteryFinalBounceDamageMult(unit.id, purchased);
   // The Blade's periodic X cut, if its Cross Slash node is active (dual blades only).
   const crossSlash = unit.visual.shape === 'player-blade' ? masteryCrossSlash(unit.id, purchased) : undefined;
+  // The Frost Witch's needle: shards, chill and the Icebreak / Shatter Storm nodes.
+  const shatter = masteryShatter(unit, 0, purchased);
+  const chill = masteryChill(unit, purchased);
+  const brittle = masteryBrittle(unit.id, purchased);
+  const split = shatter ? masteryShardSplit(unit.id, purchased) : 0;
 
   const cost: StatTile = {
     label: 'Cost · Limit',
@@ -99,6 +108,8 @@ export function championStatTiles(unit: UnitDef, purchased: string[]): StatTile[
             ? 'per enemy in blast'
             : unit.aoe === 'cone'
               ? 'per enemy in arc'
+              : unit.shatter
+                ? 'missile, before shards'
               : burst > 1
               ? unit.visual.shape === 'player-staff'
                 ? `${burst} mana bolts`
@@ -118,6 +129,18 @@ export function championStatTiles(unit: UnitDef, purchased: string[]): StatTile[
           sub: finalBounceFraction > 0 ? `final leap ${+(finalBounceFraction * 100).toFixed(1)}%` : 'damage per leap',
         },
       ]
+      : []),
+    ...(shatter
+      ? [{ label: 'Shatter', value: `${shatter.count} × ${pct(shatter.damageMult)}`, sub: 'ice shards per impact' }]
+      : []),
+    ...(split > 0
+      ? [{ label: 'Shatter Storm', value: `${shatter!.count} × ${pct(split)}`, sub: 'splinters per shard kill' }]
+      : []),
+    ...(chill
+      ? [{ label: 'Slow', value: `-${pct(chill.slow)}`, sub: `speed for ${chill.duration}s` }]
+      : []),
+    ...(brittle
+      ? [{ label: 'Brittle', value: `+${pct(brittle.mult - 1)}`, sub: `damage taken for ${brittle.duration}s` }]
       : []),
     ...(unit.maxMana
       ? [

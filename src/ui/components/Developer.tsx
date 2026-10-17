@@ -42,7 +42,7 @@ const KILLS_GRANT = 50;
  * Laid out as a grid of tool cards; the class switch and the forge span it.
  */
 export function Developer({ onClose }: Props) {
-  const { resetAccount, grantGems, awardMastery, awardEnemyKills, resetEnemyKills, awardArmor, setPlayerChampionClass, state } = useGame();
+  const { resetAccount, grantGems, awardMastery, awardEnemyKills, resetEnemyKills, awardArmor, setPlayerChampionClass, unlockAllUnits, state } = useGame();
   const [confirming, setConfirming] = useState(false);
   const [showDesigner, setShowDesigner] = useState(false);
   const [notesReset, setNotesReset] = useState(false);
@@ -86,6 +86,7 @@ export function Developer({ onClose }: Props) {
   }
 
   const player = state.player;
+  const allUnlocked = ALL_UNITS.every((u) => state.ownedUnits.includes(u.id));
   const ownedPieces = state.armor.items.length;
 
   // Portalled to <body> so the TopBar's backdrop-filter can't trap this fixed
@@ -122,6 +123,14 @@ export function Developer({ onClose }: Props) {
               </button>
               <button className="dev-btn" onClick={grantMasteryAll} title="Skill-tree EXP for every champion, your own hero included">
                 <Icon name="star" /> +{MASTERY_GRANT} EXP to all
+              </button>
+              <button
+                className="dev-btn"
+                onClick={unlockAllUnits}
+                disabled={allUnlocked}
+                title="Add every champion to your roster (your team is left as it is)"
+              >
+                <Icon name="sword" /> {allUnlocked ? 'All champions unlocked' : 'Unlock all champions'}
               </button>
               <button className="dev-btn" onClick={grantKillsAll} title="Enemy Index kills for every foe and boss">
                 <Icon name="bestiary" /> +{KILLS_GRANT} kills to all

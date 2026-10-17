@@ -15,6 +15,9 @@ export default defineConfig(({ command }) => {
     // must be requested from that sub-path. Dev/preview stay at the root.
     base: command === 'build' ? '/aetheria-td/' : '/',
     plugins: [react()],
+    // Scan only the game's page for deps: the content editor (tools/editor)
+    // has its own index.html and `@game` alias that this config doesn't know.
+    optimizeDeps: { entries: ['index.html'] },
     server: envPort
       ? { port: envPort, strictPort: true }
       : { port: 5174 },

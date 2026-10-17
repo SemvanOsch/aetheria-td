@@ -34,6 +34,7 @@ export type ParticleKind =
   | 'shard' // crystalline diamond (additive)
   | 'firefly' // blinking yellow-green glow (additive)
   | 'gust' // short curved wind wisp (additive)
+  | 'streak' // long thin wind line along velocity, fading in and out; `size` is its length (additive)
   | 'smoke' // soft expanding puff (normal)
   | 'dust' // small earthy speck (normal)
   | 'debris' // tumbling chip with gravity (normal)
@@ -47,6 +48,7 @@ const ADDITIVE: Record<ParticleKind, boolean> = {
   shard: true,
   firefly: true,
   gust: true,
+  streak: true,
   smoke: false,
   dust: false,
   debris: false,
@@ -462,6 +464,9 @@ export class Vfx {
         case 'fissure':
           this.onFissure(e.x, e.y, e.angle, e.length);
           break;
+        case 'shatter':
+          this.onShatter(e.x, e.y, e.angles, e.crit, e.small ? 0.6 : 1);
+          break;
         case 'dodge':
           this.burst('gust', e.x, e.y - 4, 4, 60, { life: 0.3, size: 5, color: '#dff4ff' });
           break;
@@ -636,6 +641,11 @@ export class Vfx {
       case 'holy':
         this.burst('mote', hx, hy, 6, 40, { life: 0.6, size: 1.6, color: fam.ramp[2], vy: -24 });
         break;
+      case 'frost':
+        // Ice chips glancing off the foe and a little frost drifting down.
+        this.burst('shard', hx, hy, e.crit ? 8 : 4, 70, { dir: ang, spread: 2.4, life: 0.34, size: 1.6, color: fam.ramp[0], color2: fam.ramp[2], drag: 5 });
+        this.burst('mote', hx, hy, e.crit ? 6 : 3, 24, { life: 0.7, size: 1.2, color: fam.ramp[1], vy: 14, drag: 2 });
+        break;
       default: {
         // Steel: hot sparks thrown along the blow, plus a directional slash
         // crescent for melee strikes.
@@ -688,6 +698,26 @@ export class Vfx {
       this.burst('debris', hx, hy, 8, 90, { life: 0.6, size: 1.8, color: '#25397a', color2: '#c9d2dc', grav: 260, vy: -50 });
       this.pulse(hx, hy, 80, 'holy', 0.5, 0.3);
     }
+  }
+
+  /**
+   * The Frost Witch's ice missile shattering: a cold white flash, a frost ring
+   * squashed onto the ground, ice chips tumbling out along each shard's line
+   * plus a scatter of finer ones, frost motes settling and a frost light pulse.
+   * `k` shrinks it all for Shatter Storm's splinter bursts.
+   */
+  private onShatter(x: number, y: number, angles: number[], crit: boolean, k = 1): void {
+    const ramp = MAGIC.frost.ramp;
+    const hy = y - 4;
+    this.flash(x, hy, (crit ? 34 : 22) * k, 0.16, ramp[0]);
+    this.ring(x, y, 3, (crit ? 30 : 22) * k, 0.3, ramp[1], 1.8, 0.55);
+    this.ring(x, hy, 2, 14 * k, 0.2, '#ffffff', 1.2);
+    for (const a of angles) {
+      this.burst('shard', x, hy, 2, 90 * k, { dir: a, spread: 0.5, life: 0.3, size: 1.8 * k, color: ramp[0], color2: ramp[2], drag: 5 });
+    }
+    this.burst('debris', x, hy, Math.round((crit ? 10 : 6) * k), 70 * k, { life: 0.5, size: 1.4, color: ramp[1], color2: ramp[3], grav: 220, vy: -50 });
+    this.burst('mote', x, hy, Math.round(8 * k), 30, { life: 0.9, size: 1.3, color: ramp[1], vy: 10, drag: 2 });
+    this.pulse(x, hy, (crit ? 110 : 80) * k, 'frost', 0.7 * k, 0.35);
   }
 
   /** Record a corpse (for a normal foe) and throw death debris. */
@@ -1152,6 +1182,76 @@ export class Vfx {
   }
 
   /**
+   * The Frost Witch's frozen aura, around her at (x, y) (her cell's centre): a
+   * light, steady sift of frost motes peeling off her figure and drifting up and
+   * away, the odd tiny ice glint among them, and a few colder motes sinking off
+   * her fur hem onto the ground.
+   */
+  frostAura(x: number, y: number, dt: number): void {
+    const ramp = MAGIC.frost.ramp;
+    // Kept sparse, faint (half-alpha colours) and slow so it reads as a chill in
+    // the air around her rather than a spell going off.
+    if (this.rand() < dt * 4) {
+      this.spawn('mote', x + (this.rand() - 0.5) * 20, y - 18 + this.rand() * 24, {
+        life: 1.3 + this.rand() * 0.6,
+        size: 0.8 + this.rand() * 0.5,
+        color: withAlpha(this.rand() < 0.6 ? ramp[1] : ramp[2], 0.5),
+        vx: (this.rand() - 0.5) * 5,
+        vy: -4 - this.rand() * 4,
+        drag: 0.8,
+      });
+    }
+    if (this.rand() < dt * 1) {
+      this.spawn('shard', x + (this.rand() - 0.5) * 16, y - 14 + this.rand() * 18, {
+        life: 0.7 + this.rand() * 0.3,
+        size: 0.9 + this.rand() * 0.3,
+        color: withAlpha(ramp[0], 0.5),
+        color2: withAlpha(ramp[2], 0.5),
+        vx: (this.rand() - 0.5) * 4,
+        vy: -3 - this.rand() * 3,
+        spin: (this.rand() - 0.5) * 2,
+        drag: 1,
+      });
+    }
+    if (this.rand() < dt * 1.2) {
+      this.spawn('mote', x + (this.rand() - 0.5) * 18, y + 10, {
+        life: 1 + this.rand() * 0.4,
+        size: 0.7 + this.rand() * 0.3,
+        color: withAlpha(ramp[1], 0.45),
+        vx: (this.rand() - 0.5) * 7,
+        vy: 1 + this.rand() * 1.5,
+        drag: 1.5,
+      });
+    }
+  }
+
+  /**
+   * The Frost Witch's Ice Storm over her range, a circle of `radius` round
+   * (x, y): thin, pale wind streaks blowing clockwise round her across the whole
+   * area, each fading in and out as it passes. Rate scales with the area so a
+   * wider range blows just as thickly.
+   */
+  iceStorm(x: number, y: number, radius: number, dt: number): void {
+    const ramp = MAGIC.frost.ramp;
+    const want = dt * radius * radius * 0.0012;
+    const n = Math.floor(want) + (this.rand() < want % 1 ? 1 : 0);
+    for (let i = 0; i < n; i++) {
+      const a = this.rand() * Math.PI * 2;
+      const d = (0.25 + Math.sqrt(this.rand()) * 0.7) * radius;
+      // Tangential (clockwise round her), with a slight inward lean.
+      const speed = 70 + this.rand() * 50;
+      this.spawn('streak', x + Math.cos(a) * d, y + Math.sin(a) * d, {
+        life: 0.45 + this.rand() * 0.35,
+        size: 12 + this.rand() * 14,
+        color: withAlpha(this.rand() < 0.6 ? ramp[0] : ramp[1], 0.6 + this.rand() * 0.3),
+        vx: -Math.sin(a) * speed - Math.cos(a) * speed * 0.12,
+        vy: Math.cos(a) * speed - Math.sin(a) * speed * 0.12,
+        drag: 0,
+      });
+    }
+  }
+
+  /**
    * A Mana Storm's overflowing pool at (x, y) (see the renderer's
    * `drawManaPools`), `rx` wide: motes bubbling up off its whole surface and the
    * odd bright droplet leaping out of it and falling back.
@@ -1188,8 +1288,13 @@ export class Vfx {
   }
 
   /** Trail motes behind a projectile in flight. */
-  trail(kind: 'arcane' | 'wind' | 'orb' | 'arrow', x: number, y: number, color: string, dt: number): void {
+  trail(kind: 'arcane' | 'wind' | 'orb' | 'arrow' | 'frost', x: number, y: number, color: string, dt: number): void {
     switch (kind) {
+      case 'frost':
+        // Frost motes sifting down off an ice missile, and the odd glint of rime.
+        if (this.rand() < dt * 30) this.spawn('mote', x + (this.rand() - 0.5) * 4, y + (this.rand() - 0.5) * 4, { life: 0.55, size: 1.1, color, vy: 16, drag: 2 });
+        if (this.rand() < dt * 10) this.spawn('shard', x, y, { life: 0.3, size: 1.1, color: '#ffffff', color2: color, vx: (this.rand() - 0.5) * 24, vy: (this.rand() - 0.5) * 24 });
+        break;
       case 'orb':
         if (this.rand() < dt * 40) this.spawn('mote', x + (this.rand() - 0.5) * 6, y + (this.rand() - 0.5) * 6, { life: 0.5, size: 1.8, color, vy: -10, drag: 2 });
         if (this.rand() < dt * 18) this.spawn('shard', x, y, { life: 0.35, size: 1.4, color: '#ffffff', color2: color, vx: (this.rand() - 0.5) * 30, vy: (this.rand() - 0.5) * 30 });
@@ -1616,6 +1721,22 @@ export class Vfx {
           ctx.closePath();
           ctx.fill();
           ctx.restore();
+          break;
+        }
+        case 'streak': {
+          // Fades in and back out over its life, so it reads as a gust passing.
+          const sp = Math.hypot(p.vx, p.vy) || 1;
+          const ux = p.vx / sp;
+          const uy = p.vy / sp;
+          ctx.globalAlpha = Math.sin(Math.PI * k);
+          ctx.strokeStyle = p.color;
+          ctx.lineWidth = 1.3;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(p.x - ux * p.size, p.y - uy * p.size);
+          ctx.stroke();
+          ctx.lineCap = 'butt';
           break;
         }
         case 'gust': {

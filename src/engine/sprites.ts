@@ -1407,6 +1407,288 @@ export function drawWizard(
   ctx.restore();
 }
 
+/**
+ * A fluffy band of white fur along a run of points: overlapping puffs (a cool
+ * shadow under each, then the pale fur), so collars, cuffs and hems read soft.
+ */
+function furBand(ctx: CanvasRenderingContext2D, pts: [number, number][], r: number, fur: string, furShade: string): void {
+  ctx.fillStyle = furShade;
+  for (const [x, y] of pts) {
+    ctx.beginPath();
+    ctx.arc(x, y + r * 0.3, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = fur;
+  for (const [x, y] of pts) {
+    ctx.beginPath();
+    ctx.arc(x - r * 0.12, y - r * 0.08, r * 0.86, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/**
+ * Procedural Frost Witch silhouette — a slender witch of the long winter in a
+ * deep-midnight gown and a crooked witch's hat, trimmed in thick white fur (a
+ * fur mantle about the shoulders, a fur band round the hat, fur cuffs and a fur
+ * hem), long silver hair streaming down her back, holding a slightly crooked
+ * wooden staff crowned with a cluster of ice. Painted in the caller's local
+ * space (origin at the figure's centre; hem near y=+11, hat tip near y=-23).
+ * Authored facing +x and flipped horizontally when `faceLeft`. `cast` (0..1)
+ * thrusts the staff forward as she looses an ice missile from its crystal (1
+ * just after a cast, easing back upright at rest), the ice flaring white.
+ */
+export function drawFrostWitch(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  faceLeft: boolean,
+  cast: number,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (faceLeft) ctx.scale(-1, 1);
+
+  const robeLit = shade(color, 0.22);
+  const robeDark = shade(color, -0.32);
+  const fur = '#f3f6fa';
+  const furShade = '#bfcbd9';
+  const hair = '#e4ebf3';
+  const hairDark = '#a9b8c9';
+  const skin = '#f1dcd8';
+  const wood = '#6a4a2c';
+  const woodDark = '#45301c';
+  const ice = '#bfe9ff';
+  const iceDeep = '#5f9fd6';
+
+  // Long silver hair streaming down her back, under everything else.
+  ctx.fillStyle = hairDark;
+  ctx.beginPath();
+  ctx.moveTo(-1.2, -13.4);
+  ctx.quadraticCurveTo(-7.6, -9, -7.8, 1.6);
+  ctx.quadraticCurveTo(-6.4, 4.4, -4.6, 3.6);
+  ctx.quadraticCurveTo(-5.4, -2.6, -2.6, -7.6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = hair;
+  ctx.beginPath();
+  ctx.moveTo(-0.8, -13.2);
+  ctx.quadraticCurveTo(-6, -9.6, -6.4, -0.4);
+  ctx.quadraticCurveTo(-5.6, 1.2, -4.6, 0.8);
+  ctx.quadraticCurveTo(-4.4, -4.6, -2, -8.4);
+  ctx.closePath();
+  ctx.fill();
+
+  // Trailing back panel of the gown sweeping behind.
+  ctx.fillStyle = robeDark;
+  ctx.beginPath();
+  ctx.moveTo(-2.6, -6.4);
+  ctx.quadraticCurveTo(-5.4, 1.6, -10.6, 11);
+  ctx.quadraticCurveTo(-5.4, 11.8, -1, 10.8);
+  ctx.closePath();
+  ctx.fill();
+
+  // Gown: fitted to a slim waist, then flaring out to a wide hem.
+  const gownPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(-3.2, -7.8);
+    ctx.quadraticCurveTo(0, -9.2, 3.4, -7.6);
+    ctx.quadraticCurveTo(4.2, -4.6, 3, -0.8);
+    ctx.quadraticCurveTo(5.8, 4.6, 8.4, 10.8);
+    ctx.quadraticCurveTo(0, 12, -8.4, 10.8);
+    ctx.quadraticCurveTo(-5.4, 4.4, -3.2, -0.8);
+    ctx.quadraticCurveTo(-4.4, -4.6, -3.2, -7.8);
+    ctx.closePath();
+  };
+  gownPath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.save();
+  gownPath();
+  ctx.clip();
+  ctx.fillStyle = robeLit; // lit front fold
+  ctx.beginPath();
+  ctx.ellipse(5.4, 4, 3.4, 9, -0.25, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = robeLit; // lit bodice
+  ctx.beginPath();
+  ctx.ellipse(2.4, -4.6, 1.6, 3.2, 0.1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = robeDark; // skirt folds
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.moveTo(-4.2, 11);
+  ctx.quadraticCurveTo(-2.6, 5.6, -1.4, 1);
+  ctx.moveTo(0.8, 11.4);
+  ctx.quadraticCurveTo(1, 6.4, 0.8, 1.2);
+  ctx.moveTo(4.6, 11.2);
+  ctx.quadraticCurveTo(3.4, 6, 2.4, 1.4);
+  ctx.stroke();
+  // Frost-silver embroidery climbing the front edge: a little line of stars.
+  ctx.strokeStyle = withAlpha(ice, 0.75);
+  ctx.lineWidth = 0.55;
+  for (const [sx, sy, s] of [[6.6, 8.2, 1.1], [5.2, 4.4, 0.9], [4, 1.4, 0.7]] as const) {
+    ctx.beginPath();
+    for (let k = 0; k < 3; k++) {
+      const a = (k / 3) * Math.PI;
+      ctx.moveTo(sx - Math.cos(a) * s, sy - Math.sin(a) * s);
+      ctx.lineTo(sx + Math.cos(a) * s, sy + Math.sin(a) * s);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Thick white fur along the hem.
+  furBand(ctx, [[-8, 10.6], [-5.8, 11.2], [-3.4, 11.5], [-1, 11.6], [1.4, 11.6], [3.8, 11.4], [6, 11.1], [8, 10.6]], 1.25, fur, furShade);
+  // A shoe tip peeking out under the fur.
+  ctx.fillStyle = '#1c2248';
+  ctx.beginPath();
+  ctx.moveTo(5.2, 11.8);
+  ctx.quadraticCurveTo(8.2, 11, 9.6, 12.2);
+  ctx.lineTo(5.6, 12.6);
+  ctx.closePath();
+  ctx.fill();
+
+  // Silver girdle with an ice-blue clasp at the slim waist.
+  belt(ctx, -3.4, 3.2, -0.8, '#c4ccd8', iceDeep, 0.5, 1, 1.4);
+
+  // Head.
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.arc(1.4, -11.4, 3.2, 0, Math.PI * 2);
+  ctx.fill();
+  // Silver fringe under the brim and a lock falling forward over the shoulder.
+  ctx.fillStyle = hair;
+  ctx.beginPath();
+  ctx.moveTo(-1.8, -13.4);
+  ctx.quadraticCurveTo(1.6, -15, 4.6, -13);
+  ctx.quadraticCurveTo(2.6, -13, 0.6, -12.2);
+  ctx.quadraticCurveTo(-0.8, -10, -1.2, -7.6);
+  ctx.quadraticCurveTo(-2.6, -10, -1.8, -13.4);
+  ctx.closePath();
+  ctx.fill();
+
+  // Fur mantle about the shoulders, a soft cloud round the neck.
+  furBand(ctx, [[-3.6, -7.4], [-1.8, -8.4], [0.2, -8.8], [2.2, -8.6], [3.9, -7.6], [-2.6, -6.2], [2.9, -6.4], [0.2, -6.9]], 1.7, fur, furShade);
+
+  // Crooked witch's hat: a wide brim, a tall crown kinked twice and bent back
+  // at the tip, ringed by a band of white fur with an icicle pin.
+  ctx.fillStyle = robeDark;
+  ctx.beginPath();
+  ctx.ellipse(1.2, -13.8, 7.2, 1.8, -0.06, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(-3.4, -14.2);
+  ctx.quadraticCurveTo(-2.2, -17.4, -1.4, -18.6); // back edge, first kink
+  ctx.quadraticCurveTo(-2.6, -20.6, -5.8, -22.6); // bent back to the tip
+  ctx.quadraticCurveTo(-1.4, -21.8, 1.2, -19.8); // front edge, back from the tip
+  ctx.quadraticCurveTo(2.2, -17.4, 5.4, -14.4); // down to the brim
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = robeLit; // lit face of the crown
+  ctx.beginPath();
+  ctx.moveTo(1.6, -14.6);
+  ctx.quadraticCurveTo(0.6, -17.6, -0.4, -19.2);
+  ctx.quadraticCurveTo(1.2, -18.6, 1.8, -17.2);
+  ctx.quadraticCurveTo(2.6, -15.8, 4.2, -14.6);
+  ctx.closePath();
+  ctx.fill();
+  furBand(ctx, [[-2.8, -14.6], [-1, -15.1], [0.9, -15.3], [2.8, -15.1], [4.5, -14.6]], 1.15, fur, furShade);
+  ctx.fillStyle = ice; // icicle pin in the fur
+  ctx.beginPath();
+  ctx.moveTo(-1.4, -16);
+  ctx.lineTo(-0.6, -14.8);
+  ctx.lineTo(-1.2, -12.6);
+  ctx.lineTo(-2, -14.8);
+  ctx.closePath();
+  ctx.fill();
+  drawProfileFace(ctx, 1.4, -11.4, 3.2, skin, { eyeY: 0.35, lashes: true, eye: '#3fa8e8', brow: '#c9d4e2' });
+
+  // --- Crooked staff & casting arm ---
+  // The staff pivots about her hand: nearly upright at rest, thrust forward as
+  // she casts. Its shaft wanders with two gentle kinks and curls into a crook
+  // at the top, where a cluster of ice is bound.
+  const handX = 6;
+  const handY = -3;
+  const ang = 0.12 + 0.45 * cast;
+  ctx.save();
+  ctx.translate(handX, handY);
+  ctx.rotate(ang);
+  const shaft: [number, number][] = [[0.3, 9], [-0.6, 3.4], [0.5, -2], [-0.4, -7.2], [0.6, -11.2]];
+  ctx.strokeStyle = woodDark;
+  ctx.lineWidth = 2.1;
+  ctx.beginPath();
+  ctx.moveTo(shaft[0][0], shaft[0][1]);
+  for (const [sx, sy] of shaft.slice(1)) ctx.lineTo(sx, sy);
+  ctx.quadraticCurveTo(1.6, -13.8, -0.6, -14.6); // the crook curling over
+  ctx.stroke();
+  ctx.strokeStyle = wood; // lit edge of the wood
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.moveTo(shaft[0][0] + 0.4, shaft[0][1]);
+  for (const [sx, sy] of shaft.slice(1)) ctx.lineTo(sx + 0.4, sy);
+  ctx.stroke();
+  ctx.fillStyle = woodDark; // a knot in the wood
+  ctx.beginPath();
+  ctx.arc(-0.5, 2.6, 0.7, 0, Math.PI * 2);
+  ctx.fill();
+  // The ice cluster cradled in the crook: three crystals, the middle tallest.
+  const crystal = (cx: number, cy: number, w: number, h: number, tilt: number) => {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(tilt);
+    ctx.fillStyle = iceDeep;
+    ctx.beginPath();
+    ctx.moveTo(0, -h);
+    ctx.lineTo(w, -h * 0.25);
+    ctx.lineTo(0, h * 0.35);
+    ctx.lineTo(-w, -h * 0.25);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = ice;
+    ctx.beginPath();
+    ctx.moveTo(0, -h);
+    ctx.lineTo(-w, -h * 0.25);
+    ctx.lineTo(0, h * 0.35);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  };
+  crystal(-0.9, -12.6, 0.9, 2, -0.5);
+  crystal(1.4, -12.8, 0.9, 2.1, 0.5);
+  crystal(0.4, -13.4, 1.2, 3, 0);
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(0.1, -14.6, 0.6, 0, Math.PI * 2);
+  ctx.fill();
+  // The ice flaring white as the missile leaves it.
+  if (cast > 0.15) {
+    ctx.globalAlpha = Math.min(1, cast) * 0.85;
+    ctx.fillStyle = withAlpha(ice, 0.45);
+    ctx.beginPath();
+    ctx.arc(0.4, -14, 2.4 + cast * 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    for (let k = 0; k < 3; k++) {
+      const a = (k / 3) * Math.PI + 0.3;
+      const s = 2.2 + cast * 2.2;
+      ctx.moveTo(0.4 - Math.cos(a) * s, -14 - Math.sin(a) * s);
+      ctx.lineTo(0.4 + Math.cos(a) * s, -14 + Math.sin(a) * s);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+
+  // Bell-sleeved arm gripping the staff, its cuff trimmed in fur.
+  arm(ctx, 1.8, -6.6, handX, handY, { sleeve: color, hand: skin, w: 2.6, bell: true }, 1.2);
+  furBand(ctx, [[handX - 1.3, handY - 0.9], [handX - 1.1, handY + 0.3]], 0.95, fur, furShade);
+
+  ctx.restore();
+}
+
 /** Millisecond clock for time-driven sprite effects (falls back to Date.now). */
 function nowMs(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -10052,6 +10334,7 @@ export function hasSprite(shape: string): boolean {
     shape === 'wizard' ||
     shape === 'elf' ||
     shape === 'bard' ||
+    shape === 'frostWitch' ||
     // The player's own adventurer(s) — drawn from a PlayerSpriteConfig; callers
     // must supply `playerConfig` to drawUnitSprite for these to render.
     shape === 'player-blade' ||
@@ -10120,6 +10403,7 @@ export function drawUnitSprite(
   else if (shape === 'wizard') drawWizard(ctx, color, faceLeft, anim, empowered);
   else if (shape === 'elf') drawElf(ctx, color, faceLeft, anim, empowered);
   else if (shape === 'bard') drawBard(ctx, color, faceLeft, anim);
+  else if (shape === 'frostWitch') drawFrostWitch(ctx, color, faceLeft, anim);
   else if (shape.startsWith('player-') && playerConfig) {
     drawPlayerSprite(ctx, playerConfig, faceLeft, anim, playerWeaponForShape(shape), draw, throwing, empowered);
   }

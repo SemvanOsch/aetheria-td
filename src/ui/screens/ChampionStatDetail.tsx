@@ -1,12 +1,14 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  aoeLabel,
+  attackShapeLabel,
   attackTypeLabel,
   coneAngleDeg,
   damageTypeLabel,
   effectiveAoe,
   effectiveBounces,
   effectiveGenerate,
+  effectiveIceStorm,
+  effectiveMagicPen,
   maxUpgradeTier,
   upgradeEffectLabel,
   type AbilityDef,
@@ -14,6 +16,10 @@ import {
 } from '../../domain/units';
 import {
   masteryBard,
+  masteryBrittle,
+  masteryChill,
+  masteryShardSplit,
+  masteryShatter,
   masteryBounceDamageMult,
   masteryBurst,
   masteryBurstRadius,
@@ -29,7 +35,7 @@ import {
   masteryThrow,
   masteryTree,
   masteryUpgradeCost,
-  masteryUpgradeDeltas,
+  masteryUpgradeEffect,
   type MasteryUpgradeDef,
 } from '../../domain/mastery';
 import { critChanceFor, critMultiplierFor } from '../../domain/combat';
@@ -37,6 +43,7 @@ import { RARITIES } from '../../domain/rarity';
 import { BOUNCE_DAMAGE_MULTS } from '../../engine/GameEngine';
 import { UnitSprite } from '../components/UnitSprite';
 import { ordinal } from '../championStats';
+import { championKey, championPaths } from './ChampionStats';
 
 /**
  * Developer-only deep dive into one champion (`#champions/<key>`, reached by
@@ -182,10 +189,8 @@ function CombatTable({ u, purchased }: { u: UnitDef; purchased: string[] }) {
                     {r.tier === 0
                       ? 'base'
                       : upgradeEffectLabel({
-                        ...masteryUpgradeDeltas(u, r.tier, purchased),
-                        setAoe: up!.setAoe,
+                        ...masteryUpgradeEffect(u, r.tier, purchased),
                         coneAngle: up!.setAoe === 'cone' ? coneAngleDeg(u) : undefined,
-                        ability: up!.ability?.name,
                       }) || up!.description}
                   </div>
                 </td>
@@ -461,15 +466,60 @@ function MasteryPicker({
   setSelected: (s: string[]) => void;
 }) {
   const tree = masteryTree(u.id);
+  const layout = useMemo(() => treeLayout(tree), [tree]);
+  // Connector lines between the cards, measured from where the grid put them.
+  const boardRef = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef(new Map<string, HTMLDivElement>());
+  const [anchors, setAnchors] = useState<Map<string, { top: Vec; bottom: Vec }>>(new Map());
+  const measure = () => {
+    const board = boardRef.current;
+    if (!board) return;
+    const b = board.getBoundingClientRect();
+    const next = new Map<string, { top: Vec; bottom: Vec }>();
+    for (const [id, el] of cardRefs.current) {
+      const r = el.getBoundingClientRect();
+      const x = r.left - b.left + r.width / 2;
+      next.set(id, { top: { x, y: r.top - b.top }, bottom: { x, y: r.bottom - b.top } });
+    }
+    // Only commit a change, so measuring after every render can't loop.
+    setAnchors((prev) => (anchorKey(prev) === anchorKey(next) ? prev : next));
+  };
+  const measureRef = useRef(measure);
+  measureRef.current = measure;
+  // After every render (a ticked node can re-wrap a card) and on any resize.
+  useLayoutEffect(() => measureRef.current());
+  useLayoutEffect(() => {
+    const board = boardRef.current;
+    if (!board) return;
+    const ro = new ResizeObserver(() => measureRef.current());
+    ro.observe(board);
+    for (const el of cardRefs.current.values()) ro.observe(el);
+    const onResize = () => measureRef.current();
+    window.addEventListener('resize', onResize);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', onResize);
+    };
+  }, [layout]);
   if (tree.length === 0) return <p className="es-faint">No skill tree.</p>;
   const toggle = (n: MasteryUpgradeDef) => {
     if (forcedState(u, n) !== undefined) return;
     if (selected.includes(n.id)) {
-      setSelected(selected.filter((id) => id !== n.id));
+      // Unticking a node unticks everything learned after it (it would be dead
+      // without it), except a node the page pins.
+      setSelected(selected.filter((id) => {
+        const m = tree.find((x) => x.id === id);
+        return id !== n.id && !(m && forcedState(u, m) === undefined && ancestorIds(tree, m).includes(n.id));
+      }));
     } else {
-      // Exclusive groups behave like radios: only one member is ever active.
-      const rivals = tree.filter((m) => n.exclusiveGroup && m.exclusiveGroup === n.exclusiveGroup).map((m) => m.id);
-      setSelected([...selected.filter((id) => !rivals.includes(id)), n.id]);
+      // Ticking a node ticks its prerequisites too, and exclusive branches behave
+      // like radios: a rival member and everything after it drop out.
+      const add = [...ancestorIds(tree, n), n.id];
+      const keep = selected.filter((id) => {
+        const m = tree.find((x) => x.id === id);
+        return !m || !branchesConflict(tree, n, m);
+      });
+      setSelected([...keep, ...add.filter((id) => !keep.includes(id))]);
     }
   };
   const exp = tree.filter((n) => selected.includes(n.id)).reduce((s, n) => s + n.cost, 0);
@@ -480,58 +530,157 @@ function MasteryPicker({
         <button onClick={() => setSelected(defaultSelection(u, true))}>All</button>
         <span className="es-faint">{exp} / {tree.reduce((s, n) => s + n.cost, 0)} EXP selected</span>
       </div>
-      <ul className="cd-nodes">
-        {tree.map((n) => {
-          const forced = forcedState(u, n);
-          const blocked = forced === undefined && tree.some(
-            (m) => m.id !== n.id && m.exclusiveGroup && m.exclusiveGroup === n.exclusiveGroup && forcedState(u, m) === true,
-          );
-          const locked = forced !== undefined || blocked;
-          return (
-            // The whole card toggles the node; the checkbox is just its indicator.
-            <li
-              key={n.id}
-              className={`${selected.includes(n.id) ? 'on' : ''}${locked ? ' locked' : ''}`}
-              role="checkbox"
-              aria-checked={selected.includes(n.id)}
-              aria-disabled={locked}
-              tabIndex={locked ? -1 : 0}
-              onClick={() => !locked && toggle(n)}
-              onKeyDown={(e) => {
-                if (!locked && (e.key === ' ' || e.key === 'Enter')) {
-                  e.preventDefault();
-                  toggle(n);
-                }
-              }}
-            >
-              <div className="cd-node-head">
-                <input type="checkbox" checked={selected.includes(n.id)} disabled={locked} readOnly tabIndex={-1} aria-hidden />
-                <span className={`es-name${n.major ? ' cd-major' : ''}`}>{n.name}</span>
-                <span className="es-faint"> · {n.cost} EXP{n.requires ? ` · after ${masteryTree(u.id).find((m) => m.id === n.requires)?.name ?? n.requires}` : ''}{n.exclusiveGroup ? ` · pick one (${n.exclusiveGroup})` : ''}</span>
+      <div className="cd-tree-scroll">
+        <div
+          className="cd-tree"
+          ref={boardRef}
+          style={{ gridTemplateColumns: `repeat(${layout.cols}, minmax(220px, 260px))` }}
+        >
+          <svg className="cd-tree-edges" aria-hidden>
+            {tree.map((n) => {
+              const from = n.requires ? anchors.get(n.requires)?.bottom : undefined;
+              const to = anchors.get(n.id)?.top;
+              if (!from || !to) return null;
+              const lit = selected.includes(n.id) && selected.includes(n.requires!);
+              const midY = (from.y + to.y) / 2;
+              return (
+                <path
+                  key={n.id}
+                  className={`${lit ? 'lit' : ''}${n.exclusiveGroup ? ' fork' : ''}`}
+                  d={`M${from.x} ${from.y}C${from.x} ${midY} ${to.x} ${midY} ${to.x} ${to.y}`}
+                />
+              );
+            })}
+          </svg>
+          {tree.map((n) => {
+            const cell = layout.cells.get(n.id)!;
+            const on = selected.includes(n.id);
+            const forced = forcedState(u, n);
+            const blocked = forced === undefined && tree.some(
+              (m) => m.id !== n.id && forcedState(u, m) === true && branchesConflict(tree, n, m),
+            );
+            const locked = forced !== undefined || blocked;
+            // Off because a rival branch is picked (rather than just unpicked).
+            const rivalled = !on && tree.some((m) => selected.includes(m.id) && branchesConflict(tree, n, m));
+            return (
+              // The whole card toggles the node; the dot is just its indicator.
+              <div
+                key={n.id}
+                ref={(el) => {
+                  if (el) cardRefs.current.set(n.id, el);
+                  else cardRefs.current.delete(n.id);
+                }}
+                className={`cd-tree-node${on ? ' on' : ''}${locked ? ' locked' : ''}${rivalled ? ' rivalled' : ''}${n.major ? ' major' : ''}`}
+                style={{ gridRow: cell.depth + 1, gridColumn: `${cell.col + 1} / span ${cell.span}` }}
+                role="checkbox"
+                aria-checked={on}
+                aria-disabled={locked}
+                tabIndex={locked ? -1 : 0}
+                onClick={() => !locked && toggle(n)}
+                onKeyDown={(e) => {
+                  if (!locked && (e.key === ' ' || e.key === 'Enter')) {
+                    e.preventDefault();
+                    toggle(n);
+                  }
+                }}
+              >
+                {n.exclusiveGroup && <span className="cd-tree-fork">Pick one</span>}
+                <div className="cd-tree-head">
+                  <span className="cd-tree-dot" aria-hidden />
+                  <span className="cd-tree-name">{n.name}</span>
+                  <span className="cd-tree-cost">{n.cost} EXP</span>
+                </div>
+                <div className="cd-tree-desc">{n.description}</div>
+                <div className="cd-tags">{nodeEffects(n).map((t) => <span key={t}>{t}</span>)}</div>
               </div>
-              <div className="es-mech">{n.description}</div>
-              <div className="cd-tags">{nodeEffects(n).map((t) => <span key={t}>{t}</span>)}</div>
-            </li>
-          );
-        })}
-      </ul>
+            );
+          })}
+        </div>
+      </div>
     </>
   );
 }
 
-/** All nodes (first of each exclusive group, honouring the page's weapon form), or none. */
+type Vec = { x: number; y: number };
+
+/** A comparable fingerprint of measured card anchors (whole pixels). */
+function anchorKey(m: Map<string, { top: Vec; bottom: Vec }>): string {
+  return [...m].map(([id, a]) => `${id}:${Math.round(a.top.x)},${Math.round(a.top.y)},${Math.round(a.bottom.y)}`).join('|');
+}
+
+/**
+ * Grid placement for a skill tree, the in-game tree's layout: rows follow
+ * prerequisite depth, and each node spans as many columns as it has leaves
+ * beneath it, so branches sit side by side under their parent.
+ */
+function treeLayout(tree: MasteryUpgradeDef[]): {
+  cols: number;
+  cells: Map<string, { col: number; span: number; depth: number }>;
+} {
+  const ids = new Set(tree.map((n) => n.id));
+  const kids = new Map<string | undefined, MasteryUpgradeDef[]>();
+  for (const n of tree) {
+    const parent = n.requires && ids.has(n.requires) ? n.requires : undefined;
+    kids.set(parent, [...(kids.get(parent) ?? []), n]);
+  }
+  const span = (id: string): number => Math.max(1, (kids.get(id) ?? []).reduce((s, k) => s + span(k.id), 0));
+  const cells = new Map<string, { col: number; span: number; depth: number }>();
+  const place = (list: MasteryUpgradeDef[], left: number, depth: number) => {
+    let cursor = left;
+    for (const n of list) {
+      const w = span(n.id);
+      cells.set(n.id, { col: cursor, span: w, depth });
+      place(kids.get(n.id) ?? [], cursor, depth + 1);
+      cursor += w;
+    }
+  };
+  const roots = kids.get(undefined) ?? [];
+  place(roots, 0, 0);
+  return { cols: Math.max(1, roots.reduce((s, r) => s + span(r.id), 0)), cells };
+}
+
+/** Ids of the nodes a node requires, nearest first. */
+function ancestorIds(tree: MasteryUpgradeDef[], n: MasteryUpgradeDef): string[] {
+  const out: string[] = [];
+  let cur = n.requires ? tree.find((m) => m.id === n.requires) : undefined;
+  while (cur && !out.includes(cur.id)) {
+    out.push(cur.id);
+    cur = cur.requires ? tree.find((m) => m.id === cur!.requires) : undefined;
+  }
+  return out;
+}
+
+/**
+ * The exclusive branches a node sits on: for itself and each node it requires
+ * that belongs to an exclusive group, group → that member.
+ */
+function branchChoices(tree: MasteryUpgradeDef[], n: MasteryUpgradeDef): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const id of [n.id, ...ancestorIds(tree, n)]) {
+    const m = tree.find((x) => x.id === id);
+    if (m?.exclusiveGroup && !out.has(m.exclusiveGroup)) out.set(m.exclusiveGroup, m.id);
+  }
+  return out;
+}
+
+/** Whether two nodes sit on rival branches of an exclusive group, so can't be live together. */
+function branchesConflict(tree: MasteryUpgradeDef[], a: MasteryUpgradeDef, b: MasteryUpgradeDef): boolean {
+  const bb = branchChoices(tree, b);
+  for (const [g, id] of branchChoices(tree, a)) {
+    if (bb.has(g) && bb.get(g) !== id) return true;
+  }
+  return false;
+}
+
+/** All nodes (the first branch of each exclusive group, honouring the page's weapon form), or none. */
 function defaultSelection(u: UnitDef, all: boolean): string[] {
   const tree = masteryTree(u.id);
   const forcedOn = tree.filter((n) => forcedState(u, n) === true);
   if (!all) return forcedOn.map((n) => n.id);
-  const groups = new Set(forcedOn.map((n) => n.exclusiveGroup).filter(Boolean));
   const out = forcedOn.map((n) => n.id);
   for (const n of tree) {
     if (forcedState(u, n) !== undefined || out.includes(n.id)) continue;
-    if (n.exclusiveGroup) {
-      if (groups.has(n.exclusiveGroup)) continue;
-      groups.add(n.exclusiveGroup);
-    }
+    if (out.some((id) => branchesConflict(tree, n, tree.find((m) => m.id === id)!))) continue;
     out.push(n.id);
   }
   return out;
@@ -539,6 +688,7 @@ function defaultSelection(u: UnitDef, all: boolean): string[] {
 
 export function ChampionStatDetail({ unit: u }: { unit: UnitDef }) {
   const [selected, setSelected] = useState(() => defaultSelection(u, true));
+  const [treeOpen, setTreeOpen] = useState(true);
   // Keep tree order so helpers that take "first wins" stay deterministic.
   const purchased = useMemo(() => masteryTree(u.id).map((n) => n.id).filter((id) => selected.includes(id)), [u, selected]);
   const combat = !u.generator && !u.bard;
@@ -546,6 +696,8 @@ export function ChampionStatDetail({ unit: u }: { unit: UnitDef }) {
   const notes = dynamicNotes(u, purchased);
   const cross = u.visual.shape === 'player-blade' ? masteryCrossSlash(u.id, purchased) : undefined;
   const fractions = bounceFractions(u, max, purchased);
+  // A champion with upgrade forks has one page per path; switch between them here.
+  const paths = championPaths(u);
 
   const summary: [string, ReactNode][] = [
     ['Rarity', <span style={{ color: RARITIES[u.rarity].color }}>{RARITIES[u.rarity].name}</span>],
@@ -555,18 +707,29 @@ export function ChampionStatDetail({ unit: u }: { unit: UnitDef }) {
   ];
   if (combat) {
     const aoeMax = effectiveAoe(u, max);
-    summary.push(['Attack shape', aoeMax !== u.aoe ? `${aoeLabel(u.aoe)} → ${aoeLabel(aoeMax)}` : aoeLabel(u.aoe)]);
+    summary.push(['Attack shape', aoeMax !== u.aoe ? `${attackShapeLabel(u)} → ${attackShapeLabel(u, aoeMax)}` : attackShapeLabel(u)]);
     if (masteryBurst(u, purchased) > 1) summary.push(['Volley', `${masteryBurst(u, purchased)} shots per attack`]);
     if (aoeMax === 'cone') summary.push(['Cone', `${coneAngleDeg(u)}°`]);
     if (u.aoe === 'line' && u.aoeWidth) summary.push(['Line width', `${u.aoeWidth * 2}px`]);
     if (u.aoe === 'circle') {
       summary.push(['Blast radius', `${masteryBurstRadius(u, purchased)}px${masteryGreaterOrb(u.id, purchased) ? ' · Greater Orb' : ''}`]);
     }
+    const shatter = masteryShatter(u, max, purchased);
+    if (shatter) summary.push(['Shatter (max tier)', `${shatter.count} shards × ${pct(shatter.damageMult)}, ${shatter.reach}px reach`]);
+    const split = shatter ? masteryShardSplit(u.id, purchased) : 0;
+    if (split) summary.push(['Shatter Storm', `a killing shard bursts into ${shatter!.count} splinters × ${pct(split)}`]);
     if (fractions.length) summary.push(['Bounces (max tier)', fractions.map(pct).join(' → ')]);
     summary.push(['Crit', <Cmp v={critChanceFor(u, purchased) * 100} base={critChanceFor(u, []) * 100} suffix="%" />]);
     summary.push(['Crit damage', <Cmp v={critMultiplierFor(u, purchased)} base={critMultiplierFor(u, [])} digits={2} suffix="×" />]);
     if (cross) summary.push(['Cross Slash', `every ${ordinal(cross.every)} attack, ${cross.damageMult}×`]);
-    if (u.special?.slow) summary.push(['Slow', `${pct(u.special.slow)} for ${u.special.slowDuration ?? 0}s`]);
+    const chill = masteryChill(u, purchased);
+    if (chill) summary.push(['Slow', `${pct(chill.slow)} for ${chill.duration}s`]);
+    const brittle = masteryBrittle(u.id, purchased);
+    if (brittle) summary.push(['Brittle', `slowed foes she hits take +${pct(brittle.mult - 1)} damage for ${brittle.duration}s`]);
+    const storm = effectiveIceStorm(u, max);
+    if (storm) summary.push(['Ice Storm (max tier)', `foes in range ${pct(storm)} slower, stacking with the chill`]);
+    const pen = effectiveMagicPen(u, max);
+    if (pen) summary.push(['Magic pen (max tier)', `ignores ${pct(pen)} of magic resist`]);
   }
   if (u.maxMana) summary.push(['Mana', `${u.maxMana}${u.manaRegen ? ` (+${u.manaRegen}/s)` : ''} · refilled by kills`]);
 
@@ -576,6 +739,25 @@ export function ChampionStatDetail({ unit: u }: { unit: UnitDef }) {
         <h1>{u.name}</h1>
         <a href="#champions">← All champions</a>
       </header>
+
+      {paths.length > 1 && (
+        <div className="cd-path">
+          <span className="cd-path-label">Upgrade path</span>
+          <div className="cd-path-opts" role="radiogroup" aria-label="Upgrade path">
+            {paths.map((p) => (
+              <button
+                key={championKey(p.unit)}
+                role="radio"
+                aria-checked={p.unit === u}
+                className={p.unit === u ? 'active' : ''}
+                onClick={() => { location.hash = `champions/${championKey(p.unit)}`; }}
+              >
+                {p.picks.join(' · ')}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="cd-top">
         <div className="cd-portrait">
@@ -594,10 +776,18 @@ export function ChampionStatDetail({ unit: u }: { unit: UnitDef }) {
         </div>
       </div>
 
-      <section className="es-section">
-        <h2>Skill tree</h2>
-        <MasteryPicker u={u} selected={selected} setSelected={setSelected} />
-      </section>
+      <details className="es-section es-fold" open={treeOpen} onToggle={(e) => setTreeOpen(e.currentTarget.open)}>
+        <summary>
+          <h2>
+            Skill tree{' '}
+            <span className="es-count">
+              · {purchased.length} / {masteryTree(u.id).length} nodes selected
+            </span>
+          </h2>
+        </summary>
+        {/* Mounted only while open, so its connectors measure the laid-out cards. */}
+        {treeOpen && <MasteryPicker u={u} selected={selected} setSelected={setSelected} />}
+      </details>
 
       <div className="cd-main">
         <section className="es-section">

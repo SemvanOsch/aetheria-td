@@ -86,6 +86,26 @@ export interface UpgradeDef {
    */
   bardSpeedBonus?: number;
   /**
+   * Additive share of a foe's magic resistance this champion's hits ignore —
+   * e.g. 0.4 turns a 20% magic resist into 12% (see `effectiveMagicPen`).
+   */
+  magicPen?: number;
+  /** Additive extra ice shards a shattering missile throws (see `ShatterDef.count`). */
+  shatterCount?: number;
+  /** Additive px a shattering missile's shards fly (see `ShatterDef.reach`). */
+  shatterReach?: number;
+  /**
+   * Ice Storm: every foe inside the champion's range is slowed by this fraction
+   * (0.15 = 15% slower) for as long as it stays there. Additive across tiers.
+   */
+  iceStorm?: number;
+  /**
+   * A fork: this tier is a choice between these upgrades, and buying one locks
+   * the others out for that tower (see `withUpgradeChoice`). The fork's own
+   * name/description/cost only label it on overview tables; it has no deltas.
+   */
+  choices?: UpgradeDef[];
+  /**
    * If set, this tier unlocks a player-activated ability (the Blade's Cyclone
    * Slash) instead of a passive stat change. The ability stays available from
    * this tier onward. A tier carrying an ability typically has no stat deltas.
@@ -187,6 +207,18 @@ export interface BardDef {
 }
 
 /**
+ * Shatter behaviour (the Frost Witch's ice missile): on impact the missile
+ * bursts into `count` shards, spread evenly around the impact point, that fly
+ * straight out up to `reach` px. Each shard strikes the first foe it touches
+ * (never the missile's own target) for `damageMult` of the missile's damage.
+ */
+export interface ShatterDef {
+  count: number;
+  damageMult: number;
+  reach: number;
+}
+
+/**
  * Economy behaviour: instead of attacking, the unit harvests gold. It produces
  * `amount` gold `timesPerWave` times during each wave.
  */
@@ -243,6 +275,12 @@ export interface UnitDef {
    * seeking a different foe) rather than one after another.
    */
   burst?: number;
+  /**
+   * An ice missile that shatters on impact (the Frost Witch): after striking its
+   * target it bursts into shards flying out from the impact point, each striking
+   * the first other foe it meets (see `ShatterDef`). Omitted for every other unit.
+   */
+  shatter?: ShatterDef;
   /** Gold cost to deploy the unit during a level. */
   cost: number;
   /** Max number of this unit that may be deployed per stage. */
@@ -307,6 +345,7 @@ export interface UnitVisual {
   | 'wizard'
   | 'elf'
   | 'bard'
+  | 'frostWitch'
   | 'player-blade'
   | 'player-claymore'
   | 'player-bow'
@@ -616,6 +655,62 @@ export const UNITS: Record<string, UnitDef> = {
     ],
     visual: { color: '#e08fd0', icon: '🎵', shape: 'bard' },
   },
+  frostWitch: {
+    id: 'frostWitch',
+    name: 'Frost Witch',
+    description:
+      'A witch of the long winter. She hurls needles of ice that shatter on impact and everything they cut is slowed by the cold.',
+    rarity: 'epic',
+    damage: 22,
+    attackSpeed: 0.8,
+    range: 125,
+    targeting: 'first',
+    aoe: 'single',
+    attackType: 'ranged',
+    damageType: 'magic',
+    shatter: { count: 5, damageMult: 0.4, reach: 44 },
+    special: { slow: 0.30, slowDuration: 2 },
+    cost: 120,
+    deployLimit: 2,
+    upgrades: [
+      {
+        name: 'Winter\'s Reach',
+        description: 'A freezing cold makes her needles fly farther and hit harder.',
+        cost: 80,
+        damage: 11,
+        range: 15,
+      },
+      {
+        name: 'Rimepiercer',
+        description: 'Her needles freeze so hard they pierce warding magic, ignoring 40% of a foe\'s magic resistance.',
+        cost: 100,
+        damage: 8,
+        magicPen: 0.4,
+      },
+      {
+        name: 'Winter\'s Choice',
+        description: 'Shattering Cold or Ice Storm: she can learn only one.',
+        cost: 160,
+        choices: [
+          {
+            name: 'Shattering Cold',
+            description: 'Her missiles burst into more shards, and they fly farther.',
+            cost: 160,
+            shatterCount: 3,
+            shatterReach: 12,
+            damage: 9
+          },
+          {
+            name: 'Ice Storm',
+            description: 'A storm of snow swirls around her, slowing every foe in her range.',
+            cost: 120,
+            iceStorm: 0.15,
+          },
+        ],
+      },
+    ],
+    visual: { color: '#24306a', icon: '❄️', shape: 'frostWitch' },
+  },
 };
 
 /** Champions every player owns from the start (no selection screen). */
@@ -648,6 +743,14 @@ export function aoeLabel(aoe: AoeType): string {
     default:
       return 'Single Target';
   }
+}
+
+/**
+ * A unit's attack shape for cards and stat sheets: its AoE label, or "Shatter"
+ * for an ice missile that bursts into shards (the Frost Witch).
+ */
+export function attackShapeLabel(unit: UnitDef, aoe: AoeType = unit.aoe): string {
+  return unit.shatter && aoe === 'single' ? 'Shatter' : aoeLabel(aoe);
 }
 
 /** Human label for a melee/ranged/support attack-type tag. */
@@ -757,6 +860,78 @@ export function effectiveBard(unit: UnitDef, tier: number): BardDef | null {
   return b;
 }
 
+/**
+ * Share (in [0,1]) of a foe's magic resistance a unit's hits ignore after the
+ * first `tier` upgrades: the sum of every purchased upgrade's `magicPen`.
+ */
+export function effectiveMagicPen(unit: UnitDef, tier: number): number {
+  let pen = 0;
+  for (let i = 0; i < tier && i < unit.upgrades.length; i++) {
+    pen += unit.upgrades[i].magicPen ?? 0;
+  }
+  return Math.min(1, pen);
+}
+
+/**
+ * A unit's shatter after the first `tier` upgrades: its base `shatter` plus
+ * every purchased upgrade's `shatterCount`/`shatterReach`. Null if it doesn't
+ * shatter.
+ */
+export function effectiveShatter(unit: UnitDef, tier: number): ShatterDef | null {
+  if (!unit.shatter) return null;
+  const s = { ...unit.shatter };
+  for (let i = 0; i < tier && i < unit.upgrades.length; i++) {
+    s.count += unit.upgrades[i].shatterCount ?? 0;
+    s.reach += unit.upgrades[i].shatterReach ?? 0;
+  }
+  return s;
+}
+
+/** The Ice Storm slow (fraction) a unit casts over its range after `tier` upgrades; 0 for none. */
+export function effectiveIceStorm(unit: UnitDef, tier: number): number {
+  let slow = 0;
+  for (let i = 0; i < tier && i < unit.upgrades.length; i++) {
+    slow += unit.upgrades[i].iceStorm ?? 0;
+  }
+  return Math.min(1, slow);
+}
+
+/**
+ * The unit with the fork at 1-based `tier` resolved to `choice`: that tier's
+ * entry is replaced by the chosen upgrade, so every per-tier helper reads it
+ * like any other tier. A deployed tower swaps its `def` for this when the
+ * choice is bought. Returns the unit unchanged if that tier isn't a fork.
+ */
+export function withUpgradeChoice(unit: UnitDef, tier: number, choice: number): UnitDef {
+  const pick = unit.upgrades[tier - 1]?.choices?.[choice];
+  if (!pick) return unit;
+  const upgrades = unit.upgrades.slice();
+  upgrades[tier - 1] = pick;
+  return { ...unit, upgrades };
+}
+
+/** One way through a unit's forks: the def with every fork resolved, and the names picked. */
+export interface UpgradePath {
+  def: UnitDef;
+  /** The chosen option's name at each fork, in tier order (empty without forks). */
+  picks: string[];
+}
+
+/**
+ * Every way a unit's fork tiers can be resolved, one `UpgradePath` per
+ * combination (a unit with no forks has the one path, itself, with no picks).
+ */
+export function upgradePaths(unit: UnitDef): UpgradePath[] {
+  let paths: UpgradePath[] = [{ def: unit, picks: [] }];
+  unit.upgrades.forEach((up, i) => {
+    if (!up.choices) return;
+    paths = paths.flatMap((p) =>
+      up.choices!.map((c, ci) => ({ def: withUpgradeChoice(p.def, i + 1, ci), picks: [...p.picks, c.name] })),
+    );
+  });
+  return paths;
+}
+
 /** The next upgrade a tower at `tier` could buy, or null if maxed. */
 export function nextUpgrade(unit: UnitDef, tier: number): UpgradeDef | null {
   return tier < unit.upgrades.length ? unit.upgrades[tier] : null;
@@ -801,6 +976,13 @@ export interface UpgradeEffect {
   bardTargets?: number;
   /** Bonus to a Bard's attack-speed buff (see `UpgradeDef.bardSpeedBonus`). */
   bardSpeedBonus?: number;
+  /** Share of magic resistance this tier's hits ignore (see `UpgradeDef.magicPen`). */
+  magicPen?: number;
+  /** Extra shards / shard reach this tier gives a shattering missile. */
+  shatterCount?: number;
+  shatterReach?: number;
+  /** Ice Storm slow over the champion's range (see `UpgradeDef.iceStorm`). */
+  iceStorm?: number;
   /** Name of an activated ability this tier unlocks (the Blade's Cyclone Slash). */
   ability?: string;
 }
@@ -823,6 +1005,10 @@ export function upgradeEffectLabel(e: UpgradeEffect): string {
   if (e.bounces) parts.push(`${sign(e.bounces)}${Math.abs(e.bounces)} Bounce`);
   if (e.bardTargets) parts.push(`${sign(e.bardTargets)}${Math.abs(e.bardTargets)} Target`);
   if (e.bardSpeedBonus) parts.push(`${sign(e.bardSpeedBonus)}${Math.abs(Math.round(e.bardSpeedBonus * 100))}% Tempo`);
+  if (e.magicPen) parts.push(`Ignores ${Math.round(e.magicPen * 100)}% Magic Resist`);
+  if (e.shatterCount) parts.push(`${sign(e.shatterCount)}${Math.abs(e.shatterCount)} Shards`);
+  if (e.shatterReach) parts.push(`${sign(e.shatterReach)}${Math.abs(e.shatterReach)} Shard Reach`);
+  if (e.iceStorm) parts.push(`Slows foes in range ${Math.round(e.iceStorm * 100)}%`);
   if (e.setAoe === 'cone') {
     parts.push(`⟶ Wind Slice${e.coneAngle ? ` (${e.coneAngle}° cone)` : ' (cone)'}`);
   }

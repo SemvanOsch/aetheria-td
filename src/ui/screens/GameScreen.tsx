@@ -20,7 +20,7 @@ import {
 import {
   masteryStartingGoldBonus,
   masteryUpgradeCost,
-  masteryUpgradeDeltas,
+  masteryUpgradeEffect,
   stageClearExp,
 } from '../../domain/mastery';
 import { SELECTABLE_TARGETING, targetingLabel, type TargetingType } from '../../domain/targeting';
@@ -28,7 +28,7 @@ import { BOARD_HEIGHT, BOARD_WIDTH, cellCenter } from '../../domain/grid';
 import { RARITIES } from '../../domain/rarity';
 import { GameEngine } from '../../engine/GameEngine';
 import { drawBoard, type RenderUiState } from '../../engine/renderer';
-import type { Outcome, Tower } from '../../engine/types';
+import type { Enemy, Outcome, Tower } from '../../engine/types';
 import { playCombatSound } from '../combatAudio';
 import { audioBus, holdAudioAwake } from '../audioBus';
 import { battleTrackFor, setMusicIntensity, setMusicTrack } from '../music';
@@ -42,7 +42,8 @@ import { ArmorIcon } from '../components/ArmorIcon';
 import { PauseMenu } from '../components/PauseMenu';
 import { BardSoundToggle } from '../components/BardSoundToggle';
 import { ARMOR_RARITIES, armorPieceName, armorStatLines, type ArmorRoll } from '../../domain/armor';
-import { getEnemy } from '../../domain/enemies';
+import { getEnemy, type EnemyDef } from '../../domain/enemies';
+import { EnemySprite } from '../components/EnemySprite';
 import { FieldNotePage, FieldNoteTab } from '../components/FieldNote';
 
 interface Props {
@@ -114,21 +115,28 @@ interface LanternPrompt {
   yPct: number;
 }
 
-/** Live info for the hovered-enemy tooltip, positioned as % of the board. */
-interface EnemyTooltip {
+/** One effect currently weakening an inspected foe. */
+interface EnemyDebuff {
+  icon: IconName;
   name: string;
+  detail: string;
+  /** Seconds left, for timed debuffs (shown as a countdown). */
+  timeLeft?: number;
+  color: string;
+}
+
+/** Live info for the click-to-inspect enemy panel, copied from the engine each frame. */
+interface EnemyInspect {
+  uid: number;
+  def: EnemyDef;
   health: number;
   maxHealth: number;
-  boss: boolean;
-  /** Physical damage reduction fraction (0-1), if any — shows a gray shield. */
-  physicalResist: number;
-  /** Magic damage reduction fraction (0-1), if any — shows a blue shield. */
-  magicResist: number;
   /** Shield points left and the foe's full shield (0 when unshielded). */
   shield: number;
   maxShield: number;
-  xPct: number;
-  yPct: number;
+  /** Damage reduction it is getting from a nearby ward aura right now (0-1). */
+  ward: number;
+  debuffs: EnemyDebuff[];
 }
 
 /**
@@ -141,7 +149,7 @@ function ResistShield({ kind, pct }: { kind: 'physical' | 'magic'; pct: number }
   const stroke = kind === 'physical' ? '#5c6577' : '#2f7fb0';
   return (
     <svg
-      className="et-resist"
+      className="ei-resist"
       width="12"
       height="14"
       viewBox="0 0 24 28"
@@ -178,7 +186,9 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   // Whether the selected champion's "Active Buffs" list is expanded.
   const [showBuffs, setShowBuffs] = useState(false);
   const [hud, setHud] = useState<Hud | null>(null);
-  const [tooltip, setTooltip] = useState<EnemyTooltip | null>(null);
+  // The foe clicked to inspect, and its live snapshot (refreshed each frame).
+  const [selectedEnemyUid, setSelectedEnemyUid] = useState<number | null>(null);
+  const [inspect, setInspect] = useState<EnemyInspect | null>(null);
   // The "light this lantern?" popup over a clicked dark lantern (board %).
   const [lanternPrompt, setLanternPrompt] = useState<LanternPrompt | null>(null);
   const lanternPromptRef = useRef<LanternPrompt | null>(null);
@@ -205,8 +215,6 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   // Bard tune mute preference, read when the loop drains sound cues.
   const bardMutedRef = useRef(false);
   bardMutedRef.current = game.state.prefs.bardSoundMuted;
-  // Uid of the enemy currently hovered (read each frame to refresh the tooltip).
-  const hoverEnemyRef = useRef<number | null>(null);
   // Bumped on place/sell to refresh deploy counts immediately (independent of
   // the rAF-driven HUD, e.g. while paused/hidden).
   const [, setDeployTick] = useState(0);
@@ -222,6 +230,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   });
   uiRef.current.selectedUnitId = selectedUnitId;
   uiRef.current.selectedTowerUid = selectedTowerUid;
+  uiRef.current.selectedEnemyUid = selectedEnemyUid;
 
   const settledRef = useRef(false);
   const firstClearRef = useRef(false);
@@ -346,28 +355,17 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
         }),
     });
 
-    // Recompute the hovered-enemy tooltip from the live enemy each frame so it
-    // follows the enemy and shows current HP. Passing null bails out of a
-    // re-render when nothing is hovered (same reference).
-    const updateTooltip = () => {
-      const uid = hoverEnemyRef.current;
-      const e = uid != null ? engine.enemies.find((x) => x.uid === uid && !x.dead) : undefined;
-      setTooltip(
-        e
-          ? {
-            name: e.def.name,
-            health: Math.max(0, Math.ceil(e.health)),
-            maxHealth: e.def.health,
-            boss: e.def.boss,
-            physicalResist: e.def.physicalResist ?? 0,
-            magicResist: e.def.magicResist ?? 0,
-            shield: e.shield,
-            maxShield: e.shieldMax,
-            xPct: (e.pos.x / BOARD_WIDTH) * 100,
-            yPct: (e.pos.y / BOARD_HEIGHT) * 100,
-          }
-          : null,
-      );
+    // Refresh the inspected foe's panel from the live enemy each frame (HP,
+    // shield, debuff timers). Once it dies the selection clears; passing null
+    // bails out of a re-render when nothing is inspected (same reference).
+    const updateInspect = () => {
+      const uid = uiRef.current.selectedEnemyUid;
+      const e = uid != null ? engine.enemies.find((x) => x.uid === uid && !x.dead && !x.dying) : undefined;
+      if (uid != null && !e) {
+        uiRef.current.selectedEnemyUid = null;
+        setSelectedEnemyUid(null);
+      }
+      setInspect(e ? inspectEnemy(e) : null);
     };
 
     // Seed HUD + first draw synchronously so the board and stats are correct
@@ -425,7 +423,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
       }
       drawBoard(ctx, engine, uiRef.current);
       setHud(snapshot(now));
-      updateTooltip();
+      updateInspect();
 
       // Endless boss-wave gems bank as soon as they're earned, so they're kept
       // however the run ends.
@@ -534,39 +532,45 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     };
   };
 
-  const pointerToCell = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const { x, y } = pointerToBoard(e);
-    return engineRef.current!.cellFromPoint(x, y);
-  };
-
   const handleMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const { x, y } = pointerToBoard(e);
     const engine = engineRef.current!;
     const cell = engine.cellFromPoint(x, y);
     uiRef.current.hoverCol = cell.col;
     uiRef.current.hoverRow = cell.row;
-    const enemy = engine.enemyAt(x, y);
-    hoverEnemyRef.current = enemy ? enemy.uid : null;
-    uiRef.current.hoverEnemyUid = hoverEnemyRef.current;
+    // A foe under the cursor is outlined (it can be clicked to inspect), unless
+    // a champion is being placed, where the click goes to placement.
+    const enemy = uiRef.current.selectedUnitId ? undefined : engine.enemyAt(x, y);
+    uiRef.current.hoverEnemyUid = enemy ? enemy.uid : null;
     // A dark lantern under the cursor can be clicked to light it.
     const lantern = engine.lanternAt(cell.col, cell.row);
-    e.currentTarget.style.cursor = lantern != null && !engine.isLanternLit(lantern) ? 'pointer' : '';
+    e.currentTarget.style.cursor = enemy || (lantern != null && !engine.isLanternLit(lantern)) ? 'pointer' : '';
   };
 
   const handleLeave = () => {
     uiRef.current.hoverCol = -1;
     uiRef.current.hoverRow = -1;
-    hoverEnemyRef.current = null;
     uiRef.current.hoverEnemyUid = null;
-    setTooltip(null);
   };
 
   const handleClick = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const engine = engineRef.current!;
     if (engine.outcome !== 'playing') return;
-    const { col, row } = pointerToCell(e);
+    const { x, y } = pointerToBoard(e);
+    const { col, row } = engine.cellFromPoint(x, y);
     // Any click on the board dismisses an open lantern popup.
     setLanternPrompt(null);
+
+    // Clicking a foe inspects it (foes move, so they win over the champion
+    // they pass); clicking anything else lets go of the inspected foe. While
+    // placing a champion the click is for placement.
+    const foe = selectedUnitId ? undefined : engine.enemyAt(x, y);
+    if (foe && !foe.dying) {
+      setSelectedEnemyUid(foe.uid);
+      setSelectedTowerUid(null);
+      return;
+    }
+    setSelectedEnemyUid(null);
 
     // Clicking an existing tower selects it.
     const existing = engine.towerAt(col, row);
@@ -627,6 +631,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
   const clearSelection = () => {
     setSelectedUnitId(null);
     setSelectedTowerUid(null);
+    setSelectedEnemyUid(null);
   };
 
   // Right-click on the board cancels the current placement.
@@ -653,7 +658,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
         return;
       }
       const ui = uiRef.current;
-      if (!pausedRef.current && (ui.selectedUnitId || ui.selectedTowerUid != null)) {
+      if (!pausedRef.current && (ui.selectedUnitId || ui.selectedTowerUid != null || ui.selectedEnemyUid != null)) {
         clearSelection();
         return;
       }
@@ -687,7 +692,10 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     const tower = engine.towers.find((t) => t.uid === uid);
     if (engine.activateAbility(uid)) {
       // Snap the camera's attention to the caster and refresh the panel.
-      if (tower) setSelectedTowerUid(uid);
+      if (tower) {
+        setSelectedTowerUid(uid);
+        setSelectedEnemyUid(null);
+      }
       refreshDeploys();
     } else if (tower && tower.stun > 0) {
       showFlash(`${tower.def.name} is stuck in sludge!`);
@@ -719,9 +727,10 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     refreshDeploys();
   };
 
-  const upgradeSelected = () => {
+  /** Buy the selected champion's next tier; `choice` picks an option at a fork. */
+  const upgradeSelected = (choice?: number) => {
     if (selectedTowerUid == null) return;
-    const ok = engineRef.current?.upgradeTower(selectedTowerUid);
+    const ok = engineRef.current?.upgradeTower(selectedTowerUid, choice);
     if (!ok) {
       showFlash('Not enough gold to upgrade.');
       return;
@@ -866,43 +875,6 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                 </div>
               </div>
             )}
-            {tooltip && hud?.outcome === 'playing' && (
-              <div
-                className={`enemy-tooltip ${tooltip.boss ? 'boss' : ''} ${tooltip.yPct < 22 ? 'below' : ''}`}
-                style={{ left: `${tooltip.xPct}%`, top: `${tooltip.yPct}%` }}
-              >
-                <div className="et-name">
-                  {tooltip.boss && <Icon name="skull" />}
-                  {tooltip.name}
-                  {tooltip.physicalResist > 0 && (
-                    <ResistShield
-                      kind="physical"
-                      pct={Math.round(tooltip.physicalResist * 100)}
-                    />
-                  )}
-                  {tooltip.magicResist > 0 && (
-                    <ResistShield kind="magic" pct={Math.round(tooltip.magicResist * 100)} />
-                  )}
-                </div>
-                <div className="et-hpbar">
-                  <span style={{ width: `${(tooltip.health / tooltip.maxHealth) * 100}%` }} />
-                </div>
-                <div className="et-hp">
-                  {tooltip.health} / {tooltip.maxHealth} HP
-                </div>
-                {tooltip.shield > 0 && (
-                  <div className="et-shield">
-                    <span className="et-pips">
-                      {/* A big shield (over 6) is just one pip beside the count. */}
-                      {Array.from({ length: tooltip.maxShield > 6 ? 1 : tooltip.maxShield }, (_, i) => (
-                        <i key={i} className={i < tooltip.shield ? 'on' : ''} />
-                      ))}
-                    </span>
-                    Shield {tooltip.shield} / {tooltip.maxShield} hits
-                  </div>
-                )}
-              </div>
-            )}
             <div className="board-overlay">
               {hud?.showBossBanner && hud.outcome === 'playing' && (
                 <div className="boss-banner">
@@ -1003,6 +975,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                       onClick={() => {
                         setSelectedUnitId((cur) => (cur === id ? null : id));
                         setSelectedTowerUid(null);
+                        setSelectedEnemyUid(null);
                       }}
                     >
                       <span className="ic"><UnitSprite unit={def} size={34} /></span>
@@ -1077,9 +1050,13 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
             </button>
           </div>
 
-          {!selectedTower && (
+          {!selectedTower && inspect && inspect.uid === selectedEnemyUid && hud?.outcome === 'playing' && (
+            <EnemyPanel foe={inspect} onClose={() => setSelectedEnemyUid(null)} />
+          )}
+
+          {!selectedTower && selectedEnemyUid == null && (
             <div className="panel panel-pad" style={{ textAlign: 'center', color: 'var(--text-faint)', fontSize: 13 }}>
-              Select a deployed champion to inspect and upgrade it.
+              Select a deployed champion to inspect and upgrade it, or click a foe to size it up.
             </div>
           )}
 
@@ -1235,20 +1212,38 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                     <div className="upgrade-box maxed"><Icon name="star" /> Fully upgraded (Lv {maxUpgradeTier(selectedTower.def)})</div>
                   );
                 }
-                const effLabel = upgradeEffectLabel({
-                  ...masteryUpgradeDeltas(
-                    selectedTower.def,
-                    selectedTower.upgradeTier + 1,
-                    effectiveMasteryUpgradesFor(game.state, selectedTower.def.id),
-                  ),
-                  setAoe: up.setAoe,
-                  coneAngle: selectedTower.def.coneAngle,
-                  // Bard upgrades aren't stat-scaled — pass their tune deltas straight through.
-                  bardTargets: up.bardTargets,
-                  bardSpeedBonus: up.bardSpeedBonus,
-                  // A tier may unlock an activated ability (Cyclone Slash) rather than stats.
-                  ability: up.ability?.name,
-                });
+                const purchased = effectiveMasteryUpgradesFor(game.state, selectedTower.def.id);
+                const nextTier = selectedTower.upgradeTier + 1;
+                // A fork: one buy button per option; buying one locks the others out.
+                if (up.choices && !isHero) {
+                  return (
+                    <div className="upgrade-fork">
+                      <div className="upgrade-fork-head">Choose one · Lv {nextTier}</div>
+                      <div className="upgrade-fork-opts">
+                        {up.choices.map((c, ci) => {
+                          const cost = masteryUpgradeCost(selectedTower.def, nextTier, purchased, ci);
+                          return (
+                            <button
+                              key={ci}
+                              className="upgrade-box"
+                              disabled={(hud?.currency ?? 0) < cost}
+                              onClick={() => upgradeSelected(ci)}
+                            >
+                              <div className="up-head">
+                                <span>{c.name}</span>
+                                <span className="up-cost"><Icon name="coin" />{cost}</span>
+                              </div>
+                              <div className="up-eff">
+                                {upgradeEffectLabel(masteryUpgradeEffect(selectedTower.def, nextTier, purchased, ci))}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                }
+                const effLabel = upgradeEffectLabel(masteryUpgradeEffect(selectedTower.def, nextTier, purchased));
                 // Hero champions never buy upgrades with gold — they pool wave-clear
                 // EXP and level up automatically once it reaches the next tier's cost.
                 if (isHero) {
@@ -1269,17 +1264,13 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                     </div>
                   );
                 }
-                const upCost = masteryUpgradeCost(
-                  selectedTower.def,
-                  selectedTower.upgradeTier + 1,
-                  effectiveMasteryUpgradesFor(game.state, selectedTower.def.id),
-                );
+                const upCost = masteryUpgradeCost(selectedTower.def, nextTier, purchased);
                 const affordable = (hud?.currency ?? 0) >= upCost;
                 return (
                   <button
                     className="upgrade-box"
                     disabled={!affordable}
-                    onClick={upgradeSelected}
+                    onClick={() => upgradeSelected()}
                   >
                     <div className="up-head">
                       <span>⬆ {up.name}</span>
@@ -1491,6 +1482,261 @@ function activeBuffsFor(t: Tower): ActiveBuff[] {
     });
   }
   return buffs;
+}
+
+/** A debuff countdown: tenths while short, whole seconds once long. */
+function secondsLeft(t: number): string {
+  return t < 10 ? `${t.toFixed(1)}s` : `${Math.ceil(t)}s`;
+}
+
+/**
+ * The inspected foe's live snapshot: health, shield and every effect slowing
+ * or softening it right now. Reads only enemy fields, so the panel (and each
+ * countdown) refreshes each frame. New debuffs slot in here as they're added.
+ */
+function inspectEnemy(e: Enemy): EnemyInspect {
+  const debuffs: EnemyDebuff[] = [];
+  // The Frost Witch's chill.
+  if (e.slowTimer > 0 && e.slowFactor < 1) {
+    debuffs.push({
+      icon: 'snowflake',
+      name: 'Chilled',
+      detail: `−${Math.round((1 - e.slowFactor) * 100)}% speed`,
+      timeLeft: e.slowTimer,
+      color: '#9fdcff',
+    });
+  }
+  // Standing in an Ice Storm (eases in and out at its edge, so shown live).
+  if (e.storm > 0.01 && e.stormSlow > 0) {
+    debuffs.push({
+      icon: 'snowflake',
+      name: 'Ice Storm',
+      detail: `−${Math.round(e.stormSlow * e.storm * 100)}% speed · while in the storm`,
+      color: '#c6ecff',
+    });
+  }
+  // Icebreak's Brittle: every hit lands harder.
+  if (e.brittle > 0 && e.brittleMult > 1) {
+    debuffs.push({
+      icon: 'crack',
+      name: 'Brittle',
+      detail: `+${Math.round((e.brittleMult - 1) * 100)}% damage taken`,
+      timeLeft: e.brittle,
+      color: '#bfe9ff',
+    });
+  }
+  // Mid-shove from a Gale Force gust or the Earthsplitter.
+  if (e.knockbackRemaining > 0.5) {
+    debuffs.push({
+      icon: 'back',
+      name: 'Knocked back',
+      detail: 'Sliding back along the path',
+      color: '#d8e4f0',
+    });
+  }
+  // A light-shy foe losing the scent in lantern light.
+  if (e.def.lightSlow != null && e.cower > 0.02) {
+    debuffs.push({
+      icon: 'lantern',
+      name: 'Cowering',
+      detail: `−${Math.round((1 - e.def.lightSlow) * e.cower * 100)}% speed · in lantern light`,
+      color: '#ffd977',
+    });
+  }
+  return {
+    uid: e.uid,
+    def: e.def,
+    health: Math.max(0, Math.ceil(e.health)),
+    maxHealth: e.def.health,
+    shield: e.shield,
+    maxShield: e.shieldMax,
+    ward: e.wardReduction,
+    debuffs,
+  };
+}
+
+/** One row of the inspected foe's defences. */
+interface EnemyDefence {
+  key: string;
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  title?: string;
+}
+
+/** Every defence the inspected foe has: resistances, dodge, shield, ward, regen. */
+function enemyDefences(foe: EnemyInspect): EnemyDefence[] {
+  const def = foe.def;
+  const out: EnemyDefence[] = [];
+  const pct = (f: number) => `${Math.round(f * 100)}%`;
+  if (def.physicalResist) {
+    out.push({
+      key: 'phys',
+      icon: <ResistShield kind="physical" pct={Math.round(def.physicalResist * 100)} />,
+      label: 'Physical resist',
+      value: pct(def.physicalResist),
+      title: 'Physical attacks deal this much less damage.',
+    });
+  }
+  if (def.magicResist) {
+    out.push({
+      key: 'magic',
+      icon: <ResistShield kind="magic" pct={Math.round(def.magicResist * 100)} />,
+      label: 'Magic resist',
+      value: pct(def.magicResist),
+      title: 'Magic attacks deal this much less damage.',
+    });
+  }
+  if (def.dodgeChance) {
+    out.push({
+      key: 'dodge',
+      icon: <Icon name="turn" />,
+      label: 'Dodge',
+      value: pct(def.dodgeChance),
+      title: 'Chance to slip a hit entirely.',
+    });
+  }
+  if (foe.maxShield > 0) {
+    out.push({
+      key: 'shield',
+      icon: (
+        <span className="ei-pips">
+          {/* A big shield (over 6) is just one pip beside the count. */}
+          {Array.from({ length: foe.maxShield > 6 ? 1 : foe.maxShield }, (_, i) => (
+            <i key={i} className={i < foe.shield || (foe.maxShield > 6 && foe.shield > 0) ? 'on' : ''} />
+          ))}
+        </span>
+      ),
+      label: 'Shield',
+      value: `${foe.shield} / ${foe.maxShield} hits`,
+      title: 'Each hit, however big, is blocked and costs one point.',
+    });
+  }
+  if (foe.ward > 0) {
+    out.push({
+      key: 'ward',
+      icon: <Icon name="shield" />,
+      label: 'Warded',
+      value: `−${pct(foe.ward)} damage`,
+      title: 'Shielded by a nearby protective aura.',
+    });
+  }
+  if (def.damageAura) {
+    out.push({
+      key: 'aura',
+      icon: <Icon name="sparkle" />,
+      label: 'Ward aura',
+      value: `−${pct(def.damageAura.reduction)} to allies`,
+      title: 'Softens damage to other foes near it.',
+    });
+  }
+  if (def.regen) {
+    out.push({
+      key: 'regen',
+      icon: <Icon name="heart" />,
+      label: 'Regeneration',
+      value: `+${+(def.regen * 100).toFixed(1)}% HP/s`,
+      title: 'Heals a share of its health every second.',
+    });
+  }
+  if (def.unkillable) {
+    out.push({
+      key: 'unkillable',
+      icon: <Icon name="lock" />,
+      label: 'Unyielding',
+      value: 'Never below 1 HP',
+    });
+  }
+  return out;
+}
+
+/**
+ * The click-to-inspect foe panel in the battle side panel: live health, its
+ * defences and the debuffs on it right now. Esc, the close button or a click
+ * anywhere else on the board lets it go; it closes itself when the foe falls.
+ */
+function EnemyPanel({ foe, onClose }: { foe: EnemyInspect; onClose: () => void }) {
+  const def = foe.def;
+  const pct = foe.maxHealth > 0 ? Math.max(0, Math.min(1, foe.health / foe.maxHealth)) : 0;
+  const defences = enemyDefences(foe);
+  return (
+    <div className={`panel panel-pad enemy-inspect${def.boss ? ' boss' : ''}`} aria-label={`${def.name} details`}>
+      <button type="button" className="ei-close" onClick={onClose} title="Close (Esc)" aria-label="Close">
+        <Icon name="close" />
+      </button>
+      <div className="ei-head">
+        <div
+          className="unit-portrait ei-portrait"
+          style={{ '--rarity': def.boss ? 'var(--red)' : def.visual.color } as CSSProperties}
+        >
+          <EnemySprite enemy={def} size={50} />
+        </div>
+        <div className="ei-title">
+          <span className="ei-name">{def.name}</span>
+          {def.boss && (
+            <span className="ei-boss-tag">
+              <Icon name="skull" /> Boss
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="ei-hp">
+        <div className="ei-hp-head">
+          <span>
+            <Icon name="heart" /> Health
+          </span>
+          <span className="ei-hp-val">
+            {foe.health} / {foe.maxHealth}
+          </span>
+        </div>
+        <div className="ei-hpbar">
+          <span
+            className={pct > 0.5 ? '' : pct > 0.25 ? 'mid' : 'low'}
+            style={{ width: `${pct * 100}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="ei-section-head">Defences</div>
+      {defences.length === 0 ? (
+        <div className="ei-empty">No resistances.</div>
+      ) : (
+        <div className="ei-defs">
+          {defences.map((d) => (
+            <div key={d.key} className="ei-def" title={d.title}>
+              <span className={`ei-def-ic ei-${d.key}`}>{d.icon}</span>
+              <span className="ei-def-label">{d.label}</span>
+              <b>{d.value}</b>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="ei-section-head">
+        Debuffs
+        <span className={`buffs-count ${foe.debuffs.length ? 'has ei-has' : ''}`}>{foe.debuffs.length}</span>
+      </div>
+      {foe.debuffs.length === 0 ? (
+        <div className="ei-empty">Nothing is holding it back.</div>
+      ) : (
+        <div className="buffs-list ei-debuffs">
+          {foe.debuffs.map((b) => (
+            <div key={b.name} className="buff-row ei-debuff" style={{ '--debuff': b.color } as CSSProperties}>
+              <span className="buff-ic">
+                <Icon name={b.icon} />
+              </span>
+              <span className="buff-info">
+                <b>{b.name}</b>
+                <span>{b.detail}</span>
+              </span>
+              {b.timeLeft != null && <span className="ei-time">{secondsLeft(b.timeLeft)}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
