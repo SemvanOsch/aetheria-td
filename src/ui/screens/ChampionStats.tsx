@@ -15,6 +15,7 @@ import {
   formatAttackSpeed,
   maxUpgradeTier,
   unitDps,
+  bleedDamageFactor,
   upgradePaths,
   type UnitDef,
 } from '../../domain/units';
@@ -93,10 +94,10 @@ function sortValue(u: UnitDef, key: SortKey): number | string {
     case 'name':
       return u.name;
     case 'dps':
-      return isCombat(u) ? unitDps(u) : -1;
+      return isCombat(u) ? unitDps(u) * bleedDamageFactor(u) : -1;
     case 'maxDps': {
       const m = maxStats(u);
-      return isCombat(u) ? m.damage * m.attackSpeed : -1;
+      return isCombat(u) ? m.damage * m.attackSpeed * bleedDamageFactor(u) : -1;
     }
     case 'upgradeCost':
       return upgradeCost(u);
@@ -213,7 +214,10 @@ function ChampionTable({ rows }: { rows: UnitDef[] }) {
                   <td className="num">{combat ? u.damage : '—'}</td>
                   <td className="num">{combat ? formatAttackSpeed(u.attackSpeed) : '—'}</td>
                   <td className="num">{u.range}</td>
-                  <td className="num">{combat ? dpsText(unitDps(u)) : '—'}</td>
+                  <td className="num">
+                    {combat ? dpsText(unitDps(u) * bleedDamageFactor(u)) : '—'}
+                    {combat && u.bleed && <div className="es-id">incl. bleed</div>}
+                  </td>
                   <td>
                     {[u.attackType && attackTypeLabel(u.attackType), u.damageType && damageTypeLabel(u.damageType)]
                       .filter(Boolean)
@@ -229,7 +233,7 @@ function ChampionTable({ rows }: { rows: UnitDef[] }) {
                   <td className="num">
                     {combat ? (
                       <>
-                        {dpsText(m.damage * m.attackSpeed)} DPS
+                        {dpsText(m.damage * m.attackSpeed * bleedDamageFactor(u))} DPS{u.bleed && ' incl. bleed'}
                         <div className="es-id">
                           {m.damage} · {formatAttackSpeed(m.attackSpeed)}/s · {m.range}
                         </div>
@@ -273,7 +277,7 @@ export function ChampionStats() {
       </nav>
       <ChampionTable key={tab} rows={shown} />
       <p className="es-faint">
-        Base catalog values — no mastery or armor. Every champion crits {Math.round(BASE_CRIT_CHANCE * 100)}% of the time for ×{CRIT_MULTIPLIER}. Max tier = all in-stage gold upgrades bought; a champion with an upgrade choice gets one row per path. Click a champion for its full breakdown.
+        Base catalog values — no mastery or armor. Every champion crits {Math.round(BASE_CRIT_CHANCE * 100)}% of the time for ×{CRIT_MULTIPLIER}. Max tier = all in-stage gold upgrades bought. A bleeding champion’s DPS includes the wounds its hits open; a champion with an upgrade choice gets one row per path. Click a champion for its full breakdown.
       </p>
     </div>
   );

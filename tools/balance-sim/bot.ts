@@ -8,9 +8,12 @@
  */
 import { GameEngine } from '../../src/engine/GameEngine';
 import { getLevel, lanePathCells } from '../../src/domain/levels';
-import { ALL_UNITS, getUnit, effectiveAoe, effectiveBounces, nextUpgrade, withUpgradeChoice, type UnitDef } from '../../src/domain/units';
+import { ALL_UNITS, getUnit, effectiveAoe, effectiveBounces, nextUpgrade, nextVialLevel, vialCycle, vialLevelCost, vialUpgradesOpen, bleedDamageFactor, withUpgradeChoice, type UnitDef, type VialMastery } from '../../src/domain/units';
+import { getEnemy } from '../../src/domain/enemies';
 import {
   MASTERY_TREES,
+  masteryRequires,
+  masteryVials,
   masteryStats,
   masteryBurst,
   masteryUpgradeCost,
@@ -47,10 +50,44 @@ export const HEROES: HeroVariant[] = [
   { key: 'Staff', id: 'player-magic', prof: 'magic', mastery: 'full', variant: 'arcane_staff' },
 ];
 
+/** Which node of the Farmer's exclusive pair a full-mastery Farmer runs. */
+const FARMER_CHOICE = 'better_soil';
+
+/**
+ * Mastery paths of a fighting champion: one per way of picking a member of
+ * each exclusive group, counting only picks the rest of the tree can reach (the
+ * Plague Doctor's three specialisations all sit behind Refined Reagents, so
+ * Self Inoculation is one path and Refined Reagents three). A path is labelled
+ * by the picks it keeps, so a single-group tree reads as before ("Deep
+ * Freeze"); a tree without groups has one unnamed path.
+ */
+function masteryPaths(unitId: string): { label?: string; nodes?: string[] }[] {
+  const tree = MASTERY_TREES[unitId] ?? [];
+  const groups = [...new Set(tree.map((n) => n.exclusiveGroup).filter((g): g is string => !!g))];
+  if (!groups.length) return [{}];
+  let combos: string[][] = [[]];
+  for (const g of groups) {
+    const members = tree.filter((n) => n.exclusiveGroup === g).map((n) => n.id);
+    combos = combos.flatMap((c) => members.map((m) => [...c, m]));
+  }
+  const seen = new Map<string, { label: string; nodes: string[] }>();
+  for (const picks of combos) {
+    const learned = new Set(fullTree(unitId, picks));
+    const kept = picks.filter((id) => learned.has(id));
+    const label = kept.map((id) => tree.find((n) => n.id === id)!.name).join(' + ');
+    if (!seen.has(label)) seen.set(label, { label, nodes: kept });
+  }
+  return [...seen.values()];
+}
+
+const FIGHTERS = ALL_UNITS.filter((u) => !u.generator && !u.bard);
+const monoKey = (id: string, label?: string) => (label ? `mono ${id} (${label})` : `mono ${id}`);
+
 /**
  * Teams fielded beside the hero. Mastery level follows the hero's. Every
  * fighting champion in the catalog also gets an "only X" team of its own, so a
- * new unit is tested the moment it is added to `UNITS`.
+ * new unit is tested the moment it is added to `UNITS`; one with rival mastery
+ * paths gets an "only X" team per path.
  */
 export const TEAMS: Record<string, string[]> = {
   'hero only': [],
@@ -58,11 +95,13 @@ export const TEAMS: Record<string, string[]> = {
   commons: ['farmer', 'archer', 'crossbow', 'swordsman', 'spearman'],
   'commons no farmer': ['archer', 'crossbow', 'swordsman', 'spearman'],
   rares: ['wizard', 'elf', 'archer', 'crossbow', 'bard'],
-  ...Object.fromEntries(ALL_UNITS.filter((u) => !u.generator && !u.bard).map((u) => [`mono ${u.id}`, [u.id]])),
+  ...Object.fromEntries(FIGHTERS.flatMap((u) => masteryPaths(u.id).map((p) => [monoKey(u.id, p.label), [u.id]]))),
 };
 
-/** Which node of the Farmer's exclusive pair a full-mastery Farmer runs. */
-const FARMER_CHOICE = 'better_soil';
+/** The exclusive nodes each path team's champion runs at full mastery. */
+const TEAM_PATHS: Record<string, Record<string, string[]>> = Object.fromEntries(
+  FIGHTERS.flatMap((u) => masteryPaths(u.id).filter((p) => p.nodes).map((p) => [monoKey(u.id, p.label), { [u.id]: p.nodes! }])),
+);
 
 export interface RunResult {
   level: number;
@@ -83,6 +122,8 @@ export interface RunResult {
   goldByUnit: Record<string, number>;
   countByUnit: Record<string, number>;
   tiers: Record<string, number[]>;
+  /** Vial levels bought per placed vial thrower (index-matched to its vials). */
+  vialLevels: Record<string, number[][]>;
   /** Base HP lost in each wave. */
   leakByWave: number[];
   goldLeft: number;
@@ -93,17 +134,31 @@ export interface RunResult {
   minGold?: number;
 }
 
-/** Every node of a champion's tree, keeping one member of each exclusive group. */
-function fullTree(unitId: string, variant?: string): string[] {
+/**
+ * Every node of a champion's tree, keeping one member of each exclusive group:
+ * the `variant` node(s) where given, else each group's first member.
+ */
+function fullTree(unitId: string, variant?: string | readonly string[]): string[] {
   const tree = MASTERY_TREES[unitId] ?? [];
   const chosen: Record<string, string> = {};
   for (const n of tree) if (n.exclusiveGroup && !chosen[n.exclusiveGroup]) chosen[n.exclusiveGroup] = n.id;
-  if (variant) {
-    const n = tree.find((x) => x.id === variant);
-    if (n?.exclusiveGroup) chosen[n.exclusiveGroup] = variant;
+  for (const id of typeof variant === 'string' ? [variant] : variant ?? []) {
+    const n = tree.find((x) => x.id === id);
+    if (n?.exclusiveGroup) chosen[n.exclusiveGroup] = id;
   }
   if (unitId === 'farmer') chosen.farming = FARMER_CHOICE;
-  return tree.filter((n) => !n.exclusiveGroup || chosen[n.exclusiveGroup] === n.id).map((n) => n.id);
+  // Keep a node only if it and its whole `requires` chain survive the picks, so
+  // the nodes behind the unpicked branch are left out too.
+  const byId = new Map(tree.map((n) => [n.id, n]));
+  // With several prerequisites, any one surviving keeps it.
+  const kept = (id: string | undefined): boolean => {
+    const n = id ? byId.get(id) : undefined;
+    if (!n) return true;
+    if (n.exclusiveGroup && chosen[n.exclusiveGroup] !== n.id) return false;
+    const req = masteryRequires(n);
+    return req.length === 0 || req.some((r) => kept(r));
+  };
+  return tree.filter((n) => kept(n.id)).map((n) => n.id);
 }
 
 function mulberry32(a: number): () => number {
@@ -119,15 +174,48 @@ function mulberry32(a: number): () => number {
 /** Rough multiplier for how many foes an attack shape tends to hit. */
 const AOE_FACTOR: Record<string, number> = { single: 1, line: 1.8, cone: 2.2, circle: 2 };
 
-/** The bot's damage-per-second estimate for a champion at an in-stage tier. */
-function estDps(def: UnitDef, tier: number, purchased: string[]): { dps: number; range: number } {
+/**
+ * Damage a hit is worth counting what it leaves behind, as a multiple of the
+ * damage stat: the Bandit's bleed, a poison stack (a share of a `foeHp` foe's
+ * health) and, for a vial thrower, its cycle's average at `vialLevels`.
+ */
+function hitFactor(def: UnitDef, damage: number, foeHp: number, vialLevels: readonly number[] = [], vm?: VialMastery): number {
+  const poisonFactor = (share = 0) => (share * foeHp) / Math.max(1, damage);
+  if (def.vials?.length) {
+    const cycle = vialCycle(def, vialLevels, vm);
+    const sum = cycle.reduce((s, { effect: e }) => s + e.damageMult + (e.bleed ?? 0) + poisonFactor(e.poison), 0);
+    return sum / cycle.length;
+  }
+  return bleedDamageFactor(def) + poisonFactor(def.poison?.maxHealthFraction);
+}
+
+/** The bot's damage-per-second estimate for a champion at an in-stage tier (and vial levels). */
+function estDps(def: UnitDef, tier: number, purchased: string[], foeHp: number, vialLevels: readonly number[] = []): { dps: number; range: number } {
   const s = masteryStats(def, tier, purchased);
   const burst = masteryBurst(def, purchased) || 1;
   const aoe = AOE_FACTOR[effectiveAoe(def, tier)] ?? 1;
   const bounces = effectiveBounces(def, tier);
   const cc = critChanceFor(def, purchased);
   const cm = critMultiplierFor(def, purchased);
-  return { dps: s.damage * s.attackSpeed * burst * aoe * (1 + 0.4 * bounces) * (1 + cc * (cm - 1)), range: s.range };
+  const hit = hitFactor(def, s.damage, foeHp, vialLevels, masteryVials(def, purchased));
+  return { dps: s.damage * s.attackSpeed * burst * aoe * (1 + 0.4 * bounces) * (1 + cc * (cm - 1)) * hit, range: s.range };
+}
+
+/** Average max health of a stage's regular foes (bosses left out), weighted by how many come. */
+function typicalFoeHp(level: NonNullable<ReturnType<typeof getLevel>>): number {
+  let hp = 0;
+  let n = 0;
+  for (const lane of level.lanes) {
+    for (const wave of lane.waves) {
+      for (const g of wave.groups) {
+        const def = getEnemy(g.enemyId);
+        if (def.boss) continue;
+        hp += def.health * (g.healthMult ?? 1) * g.count;
+        n += g.count;
+      }
+    }
+  }
+  return n ? hp / n : 100;
 }
 
 type Cell = { col: number; row: number };
@@ -141,7 +229,7 @@ export function runOne(levelId: number, hero: HeroVariant, teamKey: string, seed
   const upgrades: Record<string, string[]> = {};
   if (hero.mastery === 'full') {
     upgrades[hero.id] = fullTree(hero.id, hero.variant);
-    for (const u of teamUnits) upgrades[u] = fullTree(u);
+    for (const u of teamUnits) upgrades[u] = fullTree(u, TEAM_PATHS[teamKey]?.[u]);
   }
   const form = masteryWeaponForm(hero.id, upgrades[hero.id] ?? []);
   syncPlayerChampions({ name: 'Sim', sprite: defaultPlayerSprite(), proficiency: hero.prof }, [hero.id], [], { [hero.id]: form });
@@ -151,6 +239,8 @@ export function runOne(levelId: number, hero: HeroVariant, teamKey: string, seed
   const engine = new GameEngine(level, startGold, upgrades, mulberry32(seed * 7919 + levelId));
   engine.armorUnlocked = false;
   const purchased = (id: string) => upgrades[id] ?? [];
+  // What a poison stack is weighed against: this stage's typical foe.
+  const foeHp = typicalFoeHp(level);
 
   // Path samples on every lane (hidden ones included) score placements; the bot
   // never builds on any lane's cells, so a lane revealed later can't strand a tower.
@@ -210,16 +300,17 @@ export function runOne(levelId: number, hero: HeroVariant, teamKey: string, seed
   const avgCombatDps = () => {
     const ts = combatTowers();
     if (!ts.length) return 0;
-    return ts.reduce((a, t) => a + (estDps(t.def, t.upgradeTier, purchased(t.def.id)).dps * coverage(t.col, t.row, t.range)) / 100, 0) / ts.length;
+    return ts.reduce((a, t) => a + (estDps(t.def, t.upgradeTier, purchased(t.def.id), foeHp, t.vialLevels).dps * coverage(t.col, t.row, t.range)) / 100, 0) / ts.length;
   };
 
-  // Credit damage to the tower that dealt it.
+  // Credit damage to the tower that dealt it. The rest of the arguments (a
+  // damage-over-time tick, a vial's effect) pass straight through.
   const dmgByUid: Record<number, number> = {};
-  const eng = engine as unknown as { damageEnemy: (e: { health: number }, amount: number, source?: { uid: number }) => boolean };
+  const eng = engine as unknown as { damageEnemy: (e: { health: number }, amount: number, source?: { uid: number }, ...rest: unknown[]) => boolean };
   const damageEnemy = eng.damageEnemy.bind(engine);
-  eng.damageEnemy = (enemy, amount, source) => {
+  eng.damageEnemy = (enemy, amount, source, ...rest) => {
     const before = Math.max(0, enemy.health);
-    const landed = damageEnemy(enemy, amount, source);
+    const landed = damageEnemy(enemy, amount, source, ...rest);
     const dealt = before - Math.max(0, enemy.health);
     if (source && dealt > 0) dmgByUid[source.uid] = (dmgByUid[source.uid] ?? 0) + dealt;
     return landed;
@@ -244,7 +335,7 @@ export function runOne(levelId: number, hero: HeroVariant, teamKey: string, seed
           if (c) acts.push({ cost: def.cost, value: (0.12 * 2 * avgCombatDps()) / def.cost, run: () => engine.placeUnit(id, c.col, c.row) });
           continue;
         }
-        const e = estDps(def, 0, purchased(id));
+        const e = estDps(def, 0, purchased(id), foeHp);
         const { cell, cov } = bestCell(e.range);
         if (!cell) continue;
         // Heroes are free; repeats of one unit are worth a little less each, so teams stay mixed.
@@ -252,6 +343,20 @@ export function runOne(levelId: number, hero: HeroVariant, teamKey: string, seed
         acts.push({ cost: def.cost, value, run: () => engine.placeUnit(id, cell.col, cell.row) });
       }
       for (const t of engine.towers) {
+        // A vial thrower's vial levels, once its tiers are bought: worth the
+        // damage they add over the cycle (poison counted against a typical foe).
+        if (vialUpgradesOpen(t.def, t.upgradeTier)) {
+          t.def.vials!.forEach((v, vi) => {
+            const next = nextVialLevel(v, t.vialLevels[vi] ?? 0);
+            if (!next) return;
+            const raised = t.vialLevels.map((l, i) => (i === vi ? l + 1 : l));
+            const a = estDps(t.def, t.upgradeTier, purchased(t.def.id), foeHp, t.vialLevels).dps;
+            const b = estDps(t.def, t.upgradeTier, purchased(t.def.id), foeHp, raised).dps;
+            const uid = t.uid;
+            const cost = vialLevelCost(next, t.vialMastery.discount);
+            acts.push({ cost, value: ((b - a) * coverage(t.col, t.row, t.range)) / 100 / Math.max(1, cost), run: () => engine.upgradeVial(uid, vi) });
+          });
+        }
         const up = t.def.id.startsWith('player-') ? null : nextUpgrade(t.def, t.upgradeTier);
         if (!up) continue;
         // A fork is weighed as one buy per option, each on the def with it chosen.
@@ -266,8 +371,8 @@ export function runOne(levelId: number, hero: HeroVariant, teamKey: string, seed
           } else if (t.def.bard) {
             value = (0.08 * 2 * avgCombatDps()) / cost;
           } else {
-            const a = estDps(t.def, t.upgradeTier, purchased(t.def.id));
-            const b = estDps(next, t.upgradeTier + 1, purchased(t.def.id));
+            const a = estDps(t.def, t.upgradeTier, purchased(t.def.id), foeHp, t.vialLevels);
+            const b = estDps(next, t.upgradeTier + 1, purchased(t.def.id), foeHp, t.vialLevels);
             const scale = t.range / Math.max(1, a.range);
             value = ((b.dps * coverage(t.col, t.row, b.range * scale)) / 100 - (a.dps * coverage(t.col, t.row, a.range * scale)) / 100) / cost;
           }
@@ -283,7 +388,7 @@ export function runOne(levelId: number, hero: HeroVariant, teamKey: string, seed
         let gain = 0;
         for (const t of combatTowers()) {
           if (t.mistMult >= 1 || Math.hypot(t.pos.x - at.x, t.pos.y - at.y) > light.radius) continue;
-          const e = estDps(t.def, t.upgradeTier, purchased(t.def.id));
+          const e = estDps(t.def, t.upgradeTier, purchased(t.def.id), foeHp, t.vialLevels);
           gain += (e.dps * (coverage(t.col, t.row, t.range / t.mistMult) - coverage(t.col, t.row, t.range))) / 100;
         }
         if (gain > 0) acts.push({ cost, value: gain / cost, run: () => engine.lightLantern(i) });
@@ -338,12 +443,14 @@ export function runOne(levelId: number, hero: HeroVariant, teamKey: string, seed
   const goldByUnit: Record<string, number> = {};
   const countByUnit: Record<string, number> = {};
   const tiers: Record<string, number[]> = {};
+  const vialLevels: Record<string, number[][]> = {};
   for (const t of engine.towers) {
     const k = t.def.id;
     dmgByUnit[k] = (dmgByUnit[k] ?? 0) + (dmgByUid[t.uid] ?? 0);
     goldByUnit[k] = (goldByUnit[k] ?? 0) + t.invested;
     countByUnit[k] = (countByUnit[k] ?? 0) + 1;
     (tiers[k] ??= []).push(t.upgradeTier);
+    if (t.vialLevels.length) (vialLevels[k] ??= []).push([...t.vialLevels]);
   }
   return {
     level: levelId,
@@ -363,6 +470,7 @@ export function runOne(levelId: number, hero: HeroVariant, teamKey: string, seed
     goldByUnit,
     countByUnit,
     tiers,
+    vialLevels,
     leakByWave,
     goldLeft: Math.round(engine.currency),
     bossKilled: (engine.enemyKills[level.bossId] ?? 0) > 0,

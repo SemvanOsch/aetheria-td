@@ -6,7 +6,7 @@
  */
 
 import type { EnemyDef } from '../domain/enemies';
-import type { AbilityDef, AoeType, ShatterDef, UnitDef } from '../domain/units';
+import type { AbilityDef, AoeType, BleedDef, PoisonDef, ShatterDef, UnitDef, VialEffect, VialMastery } from '../domain/units';
 import type { Vec2 } from '../domain/grid';
 import type { TargetingType } from '../domain/targeting';
 
@@ -45,6 +45,26 @@ export interface Enemy {
    */
   brittle: number;
   brittleMult: number;
+  /**
+   * Open bleeding wounds (the Bandit): each deals `dps` damage per second for
+   * `left` more seconds, credited to `source`. Ticked every `BLEED_TICK` in
+   * `updateBleed`; the foe counts as bleeding while any is open.
+   */
+  bleeds: { dps: number; left: number; source: Tower }[];
+  /** Seconds until this foe's next bleed tick. */
+  bleedTick: number;
+  /** Bleed damage run up since the last tick, paid out on the next one. */
+  bleedDue: number;
+  /**
+   * Poison stacks (`UnitDef.poison`): each deals `dps` (a share of this foe's
+   * max health) for `left` more seconds, credited to `source`. Ticked every
+   * `POISON_TICK` in `updatePoison`; the foe counts as poisoned while any is open.
+   */
+  poisons: { dps: number; left: number; source: Tower }[];
+  /** Seconds until this foe's next poison tick. */
+  poisonTick: number;
+  /** Poison damage run up since the last tick, paid out on the next one. */
+  poisonDue: number;
   /**
    * A light-shy foe (`EnemyDef.lightSlow`) losing the scent in lantern light,
    * 0→1: eases up while it is in the light and back down out of it. Blends its
@@ -179,6 +199,7 @@ export function attackAnimTime(shape: string): number {
   if (shape === 'player-magic') return 0.35;
   if (shape === 'player-staff') return 0.42;
   if (shape === 'frostWitch') return 0.3;
+  if (shape === 'plagueDoctor') return 0.32;
   return 0.18;
 }
 
@@ -193,6 +214,22 @@ export const LANTERN_GLASS = { x: 13, y: -32 } as const;
 // engine lands the blow `*_HIT_DELAY` into it — matched to the sprite's cut
 // window (`drawDualShortSwords` / `drawClaymore`), so retime both together.
 /** The Blade's Cross Slash: coil, one crossing X cut, hold, recover. */
+/** Seconds between a bleeding foe's damage ticks (see `Enemy.bleeds`). */
+export const BLEED_TICK = 0.5;
+/** Seconds before each throw the Plague Doctor cocks his vial back (the sprite's wind-up). */
+export const VIAL_WINDUP_TIME = 0.32;
+/**
+ * Where the Plague Doctor's vial leaves his hand, relative to his cell's centre
+ * (facing right): the sprite's release pose (`plagueVialHand`) at board scale.
+ */
+export const VIAL_MUZZLE = { x: 11, y: -9 } as const;
+/** The Bandit's blood red: his slash, his hit spray and the drips on a bleeding foe. */
+export const BLOOD_RED = '#b3202c';
+/** Seconds between a poisoned foe's damage ticks (see `Enemy.poisons`). */
+export const POISON_TICK = 0.5;
+/** Venom green: the bubbles on a poisoned foe. */
+export const POISON_GREEN = '#7cc63a';
+
 export const CROSS_SLASH_ANIM_TIME = 0.5;
 export const CROSS_SLASH_HIT_DELAY = 0.19;
 /**
@@ -457,6 +494,21 @@ export interface Tower {
   brittle: { mult: number; duration: number } | null;
   /** Shatter Storm (`masteryShardSplit`): damage share of the splinters a killing shard bursts into; 0 for none. */
   shardSplit: number;
+  /** The wound its hits open (`UnitDef.bleed`); null if they don't bleed. */
+  bleed: BleedDef | null;
+  /** The poison its hits lay (`UnitDef.poison`); null if they don't poison. */
+  poison: PoisonDef | null;
+  /** Vial levels bought, index-matched to `def.vials` (empty for a champion without vials). */
+  vialLevels: number[];
+  /**
+   * Which throw of its cycle (`vialCycle`) its next attack makes: an index into
+   * `def.vials`, or one past them for The Grand Formula. They cycle in order.
+   */
+  vialNext: number;
+  /** Its vial mastery (`masteryVials`): potency, The Grand Formula, level discount. */
+  vialMastery: VialMastery;
+  /** Blood in the Water (`masteryCritChanceVsBleeding`): extra crit chance against a bleeding foe. */
+  critChanceVsBleeding: number;
   /** Ice Storm slow over this tower's range (`effectiveIceStorm`); 0 for none. */
   iceStorm: number;
   /** Attack-speed multiplier a buffed ally receives from this Bard. */
@@ -586,6 +638,22 @@ export interface Tower {
    */
   stun: number;
   stunMax: number;
+  /** Immune to every champion debuff (`masteryDisableImmune`, Self Inoculation). */
+  disableImmune: boolean;
+  /** Resist chance it grants allies within its range (`masteryDisableResistAura`, Warding Fumes); 0 = none. */
+  resistAura: number;
+  /**
+   * Chance it resists a champion debuff thanks to an ally's aura (Warding
+   * Fumes), recomputed with the range auras; 0 = none. The renderer wreathes
+   * such a champion in a faint wisp of fumes.
+   */
+  resistChance: number;
+  /** Haste a resisted debuff grants it (`masteryResistHaste`, Toxic Resilience); null = none. */
+  resistHaste: { mult: number; duration: number } | null;
+  /** Attack-speed multiplier of the haste running now (1 = none); folded into the firing cadence. */
+  resistHasteMult: number;
+  /** Seconds of that haste left (0 = none). */
+  resistHasteTimer: number;
   /**
    * Player-activated ability this tower has unlocked (the Blade's Cyclone Slash),
    * or null. Set from the unit's upgrade tiers (see `effectiveAbility`) on deploy
@@ -832,21 +900,28 @@ export interface Projectile {
      */
     split?: { count: number; mult: number; reach: number };
   };
+  /**
+   * A thrown vial (the Plague Doctor): what it does to the foe it shatters on,
+   * replacing the thrower's own bleed/poison. Undefined for every other shot.
+   */
+  vial?: VialEffect;
   /** Chill laid on every foe this shot strikes: speed × (1 − `slow`) for `duration` s. */
   chill?: { slow: number; duration: number };
 }
 
 /** How a projectile is drawn in flight. */
-export type ProjectileStyle = 'arrow' | 'wind' | 'magic' | 'orb' | 'pierce' | 'mana' | 'ice' | 'shard';
+export type ProjectileStyle = 'arrow' | 'wind' | 'magic' | 'orb' | 'pierce' | 'mana' | 'ice' | 'shard' | 'vial';
 
 /** How long a chilled foe takes to thaw visually after its slow wears off (s). */
 export const CHILL_FADE = 0.35;
+/** How long a bleed or poison takes to fade visually as its last wound/stack runs out (s). */
+export const DOT_FADE = 0.4;
 
 /**
  * Elemental family of an attack, for VFX only (sparks vs. gusts vs. arcane
  * motes). Derived from the attacking champion; never read by combat.
  */
-export type FxElement = 'steel' | 'wind' | 'arcane' | 'fire' | 'frost' | 'holy' | 'dark';
+export type FxElement = 'steel' | 'wind' | 'arcane' | 'fire' | 'frost' | 'holy' | 'dark' | 'blood';
 
 /**
  * Cosmetic battle events the engine emits for the renderer's VFX layer, the
@@ -902,9 +977,11 @@ export type FxEvent =
       /**
        * Which ability / flourish: drives the bespoke flash + light. `leap` /
        * `land` are the Greater Orb caster's take-off and touchdown (dust at the
-       * feet); `greaterOrb` is its orb leaving the raised hands.
+       * feet); `greaterOrb` is its orb leaving the raised hands; `resist` is a
+       * champion shrugging off a debuff and growing hasty (Toxic Resilience).
        */
       ability:
+        | 'resist'
         | 'cyclone'
         | 'quickdraw'
         | 'piercingShot'
@@ -955,6 +1032,8 @@ export type FxEvent =
       length: number;
     }
   | { kind: 'dodge'; x: number; y: number }
+  /** A Plague Doctor's vial shattering at `x`,`y`: glass and a splash of `color`. */
+  | { kind: 'vialSplash'; x: number; y: number; color: string; crit: boolean }
   /**
    * The Frost Witch's ice missile shattering at `x`,`y`: a burst of ice chips
    * and frost; `angles` are the directions its shards fly off in (radians).

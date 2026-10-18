@@ -263,9 +263,11 @@ function exportEnemies(text: string, shipped: ContentProject, project: ContentPr
 
 const UNIT_ORDER = [
   'id', 'name', 'description', 'rarity', 'damage', 'attackSpeed', 'range', 'targeting', 'aoe', 'aoeWidth', 'attackType', 'damageType',
-  'bounces', 'coneAngle', 'burstRadius', 'burst', 'shatter', 'special', 'cost', 'deployLimit', 'maxMana', 'manaRegen', 'generator',
+  'bounces', 'coneAngle', 'burstRadius', 'burst', 'shatter', 'special', 'bleed', 'poison', 'vials', 'cost', 'deployLimit', 'maxMana', 'manaRegen', 'generator',
   'bard', 'upgrades', 'visual',
 ];
+const VIAL_ORDER = ['name', 'description', 'color', 'damageMult', 'poison', 'bleed', 'ignoreResist', 'levels'];
+const VIAL_LEVEL_ORDER = ['cost', 'damageMult', 'poison', 'bleed'];
 const UPGRADE_ORDER = [
   'name', 'description', 'cost', 'damage', 'attackSpeed', 'range', 'generate', 'bounces', 'setAoe', 'bardTargets', 'bardSpeedBonus',
   'magicPen', 'shatterCount', 'shatterReach', 'iceStorm', 'choices', 'ability',
@@ -277,7 +279,8 @@ function normUnit(u: ContentProject['units'][number]) {
     if (o.choices) o.choices = o.choices.map(up);
     return o;
   };
-  return ordered({ ...u, upgrades: u.upgrades.map(up) }, UNIT_ORDER);
+  const vials = u.vials?.map((v) => ordered({ ...v, levels: v.levels.map((l) => ordered(l, VIAL_LEVEL_ORDER)) }, VIAL_ORDER));
+  return ordered({ ...u, upgrades: u.upgrades.map(up), vials }, UNIT_ORDER);
 }
 
 function exportUnits(text: string, shipped: ContentProject, project: ContentProject) {
@@ -288,7 +291,15 @@ function exportUnits(text: string, shipped: ContentProject, project: ContentProj
       ordered: (path) => path.length === 1,
       multiline: (path) => {
         const last = path[path.length - 1];
-        return path.length === 2 || last === 'upgrades' || last === 'choices' || (typeof last === 'number' && (path[path.length - 2] === 'upgrades' || path[path.length - 2] === 'choices'));
+        const parent = path[path.length - 2];
+        return (
+          path.length === 2 ||
+          last === 'upgrades' ||
+          last === 'choices' ||
+          last === 'vials' ||
+          last === 'levels' ||
+          (typeof last === 'number' && (parent === 'upgrades' || parent === 'choices' || parent === 'vials'))
+        );
       },
     };
     const lit = literalAt(src, 'UNITS', 'units.ts', '{');

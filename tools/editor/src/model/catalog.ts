@@ -42,6 +42,8 @@ const SHAPE_INFO: { shape: UnitVisual['shape']; label: string; attack: string }[
   { shape: 'farmer', label: 'Farmer', attack: 'Instant melee slash (usually a generator)' },
   { shape: 'bard', label: 'Bard', attack: 'Instant melee slash (usually a support)' },
   { shape: 'frostWitch', label: 'Frost Witch', attack: 'Instant hit, or an ice missile with Shatter; frozen aura' },
+  { shape: 'bandit', label: 'Bandit', attack: 'Instant melee knife stab (pairs with Bleed)' },
+  { shape: 'plagueDoctor', label: 'Plague Doctor', attack: 'Thrown homing vial (pairs with a vial cycle)' },
 ];
 
 /**
@@ -252,6 +254,26 @@ export const BARD_FIELDS: NumField[] = [
   { key: 'duration', label: 'Buff duration', ...secs, above: 0, max: 600, help: 'Seconds the buff lasts.' },
 ];
 
+export const BLEED_FIELDS: NumField[] = [
+  { key: 'damageMult', label: 'Bleed damage ×', kind: 'multiplier', above: 0, max: 10, step: 0.05, help: 'Each wound deals this share of the hit again, over 3 seconds.' },
+];
+
+export const POISON_FIELDS: NumField[] = [
+  { key: 'maxHealthFraction', label: 'Poison (max HP)', kind: 'fraction', above: 0, max: 1, step: 0.005, help: 'Each hit adds a stack dealing this share of the foe\'s max health over 5 seconds (0.01 = 1%); bosses take a fifth of it.' },
+];
+
+/**
+ * A vial's effect (the Plague Doctor's cycle): on the vial as its base, and on
+ * each of its levels as the value that level sets (blank = unchanged).
+ */
+export const VIAL_EFFECT_FIELDS: NumField[] = [
+  { key: 'damageMult', label: 'Impact damage ×', kind: 'multiplier', min: 0, max: 50, step: 0.25, help: 'Impact damage as a multiple of the champion\'s damage (1 = a plain hit, 0 = none).' },
+  { key: 'poison', label: 'Poison (max HP)', kind: 'fraction', min: 0, max: 1, step: 0.005, help: 'A poison stack dealing this share of the foe\'s max health over 5 seconds (0.03 = 3%); bosses take a fifth of it.' },
+  { key: 'bleed', label: 'Bleed ×', kind: 'multiplier', min: 0, max: 50, step: 0.25, help: 'A bleed wound dealing this share of the champion\'s damage over 3 seconds (1 = 100%).' },
+];
+export const VIAL_KEYS = new Set(['name', 'description', 'color', 'damageMult', 'poison', 'bleed', 'ignoreResist', 'levels']);
+export const VIAL_LEVEL_KEYS = new Set(['cost', 'damageMult', 'poison', 'bleed']);
+
 export const SHATTER_FIELDS: NumField[] = [
   { key: 'count', label: 'Shards', kind: 'int', min: 1, max: 40, help: 'Shards the missile bursts into on impact.' },
   { key: 'damageMult', label: 'Shard damage ×', kind: 'multiplier', above: 0, max: 10, step: 0.05, help: 'Each shard\'s damage as a share of the missile\'s.' },
@@ -280,7 +302,7 @@ export const UPGRADE_FIELDS: NumField[] = [
 
 export const UNIT_KEYS = new Set([
   'id', 'name', 'description', 'rarity', 'damage', 'attackSpeed', 'range', 'targeting', 'aoe', 'attackType', 'damageType',
-  'aoeWidth', 'bounces', 'coneAngle', 'burstRadius', 'burst', 'shatter', 'cost', 'deployLimit', 'maxMana', 'manaRegen',
+  'aoeWidth', 'bounces', 'coneAngle', 'burstRadius', 'burst', 'shatter', 'bleed', 'poison', 'vials', 'cost', 'deployLimit', 'maxMana', 'manaRegen',
   'upgrades', 'generator', 'bard', 'visual', 'special',
 ]);
 export const UPGRADE_KEYS = new Set([
@@ -307,10 +329,10 @@ export interface EffectField extends Omit<NumField, 'kind'> {
   kind: FieldKind | 'bool' | 'form' | 'discount';
   group: EffectGroup;
   /** Which champions it does anything for (else a compatibility warning). */
-  appliesTo?: 'generator' | 'bard' | 'bounce' | 'burst' | 'circle' | 'hero' | 'blade' | 'combat' | 'chill' | 'shatter';
+  appliesTo?: 'generator' | 'bard' | 'bounce' | 'burst' | 'circle' | 'hero' | 'blade' | 'combat' | 'chill' | 'shatter' | 'bleed' | 'vials';
 }
 
-export type EffectGroup = 'stats' | 'crit' | 'economy' | 'aura' | 'pattern' | 'bard' | 'hero';
+export type EffectGroup = 'stats' | 'crit' | 'economy' | 'aura' | 'pattern' | 'resist' | 'bard' | 'hero';
 
 export const EFFECT_GROUPS: { id: EffectGroup; label: string; help: string }[] = [
   { id: 'stats', label: 'Core stats', help: 'Multipliers on damage, attack speed and range (1.1 = +10%). Several nodes multiply together.' },
@@ -318,6 +340,7 @@ export const EFFECT_GROUPS: { id: EffectGroup; label: string; help: string }[] =
   { id: 'economy', label: 'Economy', help: 'Gold yields, starting gold and in-stage upgrade discounts.' },
   { id: 'aura', label: 'Board auras', help: 'Position-based effects recomputed as champions are placed and sold.' },
   { id: 'pattern', label: 'Attack patterns', help: 'Special attacks: throws, preloaded shots, knockback and bounce tuning.' },
+  { id: 'resist', label: 'Debuff resistance', help: 'Shrugging off the disabling effects foes lay on champions (the Sludge Father\'s sludge, and any added later).' },
   { id: 'bard', label: 'Bard tune', help: 'Bonuses to a Bard\'s performance.' },
   { id: 'hero', label: 'Hero', help: 'Effects only the player\'s hero champions use.' },
 ];
@@ -328,9 +351,11 @@ export const EFFECT_FIELDS: EffectField[] = [
   { key: 'rangeMult', label: 'Range ×', kind: 'multiplier', above: 0, max: 20, step: 0.05, group: 'stats', help: 'Multiplies range.' },
   { key: 'critChanceBonus', label: '+Crit chance', kind: 'fraction', min: 0, max: 1, step: 0.025, group: 'crit', appliesTo: 'combat', help: 'Added to crit chance (0.075 = +7.5 points).' },
   { key: 'critMultiplier', label: 'Crit damage ×', kind: 'multiplier', min: 1, max: 20, step: 0.1, group: 'crit', appliesTo: 'combat', help: 'Replaces the 1.5× crit multiplier (highest wins).' },
+  { key: 'critChanceVsBleeding', label: '+Crit vs bleeding', kind: 'fraction', min: 0, max: 1, step: 0.025, group: 'crit', appliesTo: 'bleed', help: 'Added to crit chance on hits against a bleeding foe.' },
   { key: 'generateMult', label: 'Harvest ×', kind: 'multiplier', above: 0, max: 20, step: 0.05, group: 'economy', appliesTo: 'generator', help: 'Multiplies gold per harvest.' },
   { key: 'startingGoldBonus', label: '+Starting gold', kind: 'int', min: 0, max: 100000, step: 10, group: 'economy', help: 'Passive team bonus: applies while the champion is on the team, deployed or not.' },
   { key: 'upgradeDiscount', label: 'Upgrade discount', kind: 'discount', group: 'economy', help: 'Gold off one in-stage upgrade tier (1-based tier).' },
+  { key: 'vialDiscount', label: 'Vial level discount', kind: 'int', min: 0, max: 100000, group: 'economy', appliesTo: 'vials', help: 'Gold off every level of every vial.' },
   { key: 'adjacentDamageMult', label: '+Damage per neighbour', kind: 'fraction', min: 0, max: 5, step: 0.05, group: 'aura', appliesTo: 'combat', help: 'Per allied champion of the same type in the 8 surrounding tiles (0.15 = +15% each).' },
   { key: 'rangeAuraMult', label: 'Range aura ×', kind: 'multiplier', min: 1, max: 5, step: 0.05, group: 'aura', help: 'Ranged allies within its range gain this range multiplier (does not stack).' },
   { key: 'throwEvery', label: 'Throw every', kind: 'int', min: 2, max: 50, group: 'pattern', appliesTo: 'combat', help: 'Every Nth attack is a throw reaching "Throw range ×" as far.' },
@@ -346,6 +371,13 @@ export const EFFECT_FIELDS: EffectField[] = [
   { key: 'brittleDuration', label: 'Brittle duration', kind: 'number', above: 0, max: 60, unit: 's', step: 0.5, group: 'pattern', appliesTo: 'combat', help: 'Seconds Brittle lasts; refreshed by its hits.' },
   { key: 'shardDamageMult', label: 'Shard damage ×', kind: 'fraction', above: 0, max: 5, step: 0.05, group: 'pattern', appliesTo: 'shatter', help: 'Replaces each shard\'s damage share of the missile (highest wins).' },
   { key: 'shardSplitMult', label: 'Splinter damage ×', kind: 'fraction', above: 0, max: 5, step: 0.05, group: 'pattern', appliesTo: 'shatter', help: 'A shard that kills bursts into splinters dealing this share of its damage.' },
+  { key: 'vialPotency', label: 'Vial potency ×', kind: 'multiplier', min: 1, max: 10, step: 0.05, group: 'pattern', appliesTo: 'vials', help: 'Multiplies a vial\'s signature effect: its poison, else its bleed, else its impact damage (highest wins per vial).' },
+  { key: 'vialPotencyVial', label: 'Potency vial', kind: 'int', min: 1, max: 20, group: 'pattern', appliesTo: 'vials', help: 'Which vial (1-based) "Vial potency" applies to; leave it off for every vial.' },
+  { key: 'grandFormula', label: 'Grand Formula', kind: 'bool', group: 'pattern', appliesTo: 'vials', help: 'After a full round of vials it throws one more carrying all of their effects.' },
+  { key: 'disableImmune', label: 'Debuff immune', kind: 'bool', group: 'resist', help: 'Immune to every disabling effect foes lay on champions.' },
+  { key: 'disableResistAura', label: 'Ally resist chance', kind: 'fraction', above: 0, max: 1, step: 0.05, group: 'resist', help: 'Allies within its range resist disabling effects this often (does not stack).' },
+  { key: 'resistHasteMult', label: 'Resist haste ×', kind: 'multiplier', above: 1, max: 20, step: 0.05, group: 'resist', help: 'Each disabling effect it resists multiplies its attack speed by this.' },
+  { key: 'resistHasteDuration', label: 'Resist haste duration', kind: 'number', above: 0, max: 60, unit: 's', step: 0.5, group: 'resist', help: 'Seconds the resist haste lasts; a fresh resist restarts it.' },
   { key: 'bardSpeedBonus', label: '+Tune speed', kind: 'number', min: 0, max: 10, step: 0.05, group: 'bard', appliesTo: 'bard', help: 'Added to the buff multiplier.' },
   { key: 'bardDurationBonus', label: '+Tune duration', kind: 'number', min: 0, max: 600, unit: 's', step: 0.5, group: 'bard', appliesTo: 'bard', help: 'Extra seconds the tune lasts.' },
   { key: 'heroExpMult', label: 'In-stage EXP ×', kind: 'multiplier', above: 0, max: 20, step: 0.05, group: 'hero', appliesTo: 'hero', help: 'Multiplies the wave-clear EXP a hero levels up with.' },

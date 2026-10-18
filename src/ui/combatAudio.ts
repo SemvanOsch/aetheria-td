@@ -277,6 +277,17 @@ const VOICES: Record<SfxName, (ac: AudioContext) => void> = {
     sparkle(ac, 4, 2600, 5200, 0.12, 0.007, 0.02);
   },
 
+  // Plague Doctor — a soft whoosh as the flask leaves his hand, then a thin
+  // glass tink and a wet splash as it breaks on a foe.
+  vialThrow: (ac) => {
+    noiseSweep(ac, jit(900, 100), jit(2200, 200), 0.14, 0.012, 0.9);
+  },
+  vialShatter: (ac) => {
+    sparkle(ac, 3, 3400, 6200, 0.08, 0.006, 0.015);
+    noiseSweep(ac, jit(1800, 150), 500, 0.16, 0.022, 0.9, 'lowpass');
+    toneGlide(ac, jit(420, 30), 260, 0.06, 0.01, 'sine', 0.02);
+  },
+
   // Magic adventurer — a soft rising arcane hum as the orb gathers, and a deep
   // muffled boom when it bursts over the pack.
   orbCast: (ac) => {

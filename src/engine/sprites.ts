@@ -659,6 +659,525 @@ export function drawSwordsman(
 }
 
 /**
+ * Procedural Bandit silhouette — a hooded cutthroat crouched low with a
+ * bloodied knife — painted in the caller's local space (origin at the figure's
+ * centre; feet near y=+11, hood peak near y=-16). Authored facing +x and
+ * flipped horizontally when `faceLeft`. `stab` (0..1) drives the knife: 0 is
+ * the ready crouch (knife drawn back at the hip, point forward), 1 is just
+ * after a strike (arm thrust out, blade level). Blood beads at the blade's tip
+ * and a drop falls from it, both placed by `stab` so the frames stay cacheable.
+ * Replaces the emoji token for `shape: 'bandit'` units.
+ */
+export function drawBandit(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  faceLeft: boolean,
+  stab: number,
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (faceLeft) ctx.scale(-1, 1);
+
+  const cloakLit = shade(color, 0.14);
+  const cloakDark = shade(color, -0.3);
+  const leather = '#2c2320';
+  const leatherLit = '#3d302a';
+  const sash = '#6e1a22';
+  const skin = '#c99c78';
+  const steel = '#b9c1cb';
+  const steelDark = '#7d8794';
+  const blood = '#a51d28';
+  const bloodDark = '#5e0c14';
+
+  // A lean, low figure: a ragged cloak off the shoulders, a dark leather
+  // jerkin, a blood-red scarf masking the face and a knife held low. Built to
+  // be quick, not to take a hit.
+  capeSide(ctx, -1.8, -7.4, 15.2, 5.6, cloakDark, 0.45);
+  // Ragged, dagged cloak hem behind the legs.
+  ctx.fillStyle = cloakDark;
+  ctx.beginPath();
+  ctx.moveTo(-8.2, 6.6);
+  ctx.lineTo(-7.4, 9.2);
+  ctx.lineTo(-6.2, 7.2);
+  ctx.lineTo(-5, 9.6);
+  ctx.lineTo(-3.8, 7.4);
+  ctx.lineTo(-3.2, 5.8);
+  ctx.closePath();
+  ctx.fill();
+
+  // Off hand, held out low in front for balance (drawn behind the body).
+  arm(ctx, -0.6, -5.8, 4.2, -0.6, { sleeve: shade(leather, -0.2), hand: shade(skin, -0.18), w: 2.6 }, 1.6);
+
+  // Crouched, wide stance: the back leg braced, the front knee bent forward.
+  const legs: LegLook = { cloth: '#26222a', boot: '#1e1814', w: 3.1, bootUp: 0.62, toe: 2.8 };
+  legSide(ctx, -1, 3.2, -4.8, 11, { ...legs, cloth: shade(legs.cloth, -0.16), boot: shade(legs.boot, -0.12) }, 0.6);
+  legSide(ctx, 1.4, 3.2, 5.2, 11, legs, 2);
+
+  torsoSide(ctx, {
+    color: leather, lit: leatherLit, dark: shade(leather, -0.3),
+    top: -8.2, waistY: 0.4, hemY: 5.4, chest: 4.4, back: 4.2, waist: 3.2, hemF: 4.6, hemB: 5,
+    lean: 0.8,
+  });
+  // Laced jerkin front and a baldric with throwing-knife hilts across it.
+  ctx.strokeStyle = shade(leather, -0.45);
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  for (const y of [-5.6, -3.8, -2]) {
+    ctx.moveTo(2.6, y);
+    ctx.lineTo(3.8, y + 0.9);
+    ctx.moveTo(3.8, y);
+    ctx.lineTo(2.6, y + 0.9);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = '#1a1412';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(-3, -7.6);
+  ctx.lineTo(3.6, 0.2);
+  ctx.stroke();
+  ctx.fillStyle = steelDark;
+  for (const [kx, ky] of [[-1.4, -5.8], [0.2, -3.9]] as const) {
+    ctx.beginPath();
+    ctx.arc(kx, ky, 0.55, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Red sash knotted at the waist, its tails hanging at the hip.
+  belt(ctx, -3.4, 3.6, 0.9, sash, undefined, 0.8, 1.6);
+  ctx.fillStyle = shade(sash, -0.18);
+  ctx.beginPath();
+  ctx.moveTo(-2.8, 1.4);
+  ctx.lineTo(-4, 5.2);
+  ctx.lineTo(-2.6, 4.6);
+  ctx.lineTo(-1.8, 1.6);
+  ctx.closePath();
+  ctx.fill();
+  // A second knife sheathed at the back of the hip, and a coin pouch.
+  ctx.fillStyle = '#1a1412';
+  ctx.save();
+  ctx.translate(-3.6, 2);
+  ctx.rotate(0.5);
+  ctx.fillRect(-0.7, 0, 1.4, 4.4);
+  ctx.fillStyle = steelDark;
+  ctx.fillRect(-0.9, -1, 1.8, 0.7);
+  ctx.restore();
+  ctx.fillStyle = '#4a3a28';
+  ctx.beginPath();
+  ctx.ellipse(1.8, 2.6, 1.3, 1.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Hood mantle over the shoulders, ragged at its edge.
+  ctx.fillStyle = cloakLit;
+  ctx.beginPath();
+  ctx.moveTo(-4.8, -7.4);
+  ctx.quadraticCurveTo(0, -10.4, 4.8, -7.2);
+  ctx.quadraticCurveTo(4.6, -5, 3.2, -4.2);
+  ctx.lineTo(2, -5.2);
+  ctx.lineTo(0.6, -3.8);
+  ctx.lineTo(-0.8, -5);
+  ctx.lineTo(-2.2, -3.8);
+  ctx.lineTo(-3.4, -5);
+  ctx.quadraticCurveTo(-5.4, -5.4, -4.8, -7.4);
+  ctx.closePath();
+  ctx.fill();
+
+  // Head, deep in the hood: the face sits in the cowl's shadow.
+  const hx = 1.8;
+  const hy = -11;
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.arc(hx, hy, 3.4, 0, Math.PI * 2);
+  ctx.fill();
+  drawProfileFace(ctx, hx, hy, 3.4, skin, { eyeY: -0.1, mouth: false, cheek: false, brow: '#1e1418' });
+  // Scarf mask over the nose and mouth, its knot trailing behind.
+  ctx.fillStyle = sash;
+  ctx.beginPath();
+  ctx.moveTo(-1.4, -10.4);
+  ctx.quadraticCurveTo(2.4, -11.2, 5.6, -10.2);
+  ctx.quadraticCurveTo(5.4, -7.6, 2.6, -7.2);
+  ctx.quadraticCurveTo(-0.6, -7.4, -1.4, -10.4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = shade(sash, -0.2);
+  ctx.beginPath();
+  ctx.moveTo(-1.6, -9.6);
+  ctx.lineTo(-4.6, -8.6);
+  ctx.lineTo(-4, -7.4);
+  ctx.lineTo(-1.2, -8.6);
+  ctx.closePath();
+  ctx.fill();
+  // The hood: crown and back of the head, a deep cowl edge over the brow and a
+  // limp peak drooping behind.
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(-3.6, -7.6);
+  ctx.quadraticCurveTo(-5.2, -16.4, 1.8, -16.2);
+  ctx.quadraticCurveTo(6.4, -15.6, 5.4, -11.4);
+  ctx.quadraticCurveTo(3.4, -12.4, 0.4, -12.2);
+  ctx.quadraticCurveTo(-1.6, -11.6, -2, -9.4);
+  ctx.quadraticCurveTo(-2.6, -8.2, -3.6, -7.6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = cloakDark;
+  ctx.beginPath();
+  ctx.moveTo(-2.6, -15.4);
+  ctx.quadraticCurveTo(-7, -15, -7.6, -11);
+  ctx.quadraticCurveTo(-5, -12.8, -3.6, -12.4);
+  ctx.closePath();
+  ctx.fill();
+  // Shadow under the cowl's lip across the upper face.
+  ctx.fillStyle = 'rgba(14,8,14,0.45)';
+  ctx.beginPath();
+  ctx.moveTo(0.2, -12.2);
+  ctx.quadraticCurveTo(3.4, -12.6, 5.4, -11.4);
+  ctx.lineTo(5.2, -10.6);
+  ctx.quadraticCurveTo(3, -11.4, 0.4, -11.2);
+  ctx.closePath();
+  ctx.fill();
+
+  // --- Knife arm ---
+  // The hand drives forward and up from the hip on a stab (stab -> 1) and
+  // draws back to the hip at rest; the blade tips from point-up to level.
+  const e = ease.outCubic(stab);
+  const handX = 3.4 + 6.4 * e;
+  const handY = -1.8 - 2.6 * e;
+  arm(ctx, 1.6, -5.8, handX, handY, { sleeve: leatherLit, hand: shade(skin, -0.08), w: 2.8, cuff: '#1a1412' }, 1.4 - 0.8 * e);
+
+  const ang = (-0.55 + 0.5 * e);
+  ctx.save();
+  ctx.translate(handX, handY);
+  ctx.rotate(ang);
+  // Wrapped grip and a short iron guard.
+  ctx.strokeStyle = '#2a1e16';
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(-2.4, 0);
+  ctx.lineTo(0, 0);
+  ctx.stroke();
+  ctx.fillStyle = steelDark;
+  ctx.beginPath();
+  ctx.arc(-2.7, 0, 0.8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = steelDark;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(0.3, -1.6);
+  ctx.lineTo(0.3, 1.6);
+  ctx.stroke();
+  // A short, broad-backed knife with a clipped point.
+  const tip = 8.6;
+  ctx.fillStyle = steel;
+  ctx.beginPath();
+  ctx.moveTo(0.6, -1.2);
+  ctx.lineTo(tip - 2.4, -1.1);
+  ctx.lineTo(tip, 0.1);
+  ctx.lineTo(tip - 1.6, 0.9);
+  ctx.lineTo(0.6, 1.1);
+  ctx.closePath();
+  ctx.fill();
+  // Blood smeared down the edge, thickest toward the point.
+  ctx.fillStyle = blood;
+  ctx.beginPath();
+  ctx.moveTo(2.6, 1.1);
+  ctx.quadraticCurveTo(5, 0.2, tip - 1, -0.6);
+  ctx.lineTo(tip, 0.1);
+  ctx.lineTo(tip - 1.6, 0.9);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = bloodDark;
+  ctx.beginPath();
+  ctx.ellipse(4.6, 0.8, 0.9, 0.35, -0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // Drips off the blade (in body space so they hang straight down): a bead
+  // swelling under the point, and a drop flung off by the stab falling away.
+  const tx = handX + Math.cos(ang) * (tip - 0.8) - Math.sin(ang) * 0.6;
+  const ty = handY + Math.sin(ang) * (tip - 0.8) + Math.cos(ang) * 0.6;
+  ctx.fillStyle = blood;
+  ctx.beginPath();
+  ctx.moveTo(tx - 0.5, ty);
+  ctx.quadraticCurveTo(tx - 0.7, ty + 1.6, tx, ty + 2 + 0.6 * (1 - e));
+  ctx.quadraticCurveTo(tx + 0.7, ty + 1.6, tx + 0.5, ty);
+  ctx.closePath();
+  ctx.fill();
+  const fall = 1 - stab;
+  ctx.globalAlpha = Math.min(1, fall * 3) * (1 - fall * 0.5);
+  ctx.beginPath();
+  ctx.ellipse(tx - 0.6 - fall * 1.2, ty + 3.4 + fall * fall * 7, 0.6, 0.85, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  ctx.restore();
+}
+
+/** Liquid colours of the vials on the Plague Doctor's bandolier, and his default held vial. */
+const PLAGUE_BANDOLIER = ['#b4d43a', '#b06ae0', '#d8344a'] as const;
+
+/**
+ * Where the Plague Doctor's throwing hand is (sprite space, facing +x) for a
+ * follow-through `toss` (1 just after release → 0 at rest) and a `windup`
+ * (0 at rest → 1 cocked back), and whether it holds a vial: it carries the next
+ * vial out in front of him at rest, cocks it back over his shoulder before the
+ * throw, and comes through empty, the next vial back in hand as the arm settles.
+ * Shared by the sprite and the renderer's glow round the held vial.
+ */
+export function plagueVialHand(toss: number, windup: number): { x: number; y: number; tilt: number; held: boolean } {
+  const rest = { x: 5.4, y: -3.4 };
+  if (toss > 0) {
+    const release = { x: 10, y: -6.8 };
+    return {
+      x: rest.x + (release.x - rest.x) * toss,
+      y: rest.y + (release.y - rest.y) * toss,
+      tilt: 0.9 * toss,
+      held: toss < 0.45,
+    };
+  }
+  const back = { x: -5.2, y: -11.4 };
+  return { x: rest.x + (back.x - rest.x) * windup, y: rest.y + (back.y - rest.y) * windup, tilt: -0.9 * windup, held: true };
+}
+
+/**
+ * A small corked flask of `color` liquid standing upright at (x, y) (its bulb's
+ * centre), tilted by `tilt`, `r` the bulb's radius: the Plague Doctor's vials,
+ * in his hand and on his bandolier.
+ */
+function plagueFlask(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string, tilt = 0): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(tilt);
+  ctx.fillStyle = '#cfdcdc'; // glass neck
+  ctx.fillRect(-r * 0.36, -r * 1.9, r * 0.72, r * 1.2);
+  ctx.fillStyle = '#7a5434'; // cork
+  ctx.fillRect(-r * 0.44, -r * 2.35, r * 0.88, r * 0.6);
+  ctx.fillStyle = color; // the liquid
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = shade(color, -0.32);
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0.1 * Math.PI, 0.9 * Math.PI);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'; // glint on the glass
+  ctx.beginPath();
+  ctx.arc(-r * 0.38, -r * 0.34, r * 0.28, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/**
+ * Procedural Plague Doctor silhouette — a beaked physician in a wide-brimmed
+ * hat and a long waxed coat, a bandolier of coloured vials across his chest and
+ * a cane at his side — painted in the caller's local space (origin at the
+ * figure's centre; feet near y=+11, hat crown near y=-20). Authored facing +x
+ * and flipped when `faceLeft`. `toss` (0..1, 1 just after release) is his
+ * throw's follow-through, `windup` (0..1) the arm cocking back before it, and
+ * `vial` the colour of the vial in his hand, the next one he throws (see
+ * `plagueVialHand`). Replaces the emoji token for `shape: 'plagueDoctor'`.
+ */
+export function drawPlagueDoctor(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  faceLeft: boolean,
+  toss: number,
+  windup: number,
+  vial: string = PLAGUE_BANDOLIER[0],
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (faceLeft) ctx.scale(-1, 1);
+
+  const coatLit = shade(color, 0.16);
+  const coatDark = shade(color, -0.32);
+  const leather = '#3b2c24';
+  const leatherDark = '#261c17';
+  const glove = '#2a201b';
+  const bone = '#d9ccad';
+  const boneDark = '#a99a78';
+  const brass = '#c49a46';
+  const hatBlack = '#1b1719';
+
+  // The body leans back into the wind-up and forward through the throw.
+  const lean = -0.9 * windup + 1.2 * toss;
+  const hand = plagueVialHand(toss, windup);
+
+  // Long coat tails flaring out behind, down to the ankles.
+  ctx.fillStyle = coatDark;
+  ctx.beginPath();
+  ctx.moveTo(-3.8, 0.4);
+  ctx.quadraticCurveTo(-7.2, 5.6, -8.4, 10.2);
+  ctx.lineTo(-5.6, 9.6);
+  ctx.lineTo(-4.6, 10.4);
+  ctx.lineTo(-2.4, 9.2);
+  ctx.lineTo(-1, 3);
+  ctx.closePath();
+  ctx.fill();
+
+  // Off hand resting on a cane planted ahead of him (behind the coat).
+  ctx.strokeStyle = '#3a2a1e';
+  ctx.lineWidth = 1.1;
+  ctx.beginPath();
+  ctx.moveTo(3 + lean * 0.4, -0.4);
+  ctx.lineTo(6.6, 10.8);
+  ctx.stroke();
+  ctx.fillStyle = brass;
+  ctx.beginPath();
+  ctx.arc(3 + lean * 0.4, -0.8, 0.9, 0, Math.PI * 2);
+  ctx.fill();
+  arm(ctx, -0.6 + lean * 0.8, -6.2, 2.8 + lean * 0.4, -0.6, { sleeve: coatDark, hand: shade(glove, -0.1), w: 2.8 }, 1.4);
+
+  // Boots under the long coat.
+  const legs: LegLook = { cloth: '#231e20', boot: leatherDark, w: 3, bootUp: 0.75, toe: 2.6 };
+  legSide(ctx, -0.8, 3, -2.8, 11, { ...legs, cloth: shade(legs.cloth, -0.16), boot: shade(legs.boot, -0.12) }, 0.6);
+  legSide(ctx, 1, 3, 3, 11, legs, 1);
+
+  // The waxed greatcoat, long and flared.
+  torsoSide(ctx, {
+    color, lit: coatLit, dark: coatDark,
+    top: -8.4, waistY: 0.2, hemY: 8.6, chest: 4.2, back: 4.4, waist: 3.3, hemF: 5.2, hemB: 6.6,
+    lean,
+  });
+  // Front opening and its brass buttons.
+  ctx.strokeStyle = coatDark;
+  ctx.lineWidth = 0.6;
+  ctx.beginPath();
+  ctx.moveTo(3.6 + lean, -7.2);
+  ctx.quadraticCurveTo(3.3 + lean * 0.5, 1, 4.6, 8.2);
+  ctx.stroke();
+  ctx.fillStyle = brass;
+  for (const y of [-5.4, -3.2, -1]) {
+    ctx.beginPath();
+    ctx.arc(3.2 + lean * (1 - (y + 8.4) / 17), y, 0.42, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  belt(ctx, -3.4 + lean * 0.5, 3.6 + lean * 0.5, 0.8, leather, brass, 0.6, 1.3, 2.2 + lean * 0.5);
+
+  // Bandolier across the chest, with a vial of each colour in its loops.
+  ctx.strokeStyle = leatherDark;
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.moveTo(-3.2 + lean, -7.8);
+  ctx.lineTo(3.4 + lean * 0.5, 0);
+  ctx.stroke();
+  PLAGUE_BANDOLIER.forEach((c, i) => {
+    const t = 0.24 + i * 0.25;
+    plagueFlask(ctx, -3.2 + lean + (6.6 - lean * 0.5) * t, -7.8 + 7.8 * t - 0.4, 0.95, c, 0.15);
+  });
+
+  // Hooded leather cowl over the shoulders.
+  ctx.fillStyle = leather;
+  ctx.beginPath();
+  ctx.moveTo(-4.8 + lean, -7.6);
+  ctx.quadraticCurveTo(0 + lean, -10.6, 4.6 + lean, -7.8);
+  ctx.quadraticCurveTo(4.8 + lean, -5.2, 2.8 + lean, -4.2);
+  ctx.quadraticCurveTo(0 + lean, -3.4, -3 + lean, -4.4);
+  ctx.quadraticCurveTo(-5.4 + lean, -5.2, -4.8 + lean, -7.6);
+  ctx.closePath();
+  ctx.fill();
+
+  // Head: the hood, then the bone-white beaked mask, then the hat.
+  const hx = 1.4 + lean;
+  const hy = -11.2;
+  ctx.fillStyle = leatherDark; // hood round the head and nape
+  ctx.beginPath();
+  ctx.moveTo(hx - 4.4, hy + 3.6);
+  ctx.quadraticCurveTo(hx - 5, hy - 3.4, hx - 0.4, hy - 3.8);
+  ctx.quadraticCurveTo(hx + 3.4, hy - 3.6, hx + 3.2, hy + 1);
+  ctx.quadraticCurveTo(hx + 1.4, hy + 3.6, hx - 4.4, hy + 3.6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = bone; // face plate
+  ctx.beginPath();
+  ctx.ellipse(hx + 1.6, hy - 0.2, 2.2, 3.1, 0.15, 0, Math.PI * 2);
+  ctx.fill();
+  // The long beak, curving down to its point.
+  ctx.beginPath();
+  ctx.moveTo(hx + 2.4, hy - 1.6);
+  ctx.quadraticCurveTo(hx + 8, hy - 0.4, hx + 11.4, hy + 4.4);
+  ctx.quadraticCurveTo(hx + 7.4, hy + 3.2, hx + 2.2, hy + 2.4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = boneDark; // its shadowed underside
+  ctx.beginPath();
+  ctx.moveTo(hx + 2.6, hy + 1);
+  ctx.quadraticCurveTo(hx + 7.6, hy + 2, hx + 11.4, hy + 4.4);
+  ctx.quadraticCurveTo(hx + 7.4, hy + 3.2, hx + 2.2, hy + 2.4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = shade(boneDark, -0.2); // stitching down the beak
+  ctx.lineWidth = 0.35;
+  ctx.beginPath();
+  ctx.moveTo(hx + 3.2, hy + 0.2);
+  ctx.quadraticCurveTo(hx + 7.4, hy + 0.9, hx + 10.4, hy + 3.7);
+  for (const k of [0.25, 0.5, 0.75]) {
+    const sx = hx + 3.2 + 7.2 * k;
+    const sy = hy + 0.2 + 3.4 * k * k;
+    ctx.moveTo(sx - 0.2, sy - 0.5);
+    ctx.lineTo(sx + 0.2, sy + 0.5);
+  }
+  ctx.stroke();
+  ctx.fillStyle = leather; // strap binding the beak at its root
+  ctx.beginPath();
+  ctx.moveTo(hx + 2.6, hy - 1.8);
+  ctx.lineTo(hx + 3.6, hy - 1.4);
+  ctx.lineTo(hx + 3.4, hy + 2.6);
+  ctx.lineTo(hx + 2.4, hy + 2.4);
+  ctx.closePath();
+  ctx.fill();
+  // Round glass eye lens in a brass rim.
+  ctx.fillStyle = brass;
+  ctx.beginPath();
+  ctx.arc(hx + 2.1, hy - 1, 1.45, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#1c2427';
+  ctx.beginPath();
+  ctx.arc(hx + 2.1, hy - 1, 1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(220,240,235,0.75)';
+  ctx.beginPath();
+  ctx.arc(hx + 1.8, hy - 1.35, 0.35, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Wide-brimmed hat with a flat crown and a band.
+  ctx.fillStyle = hatBlack;
+  ctx.beginPath();
+  ctx.ellipse(hx + 0.6, hy - 3.9, 7.4, 1.25, -0.06, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(hx - 3.4, hy - 3.9);
+  ctx.lineTo(hx - 3.1, hy - 9);
+  ctx.quadraticCurveTo(hx + 0.6, hy - 9.6, hx + 4, hy - 9.2);
+  ctx.lineTo(hx + 4.2, hy - 4.2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#4a3f45'; // band
+  ctx.beginPath();
+  ctx.moveTo(hx - 3.3, hy - 5.8);
+  ctx.lineTo(hx + 4.1, hy - 6);
+  ctx.lineTo(hx + 4.15, hy - 4.6);
+  ctx.lineTo(hx - 3.36, hy - 4.4);
+  ctx.closePath();
+  ctx.fill();
+
+  // --- Throwing arm and the vial in its hand ---
+  const sx = 1.4 + lean * 0.9;
+  const sy = -6.6;
+  const look: ArmLook = { sleeve: coatLit, hand: glove, w: 2.9, cuff: leather };
+  arm(ctx, sx, sy, hand.x, hand.y, look, hand.y < sy - 2 ? -1.4 : 1.3);
+  if (hand.held) {
+    plagueFlask(ctx, hand.x + 0.3, hand.y - 1.5, 1.6, vial, hand.tilt);
+    // Gloved fingers wrapped round the bulb.
+    ctx.fillStyle = glove;
+    ctx.beginPath();
+    ctx.ellipse(hand.x + 0.4, hand.y - 0.4, 1.3, 0.8, hand.tilt, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+/**
  * Procedural Spearman silhouette — a soldier in a forward lunge driving a long
  * two-handed spear — painted in the caller's local space (origin at the figure's
  * centre; feet near y=+11, head near y=-16, spear reaching forward past x=+18).
@@ -10335,6 +10854,8 @@ export function hasSprite(shape: string): boolean {
     shape === 'elf' ||
     shape === 'bard' ||
     shape === 'frostWitch' ||
+    shape === 'bandit' ||
+    shape === 'plagueDoctor' ||
     // The player's own adventurer(s) — drawn from a PlayerSpriteConfig; callers
     // must supply `playerConfig` to drawUnitSprite for these to render.
     shape === 'player-blade' ||
@@ -10380,9 +10901,10 @@ export function playerWeaponForShape(shape: string): PlayerWeapon {
  * ignored by ordinary champions. `draw` (0..1) is the Bow adventurer's raise +
  * draw for its next shot (see `drawPlayerShortbow`), the Magic adventurer's
  * orb charge (see `drawPlayerCastArms`) or the Claymore's heft wind-up (see
- * `drawClaymore`); others ignore it. No-op for
- * shapes without a sprite; callers should gate on `hasSprite` and fall back to
- * the emoji token.
+ * `drawClaymore`), or the Plague Doctor's throw wind-up; others ignore it.
+ * `vial` is the colour of the vial the Plague Doctor holds (his next throw).
+ * No-op for shapes without a sprite; callers should gate on `hasSprite` and
+ * fall back to the emoji token.
  */
 export function drawUnitSprite(
   ctx: CanvasRenderingContext2D,
@@ -10394,6 +10916,7 @@ export function drawUnitSprite(
   empowered = false,
   playerConfig?: PlayerSpriteConfig,
   draw = 0,
+  vial?: string,
 ): void {
   if (shape === 'archer') drawArcher(ctx, color, faceLeft, anim);
   else if (shape === 'sword') drawSwordsman(ctx, color, faceLeft, anim);
@@ -10404,6 +10927,8 @@ export function drawUnitSprite(
   else if (shape === 'elf') drawElf(ctx, color, faceLeft, anim, empowered);
   else if (shape === 'bard') drawBard(ctx, color, faceLeft, anim);
   else if (shape === 'frostWitch') drawFrostWitch(ctx, color, faceLeft, anim);
+  else if (shape === 'bandit') drawBandit(ctx, color, faceLeft, anim);
+  else if (shape === 'plagueDoctor') drawPlagueDoctor(ctx, color, faceLeft, anim, draw, vial);
   else if (shape.startsWith('player-') && playerConfig) {
     drawPlayerSprite(ctx, playerConfig, faceLeft, anim, playerWeaponForShape(shape), draw, throwing, empowered);
   }

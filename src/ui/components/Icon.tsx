@@ -67,7 +67,9 @@ export type IconName =
   | 'lantern'
   | 'expand'
   | 'snowflake'
-  | 'crack';
+  | 'crack'
+  | 'blood'
+  | 'poison';
 
 const F = 'ic-fill';
 
@@ -402,6 +404,21 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <path className={F} d="M12 2.8l6.8 9.2L12 21.2 5.2 12z" />
       <path d="M12 2.8l6.8 9.2L12 21.2 5.2 12z" />
       <path d="M12 2.8l-1.2 4.6 2.4 2.2-2.2 3.2 1.6 2.6-.6 5.8M13.2 9.6l2.6 1M10.8 12.8l-2.4.6" />
+    </>
+  ),
+  blood: (
+    <>
+      <path className={F} d="M12 3.2c3.4 4.6 5.6 8 5.6 11a5.6 5.6 0 0 1-11.2 0c0-3 2.2-6.4 5.6-11z" />
+      <path d="M12 3.2c3.4 4.6 5.6 8 5.6 11a5.6 5.6 0 0 1-11.2 0c0-3 2.2-6.4 5.6-11z" />
+      <path d="M9.4 14.6a2.6 2.6 0 0 0 2.2 2.6" />
+    </>
+  ),
+  poison: (
+    <>
+      <path className={F} d="M10.2 4v4.4l-4.4 7.8a2.6 2.6 0 0 0 2.3 3.9h7.8a2.6 2.6 0 0 0 2.3-3.9l-4.4-7.8V4z" />
+      <path d="M10.2 4v4.4l-4.4 7.8a2.6 2.6 0 0 0 2.3 3.9h7.8a2.6 2.6 0 0 0 2.3-3.9l-4.4-7.8V4M9 4h6M7.6 14h8.8" />
+      <circle cx="11" cy="16.8" r=".9" />
+      <circle cx="13.8" cy="15.9" r=".6" />
     </>
   ),
 };

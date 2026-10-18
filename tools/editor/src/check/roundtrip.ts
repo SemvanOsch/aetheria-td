@@ -69,6 +69,11 @@ export function scriptedEdits(base: ContentProject): ContentProject {
   archer.upgrades.push({ name: 'Volley Drill', description: 'Faster hands.', cost: 120, attackSpeed: 0.2 });
   const witch = p.units.find((u) => u.id === 'frostWitch')!;
   witch.upgrades[2].choices![1].iceStorm = 0.2;
+  // Vials: retune a level, add a level, add an effect to a vial.
+  const doctor = p.units.find((u) => u.id === 'plague_doctor')!;
+  doctor.vials![0].levels[0].poison = 0.06;
+  doctor.vials![1].levels.push({ cost: 120, damageMult: 4 });
+  doctor.vials![2].poison = 0.01;
   const knight = clone(p.units.find((u) => u.id === 'swordsman')!);
   knight.id = 'knight';
   knight.name = 'Knight';

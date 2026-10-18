@@ -29,6 +29,8 @@ export function UnitSprite({ unit, size = 48, animate = true }: Props) {
   // their own framing below.
   const playerConfig = unit.visual.playerConfig;
   const isPlayer = shape.startsWith('player-');
+  // A vial thrower (the Plague Doctor) holds the first vial of his cycle.
+  const firstVial = unit.vials?.[0]?.color;
 
   useEffect(() => {
     if (!sprite) return;
@@ -43,7 +45,7 @@ export function UnitSprite({ unit, size = 48, animate = true }: Props) {
     // The player's adventurer gets the journal portrait's faint rim and head
     // lift: the full champion light reads as a grey cap on dark, bare hair.
     const style = isPlayer ? { ...portraitStyle(accent), rimAlpha: 0.07, shading: 0.5 } : portraitStyle(accent);
-    const key = `p|${shape}|${color}|${playerConfig ? JSON.stringify(playerConfig) : ''}`;
+    const key = `p|${shape}|${color}|${playerConfig ? JSON.stringify(playerConfig) : ''}|${firstVial ?? ''}`;
     const phase = (shape.length * 1.7) % 6.28;
 
     const render = (t: number) => {
@@ -69,11 +71,11 @@ export function UnitSprite({ unit, size = 48, animate = true }: Props) {
       const anchorX = shape === 'bard' ? 0.56 : 0.44;
       ctx.translate(size * anchorX, size * 0.6);
       ctx.scale(s, s);
-      paintPortrait(ctx, (g) => drawUnitSprite(g, shape, color, false, 0), style, key, t, phase);
+      paintPortrait(ctx, (g) => drawUnitSprite(g, shape, color, false, 0, false, false, undefined, 0, firstVial), style, key, t, phase);
     };
     render(0);
     return animate ? onPortraitTick(render) : undefined;
-  }, [sprite, shape, color, size, isPlayer, playerConfig, animate]);
+  }, [sprite, shape, color, size, isPlayer, playerConfig, animate, firstVial]);
 
   if (!sprite) return <>{unit.visual.icon}</>;
   return (

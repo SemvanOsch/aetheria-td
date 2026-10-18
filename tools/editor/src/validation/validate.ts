@@ -39,6 +39,8 @@ import {
   PROP_KINDS,
   RARITY_CHOICES,
   SECTION_IDS,
+  BLEED_FIELDS,
+  POISON_FIELDS,
   SHATTER_FIELDS,
   SLOW_FIELDS,
   TARGETING_CHOICES,
@@ -48,6 +50,9 @@ import {
   UNIT_SHAPE_FIELDS,
   UPGRADE_FIELDS,
   UPGRADE_KEYS,
+  VIAL_EFFECT_FIELDS,
+  VIAL_KEYS,
+  VIAL_LEVEL_KEYS,
   inRange,
   rangeText,
   type NumField,
@@ -405,6 +410,40 @@ function validateUpgrade(u: UnitDef, up: UpgradeDef, f: string, where: string, p
   }
 }
 
+/** A vial cycle (the Plague Doctor): each vial's look, effect and levels. */
+function validateVials(u: UnitDef, push: Push) {
+  const vials = u.vials!;
+  if (!Array.isArray(vials)) {
+    push('error', 'vials', 'Vials', 'The vial list isn\'t a list.', 'Remove it, or add vials with the editor.');
+    return;
+  }
+  if (vials.length === 0) push('warning', 'vials', 'Vials', 'The vial cycle is empty, so it does nothing.', 'Add a vial, or turn the vial cycle off.');
+  if (u.aoe !== 'single') push('warning', 'vials', 'Vials', 'Vials are only thrown by single-target champions; this attack shape ignores them.', 'Set the attack shape to single target.');
+  if (u.shatter) push('warning', 'vials', 'Vials', 'A shattering ice missile is fired instead of the vials.', 'Remove Shatter, or the vials.');
+  if (u.bleed || u.poison) push('warning', u.bleed ? 'bleed' : 'poison', 'Vials', 'Bleed / Poison on hit are ignored: each vial decides its own.', 'Remove them and set bleed or poison on a vial.');
+  vials.forEach((v, vi) => {
+    const f = `vials.${vi}`;
+    const where = `Vials › ${v.name || `Vial ${vi + 1}`}`;
+    checkKeys(push, v, VIAL_KEYS, `${f}.`, where);
+    if (!v.name?.trim()) push('error', `${f}.name`, where, 'The vial has no name.', 'Name it; the name shows in the champion panel.');
+    checkColor(push, v.color, `${f}.color`, where, 'Liquid colour');
+    for (const fld of VIAL_EFFECT_FIELDS) checkNum(push, fld, v[fld.key as 'damageMult'], `${f}.${fld.key}`, where, fld.key === 'damageMult');
+    if (v.ignoreResist !== undefined && typeof v.ignoreResist !== 'boolean') push('error', `${f}.ignoreResist`, where, 'Ignores resistance must be on or off.', 'Toggle it.');
+    if (!Array.isArray(v.levels)) {
+      push('error', `${f}.levels`, where, 'The level list is missing.', 'Add an empty level list.');
+      return;
+    }
+    v.levels.forEach((l, li) => {
+      const lf = `${f}.levels.${li}`;
+      const lw = `${where} › Level ${li + 1}`;
+      checkKeys(push, l, VIAL_LEVEL_KEYS, `${lf}.`, lw);
+      if (typeof l.cost !== 'number' || !Number.isInteger(l.cost) || l.cost < 0) push('error', `${lf}.cost`, lw, `Cost ${JSON.stringify(l.cost)} isn't valid.`, 'Use a whole number of gold, 0 or more.');
+      for (const fld of VIAL_EFFECT_FIELDS) checkNum(push, fld, l[fld.key as 'damageMult'], `${lf}.${fld.key}`, lw, false);
+      if (VIAL_EFFECT_FIELDS.every((fld) => l[fld.key as 'damageMult'] === undefined)) push('warning', lf, lw, 'This level changes nothing.', 'Set the value it raises, or delete the level.');
+    });
+  });
+}
+
 function validateUnit(u: UnitDef, push: Push) {
   checkKeys(push, u, UNIT_KEYS, '', 'Champion');
   if (!u.id || !ID_PATTERN.test(u.id)) push('error', 'id', 'Identity', `Id "${u.id}" isn't valid.`, 'Use letters, digits, "_" or "-", starting with a letter.');
@@ -429,7 +468,10 @@ function validateUnit(u: UnitDef, push: Push) {
   const role = roleOf(u);
   if (u.generator) for (const f of GENERATOR_FIELDS) checkNum(push, f, u.generator[f.key as keyof typeof u.generator], `generator.${f.key}`, 'Special role', true);
   if (u.bard) for (const f of BARD_FIELDS) checkNum(push, f, u.bard[f.key as keyof typeof u.bard], `bard.${f.key}`, 'Special role', true);
+  if (u.bleed) for (const f of BLEED_FIELDS) checkNum(push, f, u.bleed[f.key as keyof typeof u.bleed], `bleed.${f.key}`, 'Attack shape', true);
+  if (u.poison) for (const f of POISON_FIELDS) checkNum(push, f, u.poison[f.key as keyof typeof u.poison], `poison.${f.key}`, 'Attack shape', true);
   if (u.shatter) for (const f of SHATTER_FIELDS) checkNum(push, f, u.shatter[f.key as keyof typeof u.shatter], `shatter.${f.key}`, 'Attack shape', true);
+  if (u.vials !== undefined) validateVials(u, push);
   if (u.special) for (const f of SLOW_FIELDS) checkNum(push, f, u.special[f.key as keyof typeof u.special], `special.${f.key}`, 'Attack shape', true);
   if (u.generator && u.bard) push('warning', 'bard', 'Special role', 'It both harvests and performs.', 'Pick one special role; the engine runs both but cards describe one.');
   if (role === 'combat' && (u.damage <= 0 || u.attackSpeed <= 0 || u.range <= 0)) {
@@ -504,27 +546,45 @@ function validateTree(unitId: string, nodes: MasteryUpgradeDef[], unit: UnitDef 
     if (n.throwRangeMult !== undefined && n.throwEvery === undefined) push('warning', `${f}.throwRangeMult`, N, 'Throw range is set but no throw cadence.', 'Set "Throw every" too.');
     if (n.crossSlashMult !== undefined && n.crossSlashEvery === undefined) push('warning', `${f}.crossSlashMult`, N, 'Cross Slash damage is set but no cadence.', 'Set "Cross Slash every" too.');
     if ((n.brittleMult === undefined) !== (n.brittleDuration === undefined)) push('warning', `${f}.brittleMult`, N, 'Brittle needs both a damage multiplier and a duration.', 'Set both, or clear both.');
+    if (n.vialPotencyVial !== undefined && n.vialPotency === undefined) push('warning', `${f}.vialPotencyVial`, N, 'A potency vial is picked but no potency.', 'Set "Vial potency" too.');
+    if (n.vialPotencyVial !== undefined && unit?.vials && n.vialPotencyVial > unit.vials.length) push('error', `${f}.vialPotencyVial`, N, `Vial ${n.vialPotencyVial} doesn't exist.`, `Pick a vial from 1 to ${unit.vials.length}.`);
+    if ((n.resistHasteMult === undefined) !== (n.resistHasteDuration === undefined)) push('warning', `${f}.resistHasteMult`, N, 'Resist haste needs both a multiplier and a duration.', 'Set both, or clear both.');
     if (effects === 0) push('warning', `${f}`, N, 'The node has no effect.', 'Add an effect in its Effects section, or remove the node.');
   });
 
   // Prerequisites: they must exist, and must not loop.
+  const reqsOf = (n: MasteryUpgradeDef): string[] => (n.requires == null ? [] : typeof n.requires === 'string' ? [n.requires] : n.requires);
   nodes.forEach((n, i) => {
     if (n.requires === undefined) return;
     const N = `Node ${i + 1}${n.name ? ` · ${n.name}` : ''}`;
-    if (n.requires === n.id) push('error', `nodes.${i}.requires`, N, 'The node requires itself.', 'Pick another prerequisite, or none.');
-    else if (!ids.has(n.requires)) push('error', `nodes.${i}.requires`, N, `Prerequisite "${n.requires}" isn't in this tree.`, 'Pick a node from this tree, or none.');
+    if (Array.isArray(n.requires)) {
+      if (n.requires.length < 2 || n.requires.some((r) => typeof r !== 'string')) push('error', `nodes.${i}.requires`, N, 'A list of prerequisites needs two or more node ids.', 'Use a single id for one prerequisite.');
+      if (new Set(n.requires).size !== n.requires.length) push('warning', `nodes.${i}.requires`, N, 'A prerequisite is listed twice.', 'Remove the duplicate.');
+    } else if (typeof n.requires !== 'string') {
+      push('error', `nodes.${i}.requires`, N, `Prerequisite ${JSON.stringify(n.requires)} isn't a node id.`, 'Pick a node from this tree, or none.');
+      return;
+    }
+    for (const r of reqsOf(n)) {
+      if (r === n.id) push('error', `nodes.${i}.requires`, N, 'The node requires itself.', 'Pick another prerequisite, or none.');
+      else if (!ids.has(r)) push('error', `nodes.${i}.requires`, N, `Prerequisite "${r}" isn't in this tree.`, 'Pick a node from this tree, or none.');
+    }
   });
   const byId = new Map(nodes.map((n) => [n.id, n]));
+  // A loop only traps a node when every route up from it loops back.
+  const reachesRoot = new Map<string, boolean>();
+  const grounded = (n: MasteryUpgradeDef, seen: Set<string>): boolean => {
+    if (reachesRoot.has(n.id)) return reachesRoot.get(n.id)!;
+    const ps = reqsOf(n);
+    const ok = ps.length === 0 || ps.some((r) => {
+      const p = byId.get(r);
+      return !p || (!seen.has(p.id) && grounded(p, new Set([...seen, p.id])));
+    });
+    if (seen.size === 1) reachesRoot.set(n.id, ok);
+    return ok;
+  };
   nodes.forEach((n, i) => {
-    const seen = new Set<string>([n.id]);
-    let cur = n.requires ? byId.get(n.requires) : undefined;
-    while (cur) {
-      if (seen.has(cur.id)) {
-        push('error', `nodes.${i}.requires`, `Node ${i + 1}${n.name ? ` · ${n.name}` : ''}`, `Prerequisites loop back to "${cur.id}", so none of them can ever be learned.`, 'Break the loop: one node in the chain must have no prerequisite or point outside it.');
-        break;
-      }
-      seen.add(cur.id);
-      cur = cur.requires ? byId.get(cur.requires) : undefined;
+    if (!grounded(n, new Set([n.id]))) {
+      push('error', `nodes.${i}.requires`, `Node ${i + 1}${n.name ? ` · ${n.name}` : ''}`, 'Its prerequisites loop back on themselves, so it can never be learned.', 'Break the loop: one node in the chain must have no prerequisite or point outside it.');
     }
   });
 
@@ -540,8 +600,7 @@ function validateTree(unitId: string, nodes: MasteryUpgradeDef[], unit: UnitDef 
       push('warning', `nodes.${members[0]}.exclusiveGroup`, `Node ${members[0] + 1}`, `Exclusive group "${g}" has only one node, so it excludes nothing.`, 'Add a rival node to the group, or clear the group.');
     }
     for (const i of members) {
-      const req = nodes[i].requires;
-      if (req && nodes[ids.get(req) ?? -1]?.exclusiveGroup === g) {
+      if (reqsOf(nodes[i]).some((req) => nodes[ids.get(req) ?? -1]?.exclusiveGroup === g)) {
         push('warning', `nodes.${i}.requires`, `Node ${i + 1}`, `It requires a rival in its own exclusive group "${g}": the two can't be active together.`, 'Require a node outside the group (usually the shared parent).');
       }
     }
@@ -570,6 +629,10 @@ function effectApplies(kind: NonNullable<(typeof EFFECT_FIELDS)[number]['applies
       return !!u.special?.slow;
     case 'shatter':
       return !!u.shatter;
+    case 'bleed':
+      return !!u.bleed;
+    case 'vials':
+      return !!u.vials?.length;
   }
 }
 
@@ -585,6 +648,8 @@ function appliesHint(kind: string): string {
     combat: 'Support and economy champions don\'t attack.',
     chill: 'Only champions whose hits slow (like the Frost Witch) use it.',
     shatter: 'Only shattering ice missiles (the Frost Witch) use it.',
+    bleed: 'Only champions whose hits bleed (like the Bandit) use it.',
+    vials: 'Only vial throwers (the Plague Doctor) use it.',
   };
   return `${hints[kind] ?? ''} Remove it, or move the node to a champion that uses it.`.trim();
 }

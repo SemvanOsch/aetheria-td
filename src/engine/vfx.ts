@@ -467,6 +467,18 @@ export class Vfx {
         case 'shatter':
           this.onShatter(e.x, e.y, e.angles, e.crit, e.small ? 0.6 : 1);
           break;
+        case 'vialSplash': {
+          // The flask bursting: glass chips, droplets of its liquid thrown up
+          // and raining back, a puff of its fumes and a small ring.
+          const k = e.crit ? 1.35 : 1;
+          const hy = e.y - 4;
+          this.flash(e.x, hy, 16 * k, 0.12, e.color);
+          this.burst('debris', e.x, hy, 5, 60 * k, { life: 0.4, size: 1.1, color: '#e6f2f2', grav: 240, vy: -40, spin: 10 });
+          this.burst('dust', e.x, hy, Math.round(10 * k), 55 * k, { life: 0.55, size: 1.5, color: e.color, color2: shade(e.color, 0.6), grav: 260, vy: -60, drag: 1 });
+          this.burst('smoke', e.x, hy, 3, 12, { life: 0.8, size: 3.5, grow: 7, color: shade(e.color, 0.45), drag: 3, vy: -8 });
+          this.ring(e.x, e.y, 2, 16 * k, 0.3, e.color, 1.4, 0.5);
+          break;
+        }
         case 'dodge':
           this.burst('gust', e.x, e.y - 4, 4, 60, { life: 0.3, size: 5, color: '#dff4ff' });
           break;
@@ -640,6 +652,20 @@ export class Vfx {
         break;
       case 'holy':
         this.burst('mote', hx, hy, 6, 40, { life: 0.6, size: 1.6, color: fam.ramp[2], vy: -24 });
+        break;
+      case 'blood':
+        // The Bandit's knife: a spatter of blood flung along the cut, falling
+        // under gravity, and a thin red crescent for the stroke.
+        this.burst('dust', hx, hy, e.crit ? 10 : 5, e.crit ? 120 : 85, {
+          dir: ang,
+          spread: 1.4,
+          life: 0.4,
+          size: 1.3,
+          color: '#a51d28',
+          drag: 3,
+          grav: 260,
+        });
+        if (melee) this.slash(e.x, e.y - 4, ang, 11 + e.weight * 10, 0.13, e.color, e.crit ? 3.4 : 2.2);
         break;
       case 'frost':
         // Ice chips glancing off the foe and a little frost drifting down.
@@ -884,6 +910,15 @@ export class Vfx {
         this.burst('shard', x, y - 30, 12, 140, { dir: -Math.PI / 2, spread: 0.8, life: 0.45, size: 1.8, color: ramp[1], color2: color });
         this.pulse(x, y, 170, 'arcane', 0.9, 0.7, color);
         this.exposure = Math.min(0.6, this.exposure + 0.2);
+        break;
+      }
+      case 'resist': {
+        // Shrugging the debuff off (Toxic Resilience): the stuff steams away in
+        // a ring of its colour and motes rise as the champion quickens.
+        const ramp = tintRamp(color);
+        this.ring(x, y + 8, 6, radius * 1.6, 0.45, color, 2, 0.45);
+        this.burst('mote', x, y - 4, 14, 55, { life: 0.9, size: 1.6, color: ramp[1], vy: -60, drag: 1.4 });
+        this.pulse(x, y, 90, 'holy', 0.5, 0.5, color);
         break;
       }
       case 'bard':

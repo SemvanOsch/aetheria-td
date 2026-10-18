@@ -25,6 +25,7 @@ import {
   type ShatterDef,
   type UnitDef,
   type UpgradeEffect,
+  type VialMastery,
 } from './units';
 
 /** EXP a champion earns for slaying an ordinary enemy (grunt / runner). */
@@ -74,9 +75,11 @@ export interface MasteryUpgradeDef {
   cost: number;
   /**
    * Id of a node that must be learned first. Omit for a node that branches
-   * straight from the champion. Chaining `requires` makes a linear tree.
+   * straight from the champion. Chaining `requires` makes a linear tree. A list
+   * means any one of them will do (the Plague Doctor's three Potency paths all
+   * lead to The Grand Formula); read it through `masteryRequires`.
    */
-  requires?: string;
+  requires?: string | string[];
   /**
    * Marks a standout "major" node — a capstone or defining effect rather than a
    * small stat bump. Purely cosmetic: the tree renders it with a golden outline
@@ -102,6 +105,11 @@ export interface MasteryUpgradeDef {
   critChanceBonus?: number;
   /** Overrides the champion's crit damage multiplier (e.g. 2 = 2× on crit). */
   critMultiplier?: number;
+  /**
+   * Additive crit chance (0–1) on hits against a bleeding foe (the Bandit's
+   * Blood in the Water). Read through `masteryCritChanceVsBleeding`.
+   */
+  critChanceVsBleeding?: number;
   /** Multiplier on the champion's damage (e.g. 1.1 = +10%). */
   damageMult?: number;
   /** Multiplier on the champion's attack speed (e.g. 1.1 = +10%). */
@@ -249,6 +257,48 @@ export interface MasteryUpgradeDef {
    * Highest wins. Read through `masteryShardSplit`.
    */
   shardSplitMult?: number;
+  /**
+   * Gold off every level of every vial (the Plague Doctor's Careful Measure).
+   * Read through `masteryVialDiscount`; prices through `vialLevelCost`.
+   */
+  vialDiscount?: number;
+  /**
+   * Makes a vial's signature effect this much more potent (1.25 = +25%): its
+   * poison, else its bleed, else its impact damage (see `potentVial`). Applies to
+   * the vial numbered `vialPotencyVial` (1-based), or to every vial when that is
+   * omitted. Highest wins per vial, so a 1.5 path replaces a general 1.25.
+   * Read through `masteryVialPotency`.
+   */
+  vialPotency?: number;
+  /** Which vial (1-based) `vialPotency` applies to; omitted = every vial. */
+  vialPotencyVial?: number;
+  /**
+   * The Grand Formula: after a full round of his vials the thrower adds one more
+   * that carries all of their effects at once (see `grandFormulaEffect`). Read
+   * through `masteryGrandFormula`.
+   */
+  grandFormula?: boolean;
+  /**
+   * Immune to every disabling effect a foe lays on champions (see
+   * `CHAMPION_DEBUFFS`; the Plague Doctor's Self Inoculation). Read through
+   * `masteryDisableImmune`.
+   */
+  disableImmune?: boolean;
+  /**
+   * Chance (0–1) allied champions within this champion's range resist a
+   * disabling effect (the Plague Doctor's Warding Fumes). The emitter itself is
+   * not covered, and overlapping fields don't stack: the highest wins. Read
+   * through `masteryDisableResistAura`.
+   */
+  disableResistAura?: number;
+  /**
+   * Each disabling effect this champion resists hastens it: attack speed ×this
+   * for `resistHasteDuration` s (the Plague Doctor's Toxic Resilience). A fresh
+   * resist restarts the clock. Read through `masteryResistHaste`.
+   */
+  resistHasteMult?: number;
+  /** Seconds the haste lasts (see `resistHasteMult`). */
+  resistHasteDuration?: number;
 }
 
 /**
@@ -713,7 +763,7 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
     {
       id: 'icebreak',
       name: 'Icebreak',
-      description: 'Striking an already-slowed enemy cracks its frozen guard, making it Brittle: for 3s it takes 25% more damage from every champion. Her hits on a Brittle enemy keep it Brittle.',
+      description: 'Striking an already-slowed enemy cracks its frozen guard, making it Brittle. Her hits on a Brittle enemy reset its Brittle timer.',
       cost: 750,
       requires: 'lingering_rime',
       major: true,
@@ -731,11 +781,131 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
     {
       id: 'shatter_storm',
       name: 'Shatter Storm',
-      description: 'Each shard that kills an enemy fractures again, bursting from the fallen foe into a ring of smaller splinters that deal 50% of its damage.',
+      description: 'Each shard that kills an enemy fractures again, bursting from the fallen foe into a ring of smaller splinters that deal 75% of its damage.',
       cost: 750,
       requires: 'splintering_cold',
       major: true,
-      shardSplitMult: 0.5,
+      shardSplitMult: 0.75,
+    },
+  ],
+  bandit: [
+    {
+      id: 'exploit_weakness_1',
+      name: 'Exploit Weakness I',
+      description: 'Critical strikes find the softest spot, dealing 50% more Critical Damage.',
+      cost: 100,
+      critMultiplier: 2,
+    },
+    {
+      id: 'exploit_weakness_2',
+      name: 'Exploit Weakness II',
+      description: 'Years of ruthless instinct turn every opening into a devastating blow dealing 50% more Critical Damage.',
+      cost: 100,
+      requires: 'exploit_weakness_1',
+      critMultiplier: 2.5,
+    },
+    {
+      id: 'blood_in_the_water',
+      name: 'Blood in the Water',
+      description: 'The scent of blood reveals every weakness. Gain +15% Critical Chance against bleeding enemies.',
+      cost: 250,
+      requires: 'exploit_weakness_2',
+      major: true,
+      critChanceVsBleeding: 0.15,
+    },
+  ],
+  plague_doctor: [
+    {
+      id: 'extended_delivery',
+      name: 'Extended Delivery',
+      description: 'A practised throw carries each vial 10% farther.',
+      cost: 150,
+      rangeMult: 1.1,
+    },
+    {
+      id: 'careful_measure',
+      name: 'Careful Measure',
+      description: 'Careful measurements reduce the gold cost of each Verdant Venom, Ruin Tonic, and Sanguine Solvent upgrade from 20 to 18.',
+      cost: 150,
+      requires: 'extended_delivery',
+      vialDiscount: 2,
+    },
+    {
+      id: 'refined_reagents',
+      name: 'Refined Reagents',
+      description: 'Refined reagents strengthen your concoctions making each effect 25% more potent.',
+      cost: 400,
+      requires: 'careful_measure',
+      major: true,
+      exclusiveGroup: 'plague_doctor_mode',
+      vialPotency: 1.25,
+    },
+    {
+      id: 'self_inoculation',
+      name: 'Self Inoculation',
+      description: 'Years of controlled exposure have rendered the Plague Doctor immune to all disabling effects.',
+      cost: 400,
+      requires: 'careful_measure',
+      major: true,
+      exclusiveGroup: 'plague_doctor_mode',
+      disableImmune: true,
+    },
+    {
+      id: 'verdant_distillation',
+      name: 'Verdant Distillation',
+      description: 'A more concentrated venom makes the poison of Verdant Venom 50% more potent instead of 25%.',
+      cost: 150,
+      requires: 'refined_reagents',
+      exclusiveGroup: 'plague_doctor_potency',
+      vialPotency: 1.5,
+      vialPotencyVial: 1,
+    },
+    {
+      id: 'ruinous_refinement',
+      name: 'Ruinous Refinement',
+      description: 'A harsher tonic makes the striking pain of Ruin Tonic 50% more potent instead of 25%.',
+      cost: 150,
+      requires: 'refined_reagents',
+      exclusiveGroup: 'plague_doctor_potency',
+      vialPotency: 1.5,
+      vialPotencyVial: 2,
+    },
+    {
+      id: 'sanguine_extraction',
+      name: 'Sanguine Extraction',
+      description: 'A more vicious solvent opens bigger wounds, making the bleed of Sanguine Solvent 50% more potent instead of 25%.',
+      cost: 150,
+      requires: 'refined_reagents',
+      exclusiveGroup: 'plague_doctor_potency',
+      vialPotency: 1.5,
+      vialPotencyVial: 3,
+    },
+    {
+      id: 'warding_fumes',
+      name: 'Warding Fumes',
+      description: 'Protective fumes give nearby allies a 25% chance to resist disabling effects.',
+      cost: 250,
+      requires: 'self_inoculation',
+      disableResistAura: 0.25,
+    },
+    {
+      id: 'the_grand_formula',
+      name: 'The Grand Formula',
+      description: 'After throwing each of his three remedies, the Plague Doctor prepares a fourth vial containing all of their effects.',
+      cost: 750,
+      requires: ['verdant_distillation', 'ruinous_refinement', 'sanguine_extraction'],
+      major: true,
+      grandFormula: true,
+    },
+    {
+      id: 'toxic_resilience',
+      name: 'Toxic Resilience',
+      description: 'Each resisted disabling effect invigorates the Doctor, granting 100% attack speed for 6 seconds.',
+      cost: 750,
+      requires: 'warding_fumes',
+      major: true,
+      resistHasteMult: 2,
+      resistHasteDuration: 6,
     },
   ],
 };
@@ -763,9 +933,16 @@ export function getMasteryUpgrade(
   return masteryTree(unitId).find((u) => u.id === upgradeId);
 }
 
+/** A node's prerequisites as a list (any one of them unlocks it; empty for a root node). */
+export function masteryRequires(node: Pick<MasteryUpgradeDef, 'requires'>): string[] {
+  const r = node.requires;
+  return r == null ? [] : typeof r === 'string' ? [r] : r;
+}
+
 /**
  * Whether a node's prerequisite (if any) has been purchased, so it is eligible
- * to buy. A node with no `requires` is always unlocked.
+ * to buy. A node with no `requires` is always unlocked; one with several needs
+ * any one of them.
  */
 export function isMasteryUpgradeUnlocked(
   unitId: string,
@@ -774,7 +951,8 @@ export function isMasteryUpgradeUnlocked(
 ): boolean {
   const def = getMasteryUpgrade(unitId, upgradeId);
   if (!def) return false;
-  return !def.requires || purchased.includes(def.requires);
+  const req = masteryRequires(def);
+  return req.length === 0 || req.some((id) => purchased.includes(id));
 }
 
 /**
@@ -805,8 +983,14 @@ export function activeMasteryUpgrades(
     const def = getMasteryUpgrade(unitId, id);
     if (!def) return true;
     if (def.exclusiveGroup && chosen.get(def.exclusiveGroup) !== id) return false;
-    // Guard against a malformed `requires` loop.
-    return !def.requires || depth > 32 || live(def.requires, depth + 1);
+    const req = masteryRequires(def);
+    // Guard against a malformed `requires` loop. With several prerequisites,
+    // any one learned and live keeps it lit.
+    return (
+      req.length === 0 ||
+      depth > 32 ||
+      req.some((r) => (req.length === 1 || purchased.includes(r)) && live(r, depth + 1))
+    );
   };
   return purchased.filter((id) => live(id));
 }
@@ -924,6 +1108,21 @@ export function masteryCritChanceBonus(
   let bonus = 0;
   for (const u of masteryTree(unitId)) {
     if (u.critChanceBonus && purchased.includes(u.id)) bonus += u.critChanceBonus;
+  }
+  return bonus;
+}
+
+/**
+ * Extra crit chance a champion's purchased nodes grant on hits against a
+ * bleeding foe (Blood in the Water), added on top of `critChanceFor`.
+ */
+export function masteryCritChanceVsBleeding(
+  unitId: string,
+  purchased: readonly string[],
+): number {
+  let bonus = 0;
+  for (const u of masteryTree(unitId)) {
+    if (u.critChanceVsBleeding && purchased.includes(u.id)) bonus += u.critChanceVsBleeding;
   }
   return bonus;
 }
@@ -1358,4 +1557,80 @@ export function masteryShardSplit(unitId: string, purchased: readonly string[]):
     if (u.shardSplitMult && purchased.includes(u.id)) mult = Math.max(mult, u.shardSplitMult);
   }
   return mult;
+}
+
+/** Gold off every vial level from a champion's purchased nodes (Careful Measure); 0 = none. */
+export function masteryVialDiscount(unitId: string, purchased: readonly string[]): number {
+  let discount = 0;
+  for (const u of masteryTree(unitId)) {
+    if (u.vialDiscount && purchased.includes(u.id)) discount += u.vialDiscount;
+  }
+  return discount;
+}
+
+/**
+ * Potency multiplier per vial (index-matched to `unit.vials`) from purchased
+ * nodes: the highest `vialPotency` covering each vial (Refined Reagents covers
+ * every vial, a Potency path its own one). 1 = base.
+ */
+export function masteryVialPotency(unit: UnitDef, purchased: readonly string[]): number[] {
+  const potency = (unit.vials ?? []).map(() => 1);
+  for (const u of masteryTree(unit.id)) {
+    if (!u.vialPotency || !purchased.includes(u.id)) continue;
+    potency.forEach((p, i) => {
+      if (u.vialPotencyVial == null || u.vialPotencyVial === i + 1) potency[i] = Math.max(p, u.vialPotency!);
+    });
+  }
+  return potency;
+}
+
+/** Whether a champion's purchased nodes add The Grand Formula to its vial cycle. */
+export function masteryGrandFormula(unitId: string, purchased: readonly string[]): boolean {
+  return masteryTree(unitId).some((u) => u.grandFormula && purchased.includes(u.id));
+}
+
+/**
+ * A vial thrower's whole mastery tuning (potency, The Grand Formula, level
+ * discount) in one go — what the engine stores on the tower and every vial
+ * display passes to `vialCycle` / `vialDamageFactor` / `vialLevelCost`.
+ */
+export function masteryVials(unit: UnitDef, purchased: readonly string[]): VialMastery {
+  return {
+    potency: masteryVialPotency(unit, purchased),
+    formula: masteryGrandFormula(unit.id, purchased),
+    discount: masteryVialDiscount(unit.id, purchased),
+  };
+}
+
+/** Whether a champion's purchased nodes make it immune to disabling effects (Self Inoculation). */
+export function masteryDisableImmune(unitId: string, purchased: readonly string[]): boolean {
+  return masteryTree(unitId).some((u) => u.disableImmune && purchased.includes(u.id));
+}
+
+/**
+ * The resist chance a champion's purchased nodes grant allies within its range
+ * against disabling effects (Warding Fumes); 0 = none. Highest wins.
+ */
+export function masteryDisableResistAura(unitId: string, purchased: readonly string[]): number {
+  let chance = 0;
+  for (const u of masteryTree(unitId)) {
+    if (u.disableResistAura && purchased.includes(u.id)) chance = Math.max(chance, u.disableResistAura);
+  }
+  return Math.min(1, chance);
+}
+
+/**
+ * The haste a champion gains each time it resists a disabling effect (Toxic
+ * Resilience): attack speed ×`mult` for `duration` s. Undefined when none.
+ */
+export function masteryResistHaste(
+  unitId: string,
+  purchased: readonly string[],
+): { mult: number; duration: number } | undefined {
+  for (const u of masteryTree(unitId)) {
+    if (u.resistHasteMult && u.resistHasteDuration && purchased.includes(u.id)) {
+      return { mult: u.resistHasteMult, duration: u.resistHasteDuration };
+    }
+  }
+  return undefined;
 }

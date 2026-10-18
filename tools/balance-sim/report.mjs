@@ -15,7 +15,7 @@ const TEAM_ORDER = ['starter', 'commons', 'commons no farmer', 'rares'];
 const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
 const r1 = (n) => (n == null ? null : Math.round(n * 10) / 10);
 const heroKey = (r) => Object.keys(r.dmgByUnit).find((k) => k.startsWith('player-'));
-const cap = (s) => s[0].toUpperCase() + s.slice(1);
+const cap = (s) => s[0].toUpperCase() + s.slice(1).replace(/_/g, ' ');
 
 function chapterData(R) {
   const L = [...new Set(R.map((r) => r.level))].sort((a, b) => a - b);
@@ -58,13 +58,13 @@ function chapterData(R) {
     };
   });
 
-  const fighters = [...new Set(R.flatMap((r) => Object.keys(r.dmgByUnit)))].filter((u) => !u.startsWith('player-') && !NON_FIGHTERS.includes(u));
-  const units = [...UNITS.filter((u) => fighters.includes(u)), ...fighters.filter((u) => !UNITS.includes(u))].map((u) => {
+  // A path team ("mono frostWitch (Shatterfrost)") reports its champion under that path's name.
+  const unitKey = (r, u) => (r.team.startsWith(`mono ${u} (`) ? r.team.slice(5) : u);
+  const efficiency = (r) => Object.keys(r.dmgByUnit).filter((u) => r.goldByUnit[u]).map((u) => [unitKey(r, u), r.dmgByUnit[u] / r.goldByUnit[u]]);
+  const fighters = [...new Set(R.flatMap((r) => efficiency(r).map(([k]) => k)))].filter((u) => !u.startsWith('player-') && !NON_FIGHTERS.includes(u));
+  const units = [...UNITS.filter((u) => fighters.includes(u)), ...fighters.filter((u) => !UNITS.includes(u)).sort()].map((u) => {
     const o = { u };
-    for (const m of MASTERY) {
-      const x = R.filter((r) => r.mastery === m && r.goldByUnit[u]);
-      o[m] = r1(avg(x.map((r) => r.dmgByUnit[u] / r.goldByUnit[u])));
-    }
+    for (const m of MASTERY) o[m] = r1(avg(R.filter((r) => r.mastery === m).flatMap((r) => efficiency(r).filter(([k]) => k === u).map(([, e]) => e))));
     return o;
   }).filter((u) => u.none != null || u.full != null);
 
@@ -84,11 +84,25 @@ function chapterData(R) {
     return o;
   });
 
-  return { stages, heroes, units, teams, runs: R.length, findings: findings({ stages, heroes, units, teams }) };
+  // Vial throwers (the Plague Doctor): how far the bot upgraded each one placed.
+  const vials = [...new Set(R.flatMap((r) => Object.keys(r.vialLevels ?? {})))].map((u) => {
+    const placed = R.flatMap((r) => r.vialLevels?.[u] ?? []);
+    const tiers = R.flatMap((r) => (r.vialLevels?.[u] ? r.tiers[u] ?? [] : []));
+    const n = Math.max(0, ...placed.map((l) => l.length));
+    return {
+      u,
+      placed: placed.length,
+      tier: r1(avg(tiers)),
+      levels: Array.from({ length: n }, (_, i) => r1(avg(placed.map((l) => l[i] ?? 0)))),
+      maxed: placed.filter((l) => l.every((x) => x >= 3)).length,
+    };
+  });
+
+  return { stages, heroes, units, teams, runs: R.length, findings: findings({ stages, heroes, units, teams, vials }) };
 }
 
 /** Plain-language findings, each a [headline, detail] pair, grouped by page section. */
-function findings({ stages, heroes, units, teams }) {
+function findings({ stages, heroes, units, teams, vials = [] }) {
   const f = { curve: [], leaks: [], heroes: [], units: [] };
   const known = (m) => stages.filter((s) => s[m].minGold != null);
 
@@ -140,6 +154,13 @@ function findings({ stages, heroes, units, teams }) {
   for (const m of MASTERY) {
     const never = teams.filter((t) => t.t.startsWith('mono') && t[m + 'Win'] === 0).map((t) => cap(t.t.replace('mono ', '')));
     if (never.length) f.units.push([`${never.join(', ')}-only teams never win at 200 gold ${m === 'none' ? 'without' : 'with full'} mastery.`, '']);
+  }
+  for (const v of vials) {
+    if (!v.placed) continue;
+    f.units.push([
+      `The ${cap(v.u)} reaches tier ${v.tier} on average, with vial levels ${v.levels.join(' / ')}.`,
+      `Average vial levels bought per placed ${cap(v.u)}, in cycle order, across ${v.placed} placed; ${v.maxed} had every vial maxed.`,
+    ]);
   }
   const farm = teams.find((t) => t.t === 'commons');
   const noFarm = teams.find((t) => t.t === 'commons no farmer');

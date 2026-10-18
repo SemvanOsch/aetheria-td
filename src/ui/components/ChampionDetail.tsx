@@ -1,19 +1,22 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { attackTypeLabel, coneAngleDeg, damageTypeLabel, upgradeEffectLabel, type UnitDef } from '../../domain/units';
+import { attackTypeLabel, coneAngleDeg, damageTypeLabel, upgradeEffectLabel, vialCycle, vialEffectLabel, vialLevelCost, vialLevelLabel, type UnitDef } from '../../domain/units';
 import {
   masteryBurstRadius,
   masteryGreaterOrb,
   masteryThrow,
   masteryUpgradeCost,
   masteryUpgradeEffect,
+  masteryVials,
 } from '../../domain/mastery';
 import { playerChampionPath } from '../../domain/playerChampion';
 import { proficiencyDef } from '../../domain/proficiency';
 import { RARITIES } from '../../domain/rarity';
-import { championRole, championStatTiles } from '../championStats';
+import { bleedHint, championRole, championStatTiles, ordinal, poisonHint, slowHint } from '../championStats';
+import { withKeywords, type KeywordRule } from './Keywords';
 import { UnitSprite } from './UnitSprite';
 import { Icon } from './Icon';
+import { Hint } from './Hint';
 import { BardSoundToggle } from './BardSoundToggle';
 
 interface Props {
@@ -52,6 +55,9 @@ export function ChampionDetail({
   const path = playerChampionPath(unit.id);
   const thrown = masteryThrow(unit.id, purchased);
   const tiles = championStatTiles(unit, purchased);
+  const vialMastery = masteryVials(unit, purchased);
+  const cycle = vialCycle(unit, [], vialMastery);
+  const formula = cycle.find((c) => c.formula);
   const role = championRole(unit);
 
   const notes: ReactNode[] = [];
@@ -102,7 +108,7 @@ export function ChampionDetail({
               {unit.attackType && <span className={`aoe-tag ${unit.attackType}`}>{attackTypeLabel(unit.attackType)}</span>}
               {unit.damageType && <span className={`aoe-tag ${unit.damageType}`}>{damageTypeLabel(unit.damageType)}</span>}
             </div>
-            <p className="cd-desc">{unit.description}</p>
+            <p className="cd-desc">{describe(unit, purchased)}</p>
 
             {owned ? (
               <button type="button" className="cd-mastery" onClick={onOpenMastery}>
@@ -137,13 +143,32 @@ export function ChampionDetail({
           <div className="cd-profile">
             <div className="cd-label">Battle profile</div>
             <div className="cd-tiles">
-              {tiles.map((t) => (
-                <div key={t.label} className="cd-tile">
-                  <div className="cd-tile-label">{t.label}</div>
-                  <div className="cd-tile-value">{t.value}</div>
-                  {t.sub && <div className="cd-tile-sub">{t.sub}</div>}
-                </div>
-              ))}
+              {tiles.map((t) => {
+                const body = (
+                  <>
+                    <div className="cd-tile-label">{t.label}</div>
+                    <div className="cd-tile-value">{t.value}</div>
+                    {t.sub && <div className="cd-tile-sub">{t.sub}</div>}
+                  </>
+                );
+                return t.hint ? (
+                  <Hint
+                    key={t.label}
+                    block
+                    className="cd-tile has-hint"
+                    tip={t.hint.text}
+                    title={t.hint.title}
+                    icon={t.hint.icon}
+                    accent={t.hint.accent}
+                  >
+                    {body}
+                  </Hint>
+                ) : (
+                  <div key={t.label} className="cd-tile">
+                    {body}
+                  </div>
+                );
+              })}
             </div>
             {notes.map((n, i) => (
               <p key={i} className="cd-note">
@@ -213,6 +238,52 @@ export function ChampionDetail({
                   </div>
                 );
               })}
+              {unit.vials?.length ? (
+                <>
+                  <div className="cd-vials-head">
+                    After level {unit.upgrades.length}, each vial levels up on its own, in any order:
+                  </div>
+                  {unit.vials.map((v, vi) => (
+                    <div key={`v${vi}`} className="cd-level cd-vial" style={{ '--vial': v.color } as CSSProperties}>
+                      <span className="cd-level-num cd-vial-dot" aria-hidden />
+                      <div className="cd-level-body">
+                        <div className="cd-level-head">
+                          <span className="cd-level-name">{v.name}</span>
+                          <span className="cd-level-cost">
+                            {v.levels.length ? `${v.levels.map((l) => vialLevelCost(l, vialMastery.discount)).join(' / ')} gold` : 'No levels'}
+                          </span>
+                        </div>
+                        <div className="cd-level-eff">
+                          <b>{vialEffectLabel(cycle[vi].effect)}</b> - {v.description}
+                        </div>
+                        {v.levels.length > 0 && (
+                          <div className="cd-vial-steps">
+                            {v.levels.map((_, li) => (
+                              <span key={li}>
+                                <b>Lv {li + 1}</b> {vialLevelLabel(v, li + 1, vialMastery.potency[vi] ?? 1)}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {formula && (
+                    <div className="cd-level cd-vial" style={{ '--vial': formula.color } as CSSProperties}>
+                      <span className="cd-level-num cd-vial-dot" aria-hidden />
+                      <div className="cd-level-body">
+                        <div className="cd-level-head">
+                          <span className="cd-level-name">{formula.name}</span>
+                          <span className="cd-level-cost">Every {ordinal(cycle.length)} throw</span>
+                        </div>
+                        <div className="cd-level-eff">
+                          <b>{vialEffectLabel(formula.effect)}</b> - Every vial's effect at once, at the levels they have reached.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : null}
             </div>
           </div>
         </div>
@@ -220,4 +291,21 @@ export function ChampionDetail({
     </div>,
     document.body,
   );
+}
+
+/**
+ * A champion's description with its keywords picked out: a bleeding
+ * champion's "bleed" (bleeds, bleeding), a poisoning champion's "poison"
+ * (poisons, poisoned) and an ice champion's "slow" (slowed, slows) show the
+ * same tip as their stat on hover.
+ */
+function describe(unit: UnitDef, purchased: string[]): ReactNode {
+  const rules: KeywordRule[] = [];
+  const bleed = bleedHint(unit);
+  if (bleed) rules.push({ pattern: 'bleed(?:s|ing)?', hint: bleed });
+  const poison = poisonHint(unit);
+  if (poison) rules.push({ pattern: 'poison(?:s|ed|ing|ous)?', hint: poison });
+  const slow = slowHint(unit, purchased);
+  if (slow) rules.push({ pattern: 'slow(?:s|ed|ing)?', hint: slow });
+  return withKeywords(unit.description, rules);
 }

@@ -376,6 +376,10 @@ textarea.ed-input { resize: vertical; line-height: 1.4; }
 .ed-add-effect select { background: #0c1020; border: 1px dashed var(--line-2); border-radius: var(--radius-sm); padding: 4px 8px; color: var(--text); }
 .ed-ability { padding: 8px 10px; border-radius: var(--radius-sm); background: rgba(111, 182, 255, 0.07); border: 1px solid rgba(111, 182, 255, 0.28); display: grid; gap: 6px; }
 .ed-ability p { margin: 0; }
+.ed-vial-swatch { width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--line-2); flex: none; }
+.ed-vial-levels { display: grid; gap: 8px; }
+.ed-vial-levels-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ed-vial-level-fields { padding: 8px 10px; }
 
 /* --------------------------------------------------------------- mastery */
 .ed-tree-scroll { overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); background: radial-gradient(800px 400px at 50% 0%, rgba(232, 191, 94, 0.06), transparent 70%), #0b0f1d; padding: 6px; }

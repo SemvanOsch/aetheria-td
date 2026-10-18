@@ -21,6 +21,7 @@ import {
 import { PROFICIENCIES, type Proficiency } from '../../domain/proficiency';
 import { PROFICIENCY_WEAPON } from '../../engine/sprites';
 import { LevelDesigner } from '../screens/LevelDesigner';
+import { sandboxMaps, useSandboxLauncher } from '../sandbox';
 import { ArmorIcon } from './ArmorIcon';
 import { PlayerSprite } from './PlayerSprite';
 import { Icon, type IconName } from './Icon';
@@ -30,7 +31,7 @@ interface Props {
 }
 
 /** Skill-tree EXP granted to every champion by the debug control. */
-const MASTERY_GRANT = 50;
+const MASTERY_GRANT = 500;
 
 /** Enemy Index kills granted to every enemy by the debug control. */
 const KILLS_GRANT = 50;
@@ -46,6 +47,11 @@ export function Developer({ onClose }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [showDesigner, setShowDesigner] = useState(false);
   const [notesReset, setNotesReset] = useState(false);
+
+  // Sandbox map selection.
+  const startSandbox = useSandboxLauncher();
+  const [maps] = useState(sandboxMaps);
+  const [sandboxLevel, setSandboxLevel] = useState(() => maps[0]?.levels[0]?.id ?? 1);
 
   // Armor forge selection.
   const [setId, setSetId] = useState(ARMOR_SETS[0]?.id ?? '');
@@ -160,6 +166,32 @@ export function Developer({ onClose }: Props) {
               </button>
             </div>
           </DevCard>
+
+          {startSandbox && (
+            <DevCard
+              icon="swords"
+              title="Sandbox"
+              sub="Play any map with no waves: send foes yourself from a list of every enemy. Plenty of gold, the castle can't fall, and nothing is banked."
+              wide
+            >
+              <div className="dev-sandbox-maps">
+                {maps.map((g) => (
+                  <ChipRow key={g.label} label={g.label}>
+                    {g.levels.map((l) => (
+                      <Chip key={l.id} on={sandboxLevel === l.id} onClick={() => setSandboxLevel(l.id)}>
+                        {l.endless ? `${l.name} (endless)` : l.name}
+                      </Chip>
+                    ))}
+                  </ChipRow>
+                ))}
+              </div>
+              <div className="dev-buttons">
+                <button className="dev-btn primary" onClick={() => startSandbox(sandboxLevel)}>
+                  <Icon name="swords" /> Start sandbox
+                </button>
+              </div>
+            </DevCard>
+          )}
 
           <DevCard
             icon="sword"

@@ -14,6 +14,7 @@ import { Icon, type IconName } from './Icon';
 import { CompassRose, CoverCorner, Flourish, PageCorners, WaxSeal } from './JournalArt';
 import { JournalChampions } from './JournalChampions';
 import { JournalBestiary } from './JournalBestiary';
+import { JournalStatus } from './JournalStatus';
 import { adventurerWeapon } from '../portrait';
 import { playIntroSound } from '../introAudio';
 import { JOURNAL_CHAPTERS, chapterPageTexts, unlockedChapterCount } from '../../domain/journal';
@@ -54,12 +55,25 @@ interface Props {
 }
 
 /**
- * The journal's three bookmarks: the adventurer's own pages (identification
- * and lore), their champions, and the bestiary.
+ * The journal's four bookmarks: the adventurer's own pages (identification
+ * and lore), their champions, the bestiary, and the status effects.
  */
-export type JournalSection = 'profile' | 'champions' | 'bestiary';
+export type JournalSection = 'profile' | 'champions' | 'bestiary' | 'status';
 
-const SECTION_ORDER: JournalSection[] = ['profile', 'champions', 'bestiary'];
+const SECTION_ORDER: JournalSection[] = ['profile', 'champions', 'bestiary', 'status'];
+
+const SECTION_LABEL: Record<Exclude<JournalSection, 'profile'>, string> = {
+  champions: 'Champions',
+  bestiary: 'Bestiary',
+  status: 'Status Effects',
+};
+
+const SECTION_ICON: Record<JournalSection, IconName> = {
+  profile: 'quill',
+  champions: 'helm',
+  bestiary: 'bestiary',
+  status: 'blood',
+};
 
 /** Cinematic phases: black → book opens → interactive page → book closes. */
 type Phase = 'intro' | 'opening' | 'page' | 'closing';
@@ -476,8 +490,7 @@ export function PlayerIntro({
           {isReview && phase === 'page' && (
             <div className="journal-bookmarks" role="tablist" aria-label="Journal sections">
               {SECTION_ORDER.map((id) => {
-                const label =
-                  id === 'profile' ? writtenName || review?.name || 'Adventurer' : id === 'champions' ? 'Champions' : 'Bestiary';
+                const label = id === 'profile' ? writtenName || review?.name || 'Adventurer' : SECTION_LABEL[id];
                 const marked =
                   id === 'profile'
                     ? leaves.some((l) => !revealedLeaves.has(leafKey(l)))
@@ -491,7 +504,7 @@ export function PlayerIntro({
                     className={`journal-bookmark ${id}${section === id ? ' active' : ''}`}
                     onClick={() => goToSection(id)}
                   >
-                    <Icon name={id === 'profile' ? 'quill' : id === 'champions' ? 'helm' : 'bestiary'} />
+                    <Icon name={SECTION_ICON[id]} />
                     <span className="journal-bookmark-label">{label}</span>
                     {marked && <i className="journal-bookmark-dot" aria-label="Something new" />}
                   </button>
@@ -508,6 +521,8 @@ export function PlayerIntro({
               <JournalChampions ready={phase === 'page'} onTurn={turnLeaf} />
             ) : navigable && section === 'bestiary' ? (
               <JournalBestiary ready={phase === 'page'} onTurn={turnLeaf} />
+            ) : navigable && section === 'status' ? (
+              <JournalStatus />
             ) : navigable && page === 1 ? (
               /* ---- Chapters index ---- */
               <>

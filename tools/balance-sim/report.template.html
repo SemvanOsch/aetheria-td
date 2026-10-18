@@ -110,7 +110,7 @@ td.cell { border-radius: 4px; }
     <p>Damage dealt per gold spent on the unit (placing it plus upgrades), across every run where it was deployed.</p>
     <div class="folio">
       <div class="legend"><span><i class="sw" style="background:var(--none)"></i>No mastery</span><span><i class="sw" style="background:var(--full)"></i>Full mastery</span></div>
-      <div class="scroll"><svg id="units" viewBox="0 0 640 250" width="100%" role="img" aria-label="Damage per gold by unit"></svg></div>
+      <div class="scroll"><svg id="units" viewBox="0 0 640 262" width="100%" role="img" aria-label="Damage per gold by unit"></svg></div>
     </div>
     <ul class="notes" id="fUnits"></ul>
   </section>
@@ -210,7 +210,7 @@ function drawHeroes(D) {
 function drawUnits(D) {
   const svg = clear('units');
   const us = [...D.units].sort((a, b) => ((b.none ?? 0) + (b.full ?? 0)) - ((a.none ?? 0) + (a.full ?? 0)));
-  const W = 640, l = 46, r = 14, t = 14, b = 34, H = 250, max = niceMax(Math.max(...us.flatMap((u) => [u.none ?? 0, u.full ?? 0])) + 1, 2);
+  const W = 640, l = 46, r = 14, t = 14, b = 46, H = 262, max = niceMax(Math.max(...us.flatMap((u) => [u.none ?? 0, u.full ?? 0])) + 1, 2);
   const y = (v) => t + (1 - v / max) * (H - t - b);
   for (let v = 0; v <= max; v += 2) {
     el('line', { x1: l, x2: W - r, y1: y(v), y2: y(v), stroke: css('--hair') }, svg);
@@ -227,12 +227,15 @@ function drawUnits(D) {
       el('rect', { x: x0, y: y(v), width: bw, height: y(0) - y(v), rx: 3, fill: col, opacity: 0.9 }, svg);
       el('text', { x: x0 + bw / 2, y: y(v) - 5, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 600, fill: col }, svg, v.toFixed(1));
     });
-    el('text', { x: cx, y: H - 12, 'text-anchor': 'middle', 'font-size': 12.5, fill: css('--text') }, svg, u.u[0].toUpperCase() + u.u.slice(1));
+    // "frostWitch (Deep Freeze)" → "Frost Witch" with the mastery path on a smaller line beneath.
+    const [, name, path] = u.u.match(/^(\S+)(?: \((.+)\))?$/) ?? [, u.u];
+    el('text', { x: cx, y: H - 24, 'text-anchor': 'middle', 'font-size': path ? 11.5 : 12.5, fill: css('--text') }, svg, name.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase()));
+    if (path) el('text', { x: cx, y: H - 9, 'text-anchor': 'middle', 'font-size': 10.5, fill: css('--dim') }, svg, path);
   });
 }
 
 function drawTeams(D) {
-  const label = (t) => t.replace('mono ', '').replace(/^./, (c) => c.toUpperCase()) + (t.startsWith('mono') ? ' only' : '');
+  const label = (t) => t.replace('mono ', '').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) + (t.startsWith('mono') ? ' only' : '');
   const desc = { starter: 'Swordsman, Archer', commons: 'Farmer, Archer, Crossbow, Swordsman, Spearman', 'commons no farmer': 'Archer, Crossbow, Swordsman, Spearman', rares: 'Wizard, Elf, Archer, Crossbow, Bard' };
   const hi = Math.max(260, ...D.teams.flatMap((t) => t[mastery].map((c) => c.g ?? 0)));
   let h = '<thead><tr><th>Team (plus hero)</th>' + D.stages.map((s) => `<th>Stage ${s.lv}</th>`).join('') + '<th>Win @200</th></tr></thead><tbody>';

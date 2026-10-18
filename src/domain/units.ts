@@ -218,6 +218,82 @@ export interface ShatterDef {
   reach: number;
 }
 
+/** Seconds a bleed wound lasts (and every open wound's clock resets to on a new hit). */
+export const BLEED_DURATION = 3;
+
+/** Most bleed wounds a foe can carry at once (see `addDotStack`). */
+export const BLEED_MAX_STACKS = 5;
+
+/**
+ * Bleed (the Bandit's knives): every hit that lands opens a wound that deals
+ * `damageMult` of that hit's damage again, spread over `BLEED_DURATION`
+ * seconds. Wounds stack (up to `BLEED_MAX_STACKS`), so a fast attacker keeps
+ * several open at once.
+ */
+export interface BleedDef {
+  damageMult: number;
+}
+
+/** Seconds a poison stack lasts (and every stack's clock resets to on a new hit). */
+export const POISON_DURATION = 5;
+
+/** Most poison stacks a foe can carry at once (see `addDotStack`). */
+export const POISON_MAX_STACKS = 5;
+
+/** Share of its usual strength a poison stack has on a boss. */
+export const POISON_BOSS_MULT = 0.2;
+
+/**
+ * Poison: every hit that lands adds a stack that deals `maxHealthFraction` of
+ * the foe's max health (`POISON_BOSS_MULT` of that on a boss), spread over
+ * `POISON_DURATION` seconds. Unlike Bleed it ignores the champion's damage.
+ * Stacks like Bleed (up to `POISON_MAX_STACKS`): each new stack restarts the
+ * clock on every stack ticking.
+ */
+export interface PoisonDef {
+  maxHealthFraction: number;
+}
+
+/**
+ * What one vial does when it shatters on a foe (a vial's base, or a level of it
+ * resolved through `effectiveVial`).
+ */
+export interface VialEffect {
+  /** Impact damage as a multiple of the champion's damage stat (1 = a plain hit, 0 = none). */
+  damageMult: number;
+  /** A poison stack worth this share of the foe's max health (see `PoisonDef`); 0 / omitted = none. */
+  poison?: number;
+  /** A bleed wound worth this share of the champion's damage stat (see `BleedDef`); 0 / omitted = none. */
+  bleed?: number;
+  /** Its impact damage ignores the foe's physical and magic resistance. */
+  ignoreResist?: boolean;
+}
+
+/**
+ * One in-stage level of a vial, bought with gold once the champion's regular
+ * tiers are all bought. Each set field *replaces* the vial's value from that
+ * level on (3% → 5% → 7% poison), so the numbers read as written.
+ */
+export interface VialLevelDef {
+  cost: number;
+  damageMult?: number;
+  poison?: number;
+  bleed?: number;
+}
+
+/**
+ * A vial in a thrower's cycle (the Plague Doctor): every attack throws the next
+ * vial in `UnitDef.vials` order, wrapping around. Each vial carries its own
+ * repeatable upgrade (`levels`), bought in parallel with the other vials'.
+ */
+export interface VialDef extends VialEffect {
+  name: string;
+  description: string;
+  /** Colour of the liquid (the flask in flight and its splash). */
+  color: string;
+  levels: VialLevelDef[];
+}
+
 /**
  * Economy behaviour: instead of attacking, the unit harvests gold. It produces
  * `amount` gold `timesPerWave` times during each wave.
@@ -281,6 +357,17 @@ export interface UnitDef {
    * the first other foe it meets (see `ShatterDef`). Omitted for every other unit.
    */
   shatter?: ShatterDef;
+  /** Its hits open bleeding wounds (the Bandit, see `BleedDef`). Omitted for every other unit. */
+  bleed?: BleedDef;
+  /** Its hits poison foes for a share of their max health (see `PoisonDef`). */
+  poison?: PoisonDef;
+  /**
+   * A cycle of vials thrown one per attack, in order (the Plague Doctor, see
+   * `VialDef`). Each vial decides that throw's damage, poison and bleed (the
+   * unit's own `bleed`/`poison` don't apply to it), and has its own upgrade
+   * levels that open once every regular tier is bought.
+   */
+  vials?: VialDef[];
   /** Gold cost to deploy the unit during a level. */
   cost: number;
   /** Max number of this unit that may be deployed per stage. */
@@ -346,6 +433,8 @@ export interface UnitVisual {
   | 'elf'
   | 'bard'
   | 'frostWitch'
+  | 'bandit'
+  | 'plagueDoctor'
   | 'player-blade'
   | 'player-claymore'
   | 'player-bow'
@@ -711,6 +800,105 @@ export const UNITS: Record<string, UnitDef> = {
     ],
     visual: { color: '#24306a', icon: '❄️', shape: 'frostWitch' },
   },
+  bandit: {
+    id: 'bandit',
+    name: 'Bandit',
+    description: 'A cutthroat who trades heavy blows for lingering wounds. Each quick strike applies bleed, letting the damage build while foes struggle onward.',
+    rarity: 'common',
+    damage: 6,
+    attackSpeed: 1.4,
+    range: 60,
+    targeting: 'first',
+    aoe: 'single',
+    attackType: 'melee',
+    damageType: 'physical',
+    bleed: { damageMult: 0.5 },
+    cost: 55,
+    deployLimit: 3,
+    upgrades: [
+      {
+        name: 'Deep Cuts',
+        description: 'His knives cut deeper dealing more damage.',
+        cost: 25,
+        damage: 3,
+      },
+      {
+        name: 'Rapid Cuts',
+        description: 'A flurry of quick slashes lands more often, stacking wounds in a hurry.',
+        cost: 30,
+        attackSpeed: 0.3,
+      },
+    ],
+    visual: { color: '#3b3440', icon: '🩸', shape: 'bandit' },
+  },
+  plague_doctor: {
+    id: 'plague_doctor',
+    name: 'Plague Doctor',
+    description: 'A masked physician who turns forbidden remedies against the enemy. His vials cycle between lingering venom, resistance-piercing tonics, and bloodletting solvents. Making every throw a different kind of threat.',
+    rarity: 'epic',
+    damage: 9,
+    attackSpeed: 0.65,
+    range: 95,
+    targeting: 'first',
+    aoe: 'single',
+    attackType: 'ranged',
+    damageType: 'physical',
+    vials: [
+      {
+        name: 'Verdant Venom',
+        description: 'A green venom that poisons whatever it splashes.',
+        color: '#b4d43a',
+        damageMult: 1,
+        poison: 0.1,
+        levels: [
+          { cost: 20, poison: 0.13 },
+          { cost: 20, poison: 0.16 },
+          { cost: 20, poison: 0.2 },
+        ],
+      },
+      {
+        name: 'Ruin Tonic',
+        description: 'A corrosive tonic that eats straight through armour and wards alike.',
+        color: '#b06ae0',
+        damageMult: 2,
+        ignoreResist: true,
+        levels: [
+          { cost: 20, damageMult: 2.5 },
+          { cost: 20, damageMult: 3 },
+          { cost: 20, damageMult: 3.5 },
+        ],
+      },
+      {
+        name: 'Sanguine Solvent',
+        description: 'A thin red solvent that keeps every wound it touches from closing.',
+        color: '#d8344a',
+        damageMult: 1,
+        bleed: 2,
+        levels: [
+          { cost: 20, bleed: 2.5 },
+          { cost: 20, bleed: 3 },
+          { cost: 20, bleed: 3.5 },
+        ],
+      },
+    ],
+    cost: 70,
+    deployLimit: 3,
+    upgrades: [
+      {
+        name: 'Measured Doses',
+        description: 'Careful measurements shorten the time between each prepared vial.',
+        cost: 25,
+        attackSpeed: 0.15,
+      },
+      {
+        name: 'Potent Formula',
+        description: 'A more potent mixture makes every vial strike with greater force.',
+        cost: 35,
+        damage: 8,
+      },
+    ],
+    visual: { color: '#2f2a2e', icon: '🧪', shape: 'plagueDoctor' },
+  },
 };
 
 /** Champions every player owns from the start (no selection screen). */
@@ -782,6 +970,18 @@ export function damageTypeLabel(type: DamageType): string {
  */
 export function unitDps(unit: UnitDef): number {
   return unit.damage * unit.attackSpeed;
+}
+
+/**
+ * Damage dealt per hit counting the wound it opens (the Bandit's bleed: each
+ * hit bleeds `damageMult` of itself again), as a multiplier on the hit. 1 for
+ * a champion whose hits don't bleed. A vial thrower's is its cycle's average
+ * at base levels (`vialDamageFactor`, with any vial mastery `vials`). Sustained-DPS
+ * displays read this.
+ */
+export function bleedDamageFactor(unit: UnitDef, vials: VialMastery = NO_VIAL_MASTERY): number {
+  if (unit.vials?.length) return vialDamageFactor(unit, [], vials);
+  return 1 + (unit.bleed?.damageMult ?? 0);
 }
 
 /**
@@ -894,6 +1094,151 @@ export function effectiveIceStorm(unit: UnitDef, tier: number): number {
     slow += unit.upgrades[i].iceStorm ?? 0;
   }
   return Math.min(1, slow);
+}
+
+/** A vial's effect at `level` (0 = its base): each bought level's set fields replace the last. */
+export function effectiveVial(vial: VialDef, level: number): VialEffect {
+  const e: VialEffect = { damageMult: vial.damageMult, poison: vial.poison, bleed: vial.bleed, ignoreResist: vial.ignoreResist };
+  for (let i = 0; i < level && i < vial.levels.length; i++) {
+    const l = vial.levels[i];
+    if (l.damageMult != null) e.damageMult = l.damageMult;
+    if (l.poison != null) e.poison = l.poison;
+    if (l.bleed != null) e.bleed = l.bleed;
+  }
+  return e;
+}
+
+/** The next level a vial at `level` could buy, or null if maxed. */
+export function nextVialLevel(vial: VialDef, level: number): VialLevelDef | null {
+  return level < vial.levels.length ? vial.levels[level] : null;
+}
+
+/** Whether a tower at `tier` may buy vial levels: it has vials and every regular tier is bought. */
+export function vialUpgradesOpen(unit: UnitDef, tier: number): boolean {
+  return !!unit.vials?.length && tier >= unit.upgrades.length;
+}
+
+/**
+ * A vial thrower's permanent mastery tuning (resolved by `masteryVials`):
+ * `potency` multiplies each vial's signature effect (index-matched to `vials`,
+ * missing = 1, see `potentVial`), `formula` adds The Grand Formula to the
+ * cycle, and `discount` is gold off every vial level (see `vialLevelCost`).
+ */
+export interface VialMastery {
+  potency: number[];
+  formula: boolean;
+  discount: number;
+}
+
+/** No vial mastery: base potency, no Grand Formula, full prices. */
+export const NO_VIAL_MASTERY: VialMastery = { potency: [], formula: false, discount: 0 };
+
+/** The fourth vial The Grand Formula adds after a full round (see `vialCycle`). */
+export const GRAND_FORMULA = { name: 'The Grand Formula', color: '#f4f2ec' } as const;
+
+/**
+ * A vial's effect with its signature made `mult`× as potent: its poison if it
+ * poisons, else its bleed if it bleeds, else its impact damage (the Ruin Tonic).
+ */
+export function potentVial(e: VialEffect, mult: number): VialEffect {
+  if (mult === 1) return e;
+  if (e.poison) return { ...e, poison: e.poison * mult };
+  if (e.bleed) return { ...e, bleed: e.bleed * mult };
+  return { ...e, damageMult: e.damageMult * mult };
+}
+
+/**
+ * The Grand Formula's effect: every vial's at once. The hardest impact (and
+ * resistance-piercing if any vial pierces), the strongest poison and bleed.
+ */
+export function grandFormulaEffect(effects: readonly VialEffect[]): VialEffect {
+  const max = (pick: (e: VialEffect) => number | undefined) => Math.max(0, ...effects.map((e) => pick(e) ?? 0));
+  return {
+    damageMult: max((e) => e.damageMult),
+    poison: max((e) => e.poison) || undefined,
+    bleed: max((e) => e.bleed) || undefined,
+    ignoreResist: effects.some((e) => e.ignoreResist) || undefined,
+  };
+}
+
+/** One throw in a vial thrower's cycle, resolved: what it is called, looks like and does. */
+export interface ThrownVial {
+  name: string;
+  color: string;
+  effect: VialEffect;
+  /** The Grand Formula (not one of the unit's own `vials`). */
+  formula?: boolean;
+}
+
+/**
+ * A vial thrower's full cycle in throw order: each vial at its bought level
+ * (`levels`, index-matched to `vials`) with its mastery potency, then The
+ * Grand Formula when learned. The engine's throws and every vial display read
+ * this. Empty for a champion without vials.
+ */
+export function vialCycle(unit: UnitDef, levels: readonly number[] = [], m: VialMastery = NO_VIAL_MASTERY): ThrownVial[] {
+  const cycle: ThrownVial[] = (unit.vials ?? []).map((v, i) => ({
+    name: v.name,
+    color: v.color,
+    effect: potentVial(effectiveVial(v, levels[i] ?? 0), m.potency[i] ?? 1),
+  }));
+  if (m.formula && cycle.length > 1) {
+    cycle.push({ ...GRAND_FORMULA, effect: grandFormulaEffect(cycle.map((c) => c.effect)), formula: true });
+  }
+  return cycle;
+}
+
+/** Colour of the vial at `index` of a thrower's cycle (The Grand Formula past its own vials). */
+export function vialColorAt(unit: UnitDef, index: number): string | undefined {
+  const vials = unit.vials;
+  if (!vials?.length) return undefined;
+  return index < vials.length ? vials[index].color : GRAND_FORMULA.color;
+}
+
+/** Gold a vial level costs after a mastery `discount` (Careful Measure); never below 0. */
+export function vialLevelCost(level: VialLevelDef, discount = 0): number {
+  return Math.max(0, level.cost - discount);
+}
+
+/**
+ * Damage per hit of a vial thrower averaged over its cycle, as a multiplier on
+ * its damage stat: each vial's impact plus its bleed (poison scales off the
+ * foe, so it's left out, as for every poison). `levels` index-matches `vials`
+ * (omitted = all at base); `m` folds in mastery (potency, The Grand Formula).
+ * 1 for a champion without vials.
+ */
+export function vialDamageFactor(unit: UnitDef, levels: readonly number[] = [], m: VialMastery = NO_VIAL_MASTERY): number {
+  const cycle = vialCycle(unit, levels, m);
+  if (!cycle.length) return 1;
+  const sum = cycle.reduce((s, c) => s + c.effect.damageMult + (c.effect.bleed ?? 0), 0);
+  return sum / cycle.length;
+}
+
+/** "3% max HP poison", "200% damage, ignores resistance", "100% bleed": a vial's effect in one line. */
+export function vialEffectLabel(e: VialEffect): string {
+  const pc = (f: number) => `${+(f * 100).toFixed(2)}%`;
+  const parts: string[] = [];
+  if (e.poison) parts.push(`${pc(e.poison)} max HP poison`);
+  if (e.bleed) parts.push(`${pc(e.bleed)} bleed`);
+  if (e.damageMult !== 1 || e.ignoreResist || parts.length === 0) {
+    parts.push(e.damageMult > 0 ? `${pc(e.damageMult)} damage${e.ignoreResist ? ', ignores resistance' : ''}` : 'no impact damage');
+  }
+  return parts.join(' · ');
+}
+
+/**
+ * What buying a vial's `level` (1-based) changes, as "5% → 7% poison": the
+ * values before and after it, with any mastery `potency` (see `potentVial`).
+ */
+export function vialLevelLabel(vial: VialDef, level: number, potency = 1): string {
+  const before = potentVial(effectiveVial(vial, level - 1), potency);
+  const after = potentVial(effectiveVial(vial, level), potency);
+  const pc = (f = 0) => `${+(f * 100).toFixed(2)}%`;
+  const parts: string[] = [];
+  if ((after.poison ?? 0) !== (before.poison ?? 0)) parts.push(`${pc(before.poison)} → ${pc(after.poison)} poison`);
+  if ((after.bleed ?? 0) !== (before.bleed ?? 0)) parts.push(`${pc(before.bleed)} → ${pc(after.bleed)} bleed`);
+  if (after.damageMult !== before.damageMult) parts.push(`${pc(before.damageMult)} → ${pc(after.damageMult)} damage`);
+  return parts.join(' · ') || 'No change';
 }
 
 /**

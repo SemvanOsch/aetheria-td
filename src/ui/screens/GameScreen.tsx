@@ -15,7 +15,16 @@ import {
   getUnit,
   maxUpgradeTier,
   nextUpgrade,
+  BLEED_DURATION,
+  POISON_DURATION,
   upgradeEffectLabel,
+  nextVialLevel,
+  vialCycle,
+  vialDamageFactor,
+  vialLevelCost,
+  vialEffectLabel,
+  vialLevelLabel,
+  vialUpgradesOpen,
 } from '../../domain/units';
 import {
   masteryStartingGoldBonus,
@@ -23,10 +32,11 @@ import {
   masteryUpgradeEffect,
   stageClearExp,
 } from '../../domain/mastery';
+import { CHAMPION_DEBUFFS } from '../../domain/championDebuffs';
 import { SELECTABLE_TARGETING, targetingLabel, type TargetingType } from '../../domain/targeting';
 import { BOARD_HEIGHT, BOARD_WIDTH, cellCenter } from '../../domain/grid';
 import { RARITIES } from '../../domain/rarity';
-import { GameEngine } from '../../engine/GameEngine';
+import { GameEngine, SANDBOX_GOLD } from '../../engine/GameEngine';
 import { drawBoard, type RenderUiState } from '../../engine/renderer';
 import type { Enemy, Outcome, Tower } from '../../engine/types';
 import { playCombatSound } from '../combatAudio';
@@ -45,9 +55,12 @@ import { ARMOR_RARITIES, armorPieceName, armorStatLines, type ArmorRoll } from '
 import { getEnemy, type EnemyDef } from '../../domain/enemies';
 import { EnemySprite } from '../components/EnemySprite';
 import { FieldNotePage, FieldNoteTab } from '../components/FieldNote';
+import { SandboxPanel } from '../components/SandboxPanel';
 
 interface Props {
   levelId: number;
+  /** A developer sandbox on this map: foes sent by hand, nothing banked. */
+  sandbox?: boolean;
   onExit: () => void;
   onHome: () => void;
   onRetry: () => void;
@@ -167,10 +180,11 @@ function ResistShield({ kind, pct }: { kind: 'physical' | 'magic'; pct: number }
   );
 }
 
-export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
+export function GameScreen({ levelId, sandbox = false, onExit, onHome, onRetry }: Props) {
   const game = useGame();
   const level = getBattleLevel(levelId)!;
-  const endless = level.endless;
+  // A sandbox on an endless map plays it as a plain board, not as a run.
+  const endless = sandbox ? undefined : level.endless;
   // The chapter's endless record going in, so the result can call a new best.
   const [prevBest] = useState(() => (endless ? game.state.endlessBest[endless.section] ?? 0 : 0));
   // "End run" asks for a second click before conceding an endless run.
@@ -263,8 +277,9 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     const startingGold =
       level.startingGold +
       masteryStartingGoldBonus(game.state.team, activeUpgrades);
-    const engine = new GameEngine(level, startingGold, activeUpgrades);
-    engine.armorUnlocked = isArmorUnlocked(game.state);
+    const engine = new GameEngine(level, sandbox ? SANDBOX_GOLD : startingGold, activeUpgrades, undefined, { sandbox });
+    // A sandbox banks nothing, armor drops included.
+    engine.armorUnlocked = !sandbox && isArmorUnlocked(game.state);
     engineRef.current = engine;
     // App picks the battle theme when the battle screen opens, but a retry
     // remounts this screen without App noticing: claim the theme here too, so
@@ -439,9 +454,10 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
       }
       // A foe slain enough times this battle to enter the bestiary for the
       // first time queues a field note at the board's side.
+      // (Not in a sandbox, which records nothing.)
       let fresh: string[] | null = null;
       for (const id in engine.enemyKills) {
-        if (recorded.has(id)) continue;
+        if (sandbox || recorded.has(id)) continue;
         const need = enemyUnlockKills(getEnemy(id));
         const before = bankedKills[id] ?? 0;
         if (before >= need) recorded.add(id);
@@ -456,7 +472,8 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
       }
 
       // Settle rewards/progression exactly once when the battle ends.
-      if (engine.outcome !== 'playing' && !settledRef.current) {
+      // A sandbox never ends on its own, and banks nothing if it somehow did.
+      if (engine.outcome !== 'playing' && !settledRef.current && !sandbox) {
         settledRef.current = true;
         // Champion mastery EXP is earned from kills regardless of the outcome,
         // so it banks on both victory and defeat. Winning a stage also grants
@@ -676,6 +693,16 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     engineRef.current?.startWave();
   };
 
+  // Sandbox: send foes by hand, and level heroes that have no waves to level them.
+  const sandboxSpawn = (enemyId: string, lane: number | 'all', count: number) => {
+    audioBus('combat');
+    engineRef.current?.sandboxSpawn(enemyId, lane, count);
+  };
+  const sandboxLevelHeroes = () => {
+    if (engineRef.current?.sandboxLevelHeroes()) refreshDeploys();
+    else showFlash('No deployed hero has a level left to gain.');
+  };
+
   // Concede an endless run (second click confirms); it settles like a defeat.
   const endRun = () => {
     if (!confirmEnd) {
@@ -732,6 +759,16 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
     if (selectedTowerUid == null) return;
     const ok = engineRef.current?.upgradeTower(selectedTowerUid, choice);
     if (!ok) {
+      showFlash('Not enough gold to upgrade.');
+      return;
+    }
+    refreshDeploys();
+  };
+
+  /** Buy the next level of one of the selected champion's vials. */
+  const upgradeVialSelected = (vial: number) => {
+    if (selectedTowerUid == null) return;
+    if (!engineRef.current?.upgradeVial(selectedTowerUid, vial)) {
       showFlash('Not enough gold to upgrade.');
       return;
     }
@@ -798,7 +835,11 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
         <div className="hud-stat">
           <span className="lbl">Realm</span> {level.name}
         </div>
-        {endless ? (
+        {sandbox ? (
+          <div className="hud-stat hud-sandbox">
+            <Icon name="hammer" /> Sandbox
+          </div>
+        ) : endless ? (
           <div className="hud-stat">
             <span className="lbl">Wave</span>
             <HudNum value={(hud?.waveIndex ?? 0) + 1} digits={3} />
@@ -1036,7 +1077,7 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
               )}
               {hud?.phase === 'wave' && (
                 <div className="panel wave-progress">
-                  <Icon name="swords" /> Wave in progress…
+                  <Icon name={sandbox ? 'hammer' : 'swords'} /> {sandbox ? 'Sandbox: no waves' : 'Wave in progress…'}
                 </div>
               )}
             </div>
@@ -1049,6 +1090,16 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
               <Icon name="fast" /> {fastForward ? '3×' : '1×'}
             </button>
           </div>
+
+          {sandbox && (
+            <SandboxPanel
+              laneCount={level.lanes.length}
+              onSpawn={sandboxSpawn}
+              onClear={() => engineRef.current?.sandboxClear()}
+              onRefillGold={() => engineRef.current?.sandboxRefillGold()}
+              onLevelHeroes={sandboxLevelHeroes}
+            />
+          )}
 
           {!selectedTower && inspect && inspect.uid === selectedEnemyUid && hud?.outcome === 'playing' && (
             <EnemyPanel foe={inspect} onClose={() => setSelectedEnemyUid(null)} />
@@ -1121,10 +1172,12 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                 const spd =
                   selectedTower.attackSpeed *
                   (selectedTower.attackSpeedBuffMult ?? 1) *
-                  (selectedTower.abilitySpeedBuffMult ?? 1);
+                  (selectedTower.abilitySpeedBuffMult ?? 1) *
+                  (selectedTower.resistHasteMult ?? 1);
                 const spdBuffed =
                   (selectedTower.attackSpeedBuffMult ?? 1) > 1 ||
-                  (selectedTower.abilitySpeedBuffMult ?? 1) > 1;
+                  (selectedTower.abilitySpeedBuffMult ?? 1) > 1 ||
+                  (selectedTower.resistHasteMult ?? 1) > 1;
                 const dmgBuffed = selectedTower.adjacentDamageMult > 0 && selectedTower.adjacentAllies > 0;
                 const rangeBuffed = selectedTower.rangeBuffed;
                 // DPS rises whenever damage or attack speed is lifted.
@@ -1140,9 +1193,18 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                     <div className={`s${dmgBuffed ? ' buff-dmg' : ''}`}>DMG <b>{selectedTower.damage}</b></div>
                     <div className={`s${spdBuffed ? ' buff-spd' : ''}`}>SPD <b>{formatAttackSpeed(spd)}/s</b></div>
                     <div className={`s${rangeBuffed ? ' buff-range' : selectedTower.mistMult < 1 ? ' debuff-range' : ''}`}>Range <b>{selectedTower.range}</b></div>
-                    <div className={`s${dpsBuffed ? ' buff-dps' : ''}`}>DPS <b>{(selectedTower.damage * spd).toFixed(0)}{selectedTower.burstCount > 1 ? ` x${selectedTower.burstCount}` : ''}</b></div>
+                    <div className={`s${dpsBuffed ? ' buff-dps' : ''}`}>DPS <b>{(selectedTower.damage * spd * vialDamageFactor(selectedTower.def, selectedTower.vialLevels, selectedTower.vialMastery)).toFixed(0)}{selectedTower.burstCount > 1 ? ` x${selectedTower.burstCount}` : ''}</b></div>
                     <div className={`s${critBuffed ? ' buff-crit' : ''}`}>Crit <b>{+(selectedTower.critChance * 100).toFixed(2)}%</b></div>
                     <div className={`s${critBuffed ? ' buff-crit' : ''}`}>Crit Dmg <b>{selectedTower.critMultiplier}×</b></div>
+                    {selectedTower.bleed && (
+                      <div className="s">Bleed <b>{Math.round(selectedTower.bleed.damageMult * 100)}% / {BLEED_DURATION}s</b></div>
+                    )}
+                    {selectedTower.poison && (
+                      <div className="s">Poison <b>{+(selectedTower.poison.maxHealthFraction * 100).toFixed(2)}% max HP / {POISON_DURATION}s</b></div>
+                    )}
+                    {selectedTower.critChanceVsBleeding > 0 && (
+                      <div className="s">Crit vs bleeding <b>+{+(selectedTower.critChanceVsBleeding * 100).toFixed(2)}%</b></div>
+                    )}
                   </div>
                 );
               })()}
@@ -1208,6 +1270,8 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                 const isHero = selectedTower.def.rarity === 'hero';
                 const up = nextUpgrade(selectedTower.def, selectedTower.upgradeTier);
                 if (!up) {
+                  // A vial thrower's upgrades go on in its vials (below).
+                  if (selectedTower.def.vials?.length) return null;
                   return (
                     <div className="upgrade-box maxed"><Icon name="star" /> Fully upgraded (Lv {maxUpgradeTier(selectedTower.def)})</div>
                   );
@@ -1280,6 +1344,10 @@ export function GameScreen({ levelId, onExit, onHome, onRetry }: Props) {
                   </button>
                 );
               })()}
+
+              {vialUpgradesOpen(selectedTower.def, selectedTower.upgradeTier) ? (
+                <VialUpgrades tower={selectedTower} gold={hud?.currency ?? 0} onBuy={upgradeVialSelected} />
+              ) : null}
 
               {!selectedTower.def.generator && (
                 <div className="target-select">
@@ -1419,6 +1487,86 @@ interface ActiveBuff {
 }
 
 /**
+ * A vial thrower's vial upgrades in the champion panel (the Plague Doctor),
+ * shown once every regular tier is bought. One card per vial: its name on top
+ * (a small play mark in the corner flags the one thrown next); under it the value before → after (or its
+ * current effect once maxed), with the buy button over its level pips beside it.
+ * The vials level independently of each other.
+ */
+function VialUpgrades({ tower, gold, onBuy }: { tower: Tower; gold: number; onBuy: (vial: number) => void }) {
+  const vials = tower.def.vials ?? [];
+  const m = tower.vialMastery;
+  const cycle = vialCycle(tower.def, tower.vialLevels, m);
+  const formula = cycle.find((c) => c.formula);
+  return (
+    <div className="vial-box">
+      <div className="upgrade-fork-head">Vial upgrades · any order</div>
+      <div className="vial-list">
+        {vials.map((v, i) => {
+          const level = tower.vialLevels[i] ?? 0;
+          const next = nextVialLevel(v, level);
+          const cost = next ? vialLevelCost(next, m.discount) : 0;
+          // A vial with a level left to buy is one big button, like a regular
+          // upgrade; a maxed one is a plain card.
+          const Card = next ? 'button' : 'div';
+          return (
+            <Card
+              key={i}
+              className={`vial-row${next ? ' buyable' : ''}`}
+              style={{ '--vial': v.color } as CSSProperties}
+              {...(next && {
+                type: 'button' as const,
+                disabled: gold < cost,
+                onClick: () => onBuy(i),
+                title: `Buy ${v.name} Lv ${level + 1}`,
+              })}
+            >
+              <div className="vial-top">
+                <span className="vial-dot" aria-hidden />
+                <span className="vial-name">{v.name}</span>
+                {tower.vialNext === i && <Icon name="play" className="vial-next" title="Thrown next" />}
+              </div>
+              <div className="vial-body">
+                <div className="vial-eff">
+                  {next ? vialLevelLabel(v, level + 1, m.potency[i] ?? 1) : vialEffectLabel(cycle[i].effect)}
+                </div>
+                <div className="vial-side">
+                  {next ? (
+                    <span className="vial-buy">
+                      <Icon name="coin" />{cost}
+                    </span>
+                  ) : (
+                    <span className="vial-max"><Icon name="star" /> Max</span>
+                  )}
+                  <span className="vial-pips" title={`Lv ${level}/${v.levels.length}`}>
+                    {v.levels.map((_, li) => (
+                      <span key={li} className={li < level ? 'on' : ''} />
+                    ))}
+                  </span>
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+        {formula && (
+          // The Grand Formula: no levels of its own, it carries the others' effects.
+          <div className="vial-row" style={{ '--vial': formula.color } as CSSProperties}>
+            <div className="vial-top">
+              <span className="vial-dot" aria-hidden />
+              <span className="vial-name">{formula.name}</span>
+              {tower.vialNext === vials.length && <Icon name="play" className="vial-next" title="Thrown next" />}
+            </div>
+            <div className="vial-body">
+              <div className="vial-eff">All in One</div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Every buff presently boosting a deployed champion, for the in-stage "Active
  * Buffs" panel. Reads only live tower fields, so the list (and any countdown)
  * refreshes each frame as the HUD re-renders. Covers the Bard's attack-speed
@@ -1446,6 +1594,23 @@ function activeBuffsFor(t: Tower): ActiveBuff[] {
       name: 'Piercing Shot',
       detail: `${t.pierceShots} piercing ${t.pierceShots === 1 ? 'arrow' : 'arrows'} nocked`,
       color: t.def.visual.color,
+    });
+  }
+  // Toxic Resilience: the haste of a debuff it just shrugged off.
+  if ((t.resistHasteMult ?? 1) > 1) {
+    buffs.push({
+      icon: 'fast',
+      name: 'Toxic Resilience',
+      detail: `+${Math.round((t.resistHasteMult - 1) * 100)}% attack speed · ${Math.ceil(t.resistHasteTimer)}s left`,
+      color: CHAMPION_DEBUFFS.sludged.color,
+    });
+  }
+  // Warding Fumes from a nearby Plague Doctor.
+  if ((t.resistChance ?? 0) > 0) {
+    buffs.push({
+      icon: 'shield',
+      name: 'Warding Fumes',
+      detail: `${Math.round(t.resistChance * 100)}% chance to resist disabling effects · from a nearby Plague Doctor`,
     });
   }
   if ((t.attackSpeedBuffMult ?? 1) > 1) {
@@ -1523,6 +1688,28 @@ function inspectEnemy(e: Enemy): EnemyInspect {
       detail: `+${Math.round((e.brittleMult - 1) * 100)}% damage taken`,
       timeLeft: e.brittle,
       color: '#bfe9ff',
+    });
+  }
+  // The Bandit's open wounds, bleeding until the longest one closes.
+  if (e.bleeds.length > 0) {
+    const dps = e.bleeds.reduce((sum, w) => sum + w.dps, 0);
+    debuffs.push({
+      icon: 'blood',
+      name: 'Bleeding',
+      detail: `${e.bleeds.length} wound${e.bleeds.length > 1 ? 's' : ''} · ${dps.toFixed(1)} dmg/s`,
+      timeLeft: Math.max(...e.bleeds.map((w) => w.left)),
+      color: '#e0455a',
+    });
+  }
+  // Poison stacks, eating a share of its max health until the last wears off.
+  if (e.poisons.length > 0) {
+    const dps = e.poisons.reduce((sum, p) => sum + p.dps, 0);
+    debuffs.push({
+      icon: 'poison',
+      name: 'Poisoned',
+      detail: `${e.poisons.length} stack${e.poisons.length > 1 ? 's' : ''} · ${dps.toFixed(1)} dmg/s`,
+      timeLeft: Math.max(...e.poisons.map((p) => p.left)),
+      color: '#8fd14f',
     });
   }
   // Mid-shove from a Gale Force gust or the Earthsplitter.

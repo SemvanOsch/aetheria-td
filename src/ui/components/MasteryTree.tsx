@@ -1,10 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { masteryTree, type MasteryUpgradeDef } from '../../domain/mastery';
+import { masteryRequires, masteryTree, type MasteryUpgradeDef } from '../../domain/mastery';
 import type { UnitDef } from '../../domain/units';
 import { RARITIES } from '../../domain/rarity';
 import { UnitSprite } from './UnitSprite';
 import { Icon, type IconName } from './Icon';
+import { withKeywords, type KeywordRule } from './Keywords';
+import { bleedHint, brittleHint, disableHint, poisonHint, slowHint } from '../championStats';
 
 interface Props {
   unit: UnitDef;
@@ -60,6 +62,12 @@ function nodeIcon(up: MasteryUpgradeDef): IconName {
   if (up.crossSlashEvery) return 'swords';
   if (up.burstShots) return 'volley';
   if (up.greaterOrb) return 'orb';
+  if (up.critChanceVsBleeding) return 'blood';
+  if (up.grandFormula) return 'crown';
+  if (up.vialPotency) return 'poison';
+  if (up.disableImmune || up.disableResistAura) return 'shield';
+  if (up.resistHasteMult) return 'fast';
+  if (up.vialDiscount) return 'coin';
   if (up.critChanceBonus || up.critMultiplier) return 'target';
   if (up.generateMult) return 'wheat';
   if (up.startingGoldBonus || up.upgradeDiscount) return 'coin';
@@ -98,11 +106,21 @@ export function MasteryTree({
   const style = { '--rarity': rarity.color } as CSSProperties;
   const tree = masteryTree(unit.id);
   const byId = new Map(tree.map((n) => [n.id, n]));
+  // A node's prerequisites in this tree (any one unlocks it), and the one its
+  // path runs up through: a learned one first.
+  const parentsOf = (n: MasteryUpgradeDef) => masteryRequires(n).filter((id) => byId.has(id));
+  const upOf = (n: MasteryUpgradeDef | undefined): MasteryUpgradeDef | undefined => {
+    if (!n) return undefined;
+    const ps = parentsOf(n);
+    const id = ps.find((p) => purchased.includes(p)) ?? ps[0];
+    return id ? byId.get(id) : undefined;
+  };
 
   const stateOf = (up: MasteryUpgradeDef): NodeState => {
     // Learned but not live: a swapped-out exclusive member, or a node after one.
     if (purchased.includes(up.id)) return active.includes(up.id) ? 'learned' : 'inactive';
-    if (up.requires && byId.has(up.requires) && !purchased.includes(up.requires)) return 'locked';
+    const ps = parentsOf(up);
+    if (ps.length > 0 && !ps.some((p) => purchased.includes(p))) return 'locked';
     return availableExp >= up.cost ? 'open' : 'short';
   };
 
@@ -117,9 +135,15 @@ export function MasteryTree({
 
   // Lay out: each node spans as many columns as it has leaves beneath it and
   // sits centred over them; rows follow prerequisite depth (the champion is row 0).
+  // A node with several prerequisites is laid out under the middle one, then
+  // slid to sit centred beneath them all.
+  const layoutParent = (n: MasteryUpgradeDef): string | undefined => {
+    const ps = parentsOf(n);
+    return ps[Math.floor((ps.length - 1) / 2)];
+  };
   const kids = new Map<string | undefined, MasteryUpgradeDef[]>();
   for (const n of tree) {
-    const parent = n.requires && byId.has(n.requires) ? n.requires : undefined;
+    const parent = layoutParent(n);
     kids.set(parent, [...(kids.get(parent) ?? []), n]);
   }
   const span = (id: string): number =>
@@ -139,6 +163,17 @@ export function MasteryTree({
   const roots = kids.get(undefined) ?? [];
   const cols = Math.max(1, roots.reduce((s, r) => s + span(r.id), 0));
   place(roots, 0, 1);
+  const shift = (id: string, dx: number) => {
+    const p = pos.get(id);
+    if (p) pos.set(id, { ...p, x: p.x + dx });
+    for (const k of kids.get(id) ?? []) shift(k.id, dx);
+  };
+  for (const n of tree) {
+    const ps = parentsOf(n).filter((p) => pos.has(p));
+    if (ps.length < 2) continue;
+    const mid = ps.reduce((s, p) => s + pos.get(p)!.x, 0) / ps.length;
+    shift(n.id, mid - pos.get(n.id)!.x);
+  }
   const boardW = cols * COL;
   const boardH = PAD_Y * 2 + maxDepth * ROW + 20;
   const rootPos = { x: boardW / 2, y: PAD_Y };
@@ -232,28 +267,38 @@ export function MasteryTree({
   // Whether a node sits on a learned-but-switched-off exclusive path (it, or a
   // node above it, is an inactive member of its group).
   const onInactivePath = (n: MasteryUpgradeDef | undefined): boolean =>
-    !!n && (stateOf(n) === 'inactive' || onInactivePath(n.requires ? byId.get(n.requires) : undefined));
+    !!n && (stateOf(n) === 'inactive' || onInactivePath(upOf(n)));
 
-  const edges = tree.map((n) => {
+  // One edge per prerequisite (or from the champion for a root node). With
+  // several prerequisites, only edges from learned ones light up.
+  const edges = tree.flatMap((n) => {
     const to = pos.get(n.id)!;
-    const from = n.requires && pos.has(n.requires) ? pos.get(n.requires)! : rootPos;
     const st = stateOf(n);
     const learned = st === 'learned' || st === 'inactive';
-    // A learned path that isn't the active one is darkened rather than gilded.
-    const cls = learned
-      ? onInactivePath(n) ? ' inactive' : ' lit'
-      : st === 'open' || st === 'short' ? ' ready' : '';
-    const midY = (from.y + to.y) / 2;
-    const d =
-      from.x === to.x
-        ? `M${from.x} ${from.y}L${to.x} ${to.y}`
-        : `M${from.x} ${from.y}C${from.x} ${midY} ${to.x} ${midY} ${to.x} ${to.y}`;
-    return <path key={n.id} d={d} className={`mt-edge${cls}`} />;
+    const ps = parentsOf(n);
+    return (ps.length ? ps : [undefined]).map((p) => {
+      const from = p ? pos.get(p)! : rootPos;
+      const taken = !p || purchased.includes(p);
+      // A learned path that isn't the active one is darkened rather than gilded.
+      const cls = !taken
+        ? ''
+        : learned
+          ? st === 'inactive' || onInactivePath(p ? byId.get(p) : undefined) ? ' inactive' : ' lit'
+          : st === 'open' || st === 'short' ? ' ready' : '';
+      const midY = (from.y + to.y) / 2;
+      const d =
+        from.x === to.x
+          ? `M${from.x} ${from.y}L${to.x} ${to.y}`
+          : `M${from.x} ${from.y}C${from.x} ${midY} ${to.x} ${midY} ${to.x} ${to.y}`;
+      return <path key={`${n.id}<${p ?? ''}`} d={d} className={`mt-edge${cls}`} />;
+    });
   });
 
   const detail = selected && (() => {
     const st = stateOf(selected);
-    const prereq = selected.requires ? byId.get(selected.requires) : undefined;
+    const prereqs = parentsOf(selected).map((id) => byId.get(id)!.name);
+    const prereqText =
+      prereqs.length > 1 ? `${prereqs.slice(0, -1).join(', ')} or ${prereqs[prereqs.length - 1]}` : prereqs[0];
     let action;
     if (st === 'learned') {
       action = (
@@ -265,7 +310,7 @@ export function MasteryTree({
       // Activating a node after a swapped-out member activates that member.
       let rival: MasteryUpgradeDef | undefined = selected;
       while (rival && !(rival.exclusiveGroup && !active.includes(rival.id))) {
-        rival = rival.requires ? byId.get(rival.requires) : undefined;
+        rival = upOf(rival);
       }
       const target = rival ?? selected;
       action = (
@@ -276,7 +321,7 @@ export function MasteryTree({
     } else if (st === 'locked') {
       action = (
         <button className="btn mt-action" disabled>
-          <Icon name="lock" /> Learn {prereq?.name ?? 'the previous node'} first
+          <Icon name="lock" /> Learn {prereqText ?? 'the previous node'} first
         </button>
       );
     } else if (st === 'short') {
@@ -307,7 +352,7 @@ export function MasteryTree({
             </div>
           </div>
         </div>
-        <p className="mt-detail-desc">{selected.description}</p>
+        <p className="mt-detail-desc">{nodeDescription(unit, selected, disabled ? [] : active)}</p>
         {action}
       </div>
     );
@@ -431,4 +476,28 @@ export function MasteryTree({
     </div>,
     document.body,
   );
+}
+
+/**
+ * A node's description with its keywords showing their tips on hover: a
+ * bleeding champion's "bleed" (Blood in the Water's "bleeding"), a poisoning
+ * champion's "poison", an ice
+ * champion's "slow" (her chill as the live nodes set it, or her base chill
+ * when a path like Shatterfrost turns it off) and Icebreak's "Brittle".
+ */
+function nodeDescription(unit: UnitDef, node: MasteryUpgradeDef, live: string[]): ReactNode {
+  const rules: KeywordRule[] = [];
+  const bleed = bleedHint(unit);
+  if (bleed) rules.push({ pattern: 'bleed(?:s|ing)?', hint: bleed });
+  const poison = poisonHint(unit);
+  if (poison) rules.push({ pattern: 'poison(?:s|ed|ing|ous)?', hint: poison });
+  const slow = slowHint(unit, live) ?? slowHint(unit, []);
+  if (slow) rules.push({ pattern: 'slow(?:s|ed|ing)?', hint: slow });
+  if (node.disableImmune || node.disableResistAura || node.resistHasteMult) {
+    rules.push({ pattern: 'disabling effects?', hint: disableHint() });
+  }
+  if (node.brittleMult && node.brittleDuration) {
+    rules.push({ pattern: 'brittle', hint: brittleHint({ mult: node.brittleMult, duration: node.brittleDuration }) });
+  }
+  return withKeywords(node.description, rules);
 }

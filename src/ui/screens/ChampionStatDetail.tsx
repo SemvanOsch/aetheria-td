@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   attackShapeLabel,
+  bleedDamageFactor,
   attackTypeLabel,
   coneAngleDeg,
   damageTypeLabel,
@@ -8,8 +9,14 @@ import {
   effectiveBounces,
   effectiveGenerate,
   effectiveIceStorm,
+  effectiveVial,
+  vialEffectLabel,
+  vialLevelLabel,
   effectiveMagicPen,
   maxUpgradeTier,
+  BLEED_DURATION,
+  POISON_BOSS_MULT,
+  POISON_DURATION,
   upgradeEffectLabel,
   type AbilityDef,
   type UnitDef,
@@ -18,6 +25,7 @@ import {
   masteryBard,
   masteryBrittle,
   masteryChill,
+  masteryCritChanceVsBleeding,
   masteryShardSplit,
   masteryShatter,
   masteryBounceDamageMult,
@@ -33,6 +41,11 @@ import {
   masteryAdjacentDamageMult,
   masteryStats,
   masteryThrow,
+  masteryDisableImmune,
+  masteryVials,
+  masteryDisableResistAura,
+  masteryRequires,
+  masteryResistHaste,
   masteryTree,
   masteryUpgradeCost,
   masteryUpgradeEffect,
@@ -81,7 +94,10 @@ interface CombatRow {
   rawDps: number;
   /** Raw DPS with average crit and Cross Slash folded in, on one target. */
   dps: number;
-  /** `dps` including every bounce leap's damage (= dps when the shot doesn't bounce). */
+  /**
+   * `dps` including every bounce leap's damage and the wounds a bleeding hit
+   * opens (= dps when the shot neither bounces nor bleeds).
+   */
   chainDps: number;
   /** Gold (EXP for a hero) spent to reach this tier (deploy cost + upgrade prices). */
   invested: number;
@@ -91,8 +107,11 @@ interface CombatRow {
 
 function combatRows(u: UnitDef, purchased: string[]): CombatRow[] {
   const burst = masteryBurst(u, purchased);
-  const cc = critChanceFor(u, purchased);
+  // A bleeding champion's sustained hits land on a foe already bleeding, so
+  // Blood in the Water's bonus counts.
+  const cc = critChanceFor(u, purchased) + (u.bleed ? masteryCritChanceVsBleeding(u.id, purchased) : 0);
   const cm = critMultiplierFor(u, purchased);
+  const bleed = bleedDamageFactor(u, masteryVials(u, purchased));
   const critFactor = 1 + cc * (cm - 1);
   const cross = u.visual.shape === 'player-blade' ? masteryCrossSlash(u.id, purchased) : undefined;
   const crossFactor = cross ? (cross.every - 1 + cross.damageMult) / cross.every : 1;
@@ -105,7 +124,8 @@ function combatRows(u: UnitDef, purchased: string[]): CombatRow[] {
     const rawDps = s.damage * s.attackSpeed * burst;
     const dps = rawDps * critFactor * crossFactor;
     const chain = 1 + bounceFractions(u, t, purchased).reduce((a, b) => a + b, 0);
-    rows.push({ tier: t, ...s, rawDps, dps, chainDps: dps * chain, invested, tierCost });
+    // Wounds scale off the damage stat, so they add to the uncritted DPS.
+    rows.push({ tier: t, ...s, rawDps, dps, chainDps: dps * chain + rawDps * (bleed - 1), invested, tierCost });
   }
   return rows;
 }
@@ -161,7 +181,7 @@ function CombatTable({ u, purchased }: { u: UnitDef; purchased: string[] }) {
             <th className="num">Range</th>
             <th className="num">Raw DPS</th>
             <th className="num">DPS (crit)</th>
-            {bounces && <th className="num">DPS w/ bounces</th>}
+            {bounces && <th className="num">{u.bleed ? 'DPS w/ bleed' : 'DPS w/ bounces'}</th>}
             <th className="num">{hero ? 'EXP so far' : 'Invested'}</th>
             <th className="num" title={`Total ${cur.toLowerCase()} spent to reach this tier, per point of DPS — lower is better`}>{cur} / DPS</th>
             <th className="num">Δ DPS</th>
@@ -417,6 +437,7 @@ function nodeEffects(n: MasteryUpgradeDef): string[] {
   mult('Hero EXP', n.heroExpMult);
   if (n.critChanceBonus) e.push(`Crit +${pct(n.critChanceBonus)}`);
   if (n.critMultiplier) e.push(`Crit dmg ${n.critMultiplier}×`);
+  if (n.critChanceVsBleeding) e.push(`Crit +${pct(n.critChanceVsBleeding)} vs bleeding`);
   if (n.startingGoldBonus) e.push(`+${n.startingGoldBonus} starting gold`);
   if (n.adjacentDamageMult) e.push(`+${pct(n.adjacentDamageMult)} dmg per adjacent ally`);
   if (n.rangeAuraMult) e.push(`Range aura ×${n.rangeAuraMult}`);
@@ -431,6 +452,12 @@ function nodeEffects(n: MasteryUpgradeDef): string[] {
   if (n.crossSlashEvery) e.push(`Every ${ordinal(n.crossSlashEvery)}: ${n.crossSlashMult ?? 1}× X cut`);
   if (n.weaponForm) e.push(`Weapon: ${n.weaponForm}`);
   if (n.unlocksArmor) e.push('Unlocks armor');
+  if (n.vialDiscount) e.push(`Vial levels −${n.vialDiscount}g`);
+  if (n.vialPotency) e.push(`${n.vialPotencyVial ? `Vial ${n.vialPotencyVial}` : 'Vials'} ×${n.vialPotency} potency`);
+  if (n.grandFormula) e.push('Grand Formula vial');
+  if (n.disableImmune) e.push('Debuff immune');
+  if (n.disableResistAura) e.push(`Allies resist ${pct(n.disableResistAura)}`);
+  if (n.resistHasteMult) e.push(`Resist: ×${n.resistHasteMult} speed ${n.resistHasteDuration ?? 0}s`);
   return e;
 }
 
@@ -447,6 +474,11 @@ function dynamicNotes(u: UnitDef, purchased: string[]): string[] {
   if (pre) out.push(`Preloads up to ${pre} spare shots while idle.`);
   const th = masteryThrow(u.id, purchased);
   if (th) out.push(`Every ${ordinal(th.every)} attack is a throw with ×${th.rangeMult} reach.`);
+  if (masteryDisableImmune(u.id, purchased)) out.push('Immune to champion debuffs (the Sludge Father\x27s sludge).');
+  const ward = masteryDisableResistAura(u.id, purchased);
+  if (ward) out.push(`Allies in range resist champion debuffs ${pct(ward)} of the time.`);
+  const haste = masteryResistHaste(u.id, purchased);
+  if (haste) out.push(`Each resisted debuff: ×${haste.mult} attack speed for ${haste.duration}s.`);
   return out;
 }
 
@@ -509,12 +541,12 @@ function MasteryPicker({
       // without it), except a node the page pins.
       setSelected(selected.filter((id) => {
         const m = tree.find((x) => x.id === id);
-        return id !== n.id && !(m && forcedState(u, m) === undefined && ancestorIds(tree, m).includes(n.id));
+        return id !== n.id && !(m && forcedState(u, m) === undefined && ancestorIds(tree, m, selected).includes(n.id));
       }));
     } else {
       // Ticking a node ticks its prerequisites too, and exclusive branches behave
       // like radios: a rival member and everything after it drop out.
-      const add = [...ancestorIds(tree, n), n.id];
+      const add = [...ancestorIds(tree, n, selected), n.id];
       const keep = selected.filter((id) => {
         const m = tree.find((x) => x.id === id);
         return !m || !branchesConflict(tree, n, m);
@@ -537,20 +569,20 @@ function MasteryPicker({
           style={{ gridTemplateColumns: `repeat(${layout.cols}, minmax(220px, 260px))` }}
         >
           <svg className="cd-tree-edges" aria-hidden>
-            {tree.map((n) => {
-              const from = n.requires ? anchors.get(n.requires)?.bottom : undefined;
+            {tree.flatMap((n) => masteryRequires(n).map((p) => {
+              const from = anchors.get(p)?.bottom;
               const to = anchors.get(n.id)?.top;
               if (!from || !to) return null;
-              const lit = selected.includes(n.id) && selected.includes(n.requires!);
+              const lit = selected.includes(n.id) && selected.includes(p);
               const midY = (from.y + to.y) / 2;
               return (
                 <path
-                  key={n.id}
+                  key={`${n.id}<${p}`}
                   className={`${lit ? 'lit' : ''}${n.exclusiveGroup ? ' fork' : ''}`}
                   d={`M${from.x} ${from.y}C${from.x} ${midY} ${to.x} ${midY} ${to.x} ${to.y}`}
                 />
               );
-            })}
+            }))}
           </svg>
           {tree.map((n) => {
             const cell = layout.cells.get(n.id)!;
@@ -620,7 +652,9 @@ function treeLayout(tree: MasteryUpgradeDef[]): {
   const ids = new Set(tree.map((n) => n.id));
   const kids = new Map<string | undefined, MasteryUpgradeDef[]>();
   for (const n of tree) {
-    const parent = n.requires && ids.has(n.requires) ? n.requires : undefined;
+    // Under its middle prerequisite when it has several.
+    const ps = masteryRequires(n).filter((id) => ids.has(id));
+    const parent = ps[Math.floor((ps.length - 1) / 2)];
     kids.set(parent, [...(kids.get(parent) ?? []), n]);
   }
   const span = (id: string): number => Math.max(1, (kids.get(id) ?? []).reduce((s, k) => s + span(k.id), 0));
@@ -639,15 +673,37 @@ function treeLayout(tree: MasteryUpgradeDef[]): {
   return { cols: Math.max(1, roots.reduce((s, r) => s + span(r.id), 0)), cells };
 }
 
-/** Ids of the nodes a node requires, nearest first. */
-function ancestorIds(tree: MasteryUpgradeDef[], n: MasteryUpgradeDef): string[] {
+/**
+ * Ids of the nodes a node requires, nearest first. Where a node has several
+ * prerequisites the path runs up through one in `prefer` (the ticked ones),
+ * else its first.
+ */
+function ancestorIds(tree: MasteryUpgradeDef[], n: MasteryUpgradeDef, prefer: readonly string[] = []): string[] {
+  const up = (m: MasteryUpgradeDef) => {
+    const ps = masteryRequires(m);
+    const id = ps.find((p) => prefer.includes(p)) ?? ps[0];
+    return id ? tree.find((x) => x.id === id) : undefined;
+  };
   const out: string[] = [];
-  let cur = n.requires ? tree.find((m) => m.id === n.requires) : undefined;
+  let cur = up(n);
   while (cur && !out.includes(cur.id)) {
     out.push(cur.id);
-    cur = cur.requires ? tree.find((m) => m.id === cur!.requires) : undefined;
+    cur = up(cur);
   }
   return out;
+}
+
+/**
+ * The ancestors every route up from a node shares: with several prerequisites
+ * (any one will do) only those common to all of them bind it to a branch.
+ */
+function sharedAncestorIds(tree: MasteryUpgradeDef[], n: MasteryUpgradeDef): string[] {
+  const routes = masteryRequires(n).map((p) => {
+    const m = tree.find((x) => x.id === p);
+    return m ? [p, ...sharedAncestorIds(tree, m)] : [p];
+  });
+  if (routes.length === 0) return [];
+  return routes[0].filter((id) => routes.every((r) => r.includes(id)));
 }
 
 /**
@@ -656,7 +712,7 @@ function ancestorIds(tree: MasteryUpgradeDef[], n: MasteryUpgradeDef): string[] 
  */
 function branchChoices(tree: MasteryUpgradeDef[], n: MasteryUpgradeDef): Map<string, string> {
   const out = new Map<string, string>();
-  for (const id of [n.id, ...ancestorIds(tree, n)]) {
+  for (const id of [n.id, ...sharedAncestorIds(tree, n)]) {
     const m = tree.find((x) => x.id === id);
     if (m?.exclusiveGroup && !out.has(m.exclusiveGroup)) out.set(m.exclusiveGroup, m.id);
   }
@@ -721,6 +777,19 @@ export function ChampionStatDetail({ unit: u }: { unit: UnitDef }) {
     if (fractions.length) summary.push(['Bounces (max tier)', fractions.map(pct).join(' → ')]);
     summary.push(['Crit', <Cmp v={critChanceFor(u, purchased) * 100} base={critChanceFor(u, []) * 100} suffix="%" />]);
     summary.push(['Crit damage', <Cmp v={critMultiplierFor(u, purchased)} base={critMultiplierFor(u, [])} digits={2} suffix="×" />]);
+    if (u.bleed) {
+      summary.push(['Bleed', `each hit bleeds ${pct(u.bleed.damageMult)} of the damage stat (crits don't count) over ${BLEED_DURATION}s`]);
+      const vsBleeding = masteryCritChanceVsBleeding(u.id, purchased);
+      if (vsBleeding) summary.push(['Crit vs bleeding', `+${pct(vsBleeding)} (Blood in the Water)`]);
+    }
+    if (u.poison) {
+      summary.push(['Poison', `each hit adds a stack of ${pct(u.poison.maxHealthFraction)} of the foe's max HP over ${POISON_DURATION}s, ${pct(POISON_BOSS_MULT)} as much on bosses (not in DPS)`]);
+    }
+    // A vial thrower: its cycle, then each vial's in-stage levels (bought after the tiers).
+    u.vials?.forEach((v, vi) => {
+      const steps = v.levels.map((l, li) => `Lv ${li + 1} (${l.cost}g) ${vialLevelLabel(v, li + 1)}`).join(', ');
+      summary.push([`Vial ${vi + 1}: ${v.name}`, `${vialEffectLabel(effectiveVial(v, 0))}${steps ? `; ${steps}` : ''}`]);
+    });
     if (cross) summary.push(['Cross Slash', `every ${ordinal(cross.every)} attack, ${cross.damageMult}×`]);
     const chill = masteryChill(u, purchased);
     if (chill) summary.push(['Slow', `${pct(chill.slow)} for ${chill.duration}s`]);
@@ -804,6 +873,7 @@ export function ChampionStatDetail({ unit: u }: { unit: UnitDef }) {
           <p className="es-faint">
             {combat &&
               'Raw DPS = damage × atk/s × volley. DPS (crit) adds average crit and Cross Slash, on one target — line, cone and blast shapes multiply it per foe struck. '}
+            {u.bleed && 'DPS w/ bleed adds the wounds each hit opens, as sustained damage on a foe kept bleeding (so crit counts Blood in the Water). Wounds scale off the damage stat, so crits don\'t enlarge them. '}
             {isHero(u)
               ? 'Heroes deploy free and level up from EXP pooled in-stage, so costs are EXP thresholds. EXP / DPS = EXP pooled so far per point of DPS; EXP / Δ DPS = that level’s EXP per DPS it adds. Lower is better.'
               : 'Invested = deploy cost + upgrades so far. Gold / DPS = invested gold per point of DPS; Gold / Δ DPS = that upgrade’s price per DPS it adds. Lower is better.'}

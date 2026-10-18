@@ -2388,6 +2388,143 @@ button:disabled .icon {
   margin-top: 0;
 }
 
+/* A vial thrower's vial upgrades in-stage (the Plague Doctor), shown once its
+   regular tiers are bought: one card per vial, each levelling on its own. Its
+   name on top, then its effect beside the buy button over its level pips;
+   `--vial` is the vial's liquid colour. */
+.vial-box {
+  margin-top: 10px;
+}
+.vial-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.vial-row {
+  position: relative;
+  padding: 5px 7px 5px 8px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--vial) 35%, transparent);
+  background: color-mix(in srgb, var(--vial) 7%, transparent);
+}
+/* A vial with a level left to buy: the whole card is the buy button. */
+.vial-row.buyable {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.vial-row.buyable:hover:not(:disabled) {
+  filter: brightness(1.15);
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--vial) 60%, transparent);
+}
+.vial-row.buyable:disabled {
+  cursor: not-allowed;
+}
+.vial-row.buyable:disabled .vial-buy {
+  opacity: 0.5;
+}
+.vial-top {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 700;
+  min-width: 0;
+}
+.vial-body {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+.vial-side {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.vial-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vial);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--vial) 70%, transparent);
+  flex: none;
+}
+.vial-name {
+  color: var(--vial);
+  filter: brightness(1.15);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+/* The vial thrown next: a small play mark in the card's top-right corner. */
+.vial-next {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  width: 11px;
+  height: 11px;
+  color: var(--vial);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--vial) 70%, transparent));
+}
+.vial-next .ic-fill {
+  opacity: 1;
+}
+.vial-pips {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+.vial-pips span {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  border: 1px solid color-mix(in srgb, var(--vial) 70%, transparent);
+}
+.vial-pips span.on {
+  background: var(--vial);
+}
+.vial-buy {
+  flex: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 48px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--gold);
+  border: 1px solid rgba(95, 211, 138, 0.5);
+  background: rgba(95, 211, 138, 0.12);
+}
+.vial-max {
+  flex: none;
+  min-width: 48px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gold);
+}
+.vial-eff {
+  flex: 1;
+  min-width: 0;
+  padding-left: 12px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-dim);
+}
+
 /* Hero champion in-stage leveling: an EXP pool that auto-levels, shown as a
    progress bar instead of a gold buy button. */
 .upgrade-box.hero-xp {
@@ -2632,6 +2769,142 @@ button.cd-mastery:hover {
   font-size: 11.5px;
   color: var(--text-faint);
 }
+/* A tile with a hover tip (the Bandit's Bleed, the Frost Witch's Slow): it
+   warms to its tip's accent (`--hint-accent`, set by `Hint`). */
+.cd-tile.has-hint {
+  position: relative;
+  cursor: help;
+  outline: none;
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, transform 0.18s var(--ease-out);
+}
+.cd-tile.has-hint .cd-tile-label::after {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 6px;
+  vertical-align: 2px;
+  border-radius: 50%;
+  background: var(--hint-accent);
+  box-shadow: 0 0 6px var(--hint-accent);
+}
+.cd-tile.has-hint:hover,
+.cd-tile.has-hint:focus-visible {
+  border-color: color-mix(in srgb, var(--hint-accent) 55%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--hint-accent) 14%, transparent), var(--well));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--hint-accent) 18%, transparent),
+    0 6px 18px color-mix(in srgb, var(--hint-accent) 22%, transparent);
+  transform: translateY(-1px);
+}
+.cd-tile.has-hint:hover .cd-tile-value,
+.cd-tile.has-hint:focus-visible .cd-tile-value {
+  color: color-mix(in srgb, var(--hint-accent) 55%, white);
+}
+
+/* Keywords in a description (the Bandit's "bleed", the Frost Witch's "slowed",
+   Icebreak's "Brittle"): bold, underlined, in the keyword's accent (`--kw`). */
+.kw {
+  outline: none;
+  cursor: help;
+}
+.kw > span {
+  font-weight: 700;
+  color: var(--kw);
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  border-radius: 3px;
+  transition: filter 0.15s ease, background 0.15s ease;
+}
+.kw:hover > span,
+.kw:focus-visible > span {
+  filter: brightness(1.35);
+  background: color-mix(in srgb, var(--kw) 14%, transparent);
+}
+
+/* ---- Hover tips (`Hint`): a dark plate with a gilt hairline ---- */
+.hint-tip {
+  position: fixed;
+  z-index: 400;
+  max-width: 260px;
+  padding: 9px 12px 10px;
+  border-radius: 9px;
+  pointer-events: none;
+  color: var(--text);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--hint-accent) 14%, transparent), transparent 60%),
+    var(--panel-solid);
+  border: 1px solid color-mix(in srgb, var(--hint-accent) 55%, var(--border-strong));
+  box-shadow:
+    inset 0 1px 0 var(--panel-hi),
+    0 0 18px color-mix(in srgb, var(--hint-accent) 22%, transparent),
+    var(--shadow);
+  opacity: 0;
+  transform: translateY(4px) scale(0.97);
+  transform-origin: var(--hint-arrow) 100%;
+  transition: opacity 0.16s ease, transform 0.2s var(--ease-out);
+}
+.hint-tip.below {
+  transform: translateY(-4px) scale(0.97);
+  transform-origin: var(--hint-arrow) 0%;
+}
+.hint-tip.shown {
+  opacity: 1;
+  transform: none;
+}
+/* The pointer: a small rotated square on the edge facing the anchor. */
+.hint-tip::after {
+  content: '';
+  position: absolute;
+  left: calc(var(--hint-arrow) - 5px);
+  bottom: -6px;
+  width: 10px;
+  height: 10px;
+  background: var(--panel-solid);
+  border-right: 1px solid color-mix(in srgb, var(--hint-accent) 55%, var(--border-strong));
+  border-bottom: 1px solid color-mix(in srgb, var(--hint-accent) 55%, var(--border-strong));
+  transform: rotate(45deg);
+}
+.hint-tip.below::after {
+  top: -6px;
+  bottom: auto;
+  transform: rotate(225deg);
+}
+.hint-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  padding-bottom: 5px;
+  font-family: var(--font-title);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--hint-accent);
+  border-bottom: 1px solid var(--hairline);
+}
+.hint-head .icon {
+  width: 14px;
+  height: 14px;
+}
+.hint-body {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hint-tip,
+  .hint-tip.below {
+    transform: none;
+    transition: opacity 0.1s linear;
+  }
+  .cd-tile.has-hint:hover,
+  .cd-tile.has-hint:focus-visible {
+    transform: none;
+  }
+}
 .cd-attack {
   margin: 12px 0 0;
   font-size: 13.5px;
@@ -2730,6 +3003,30 @@ button.cd-mastery:hover {
   .cd-level-fork {
     grid-template-columns: 1fr;
   }
+}
+/* A vial thrower's vials after its tiers, each in its liquid's colour (`--vial`). */
+.cd-vials-head {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.cd-level.cd-vial {
+  border-color: color-mix(in srgb, var(--vial) 45%, transparent);
+  background: color-mix(in srgb, var(--vial) 7%, var(--well));
+}
+.cd-vial-dot {
+  background: radial-gradient(circle at 40% 35%, #ffffffaa, var(--vial) 45%, color-mix(in srgb, var(--vial) 55%, #000) 100%);
+}
+.cd-vial-steps {
+  margin-top: 5px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.cd-vial-steps b {
+  color: var(--vial);
 }
 /* A tier that grants an activated ability, picked out in gold. */
 .cd-level.ability {
@@ -2952,8 +3249,8 @@ button.cd-mastery:hover {
 }
 .mt-pan-hint {
   position: absolute;
-  right: 10px;
-  bottom: 8px;
+  left: 10px;
+  top: 8px;
   font-size: 11px;
   color: var(--text-faint);
   pointer-events: none;
@@ -4593,6 +4890,12 @@ button.cd-mastery:hover {
 .hud-stat.hud-gold .icon {
   color: var(--gold);
   font-size: 17px;
+}
+/* A developer sandbox battle, in place of the wave counter. */
+.hud-stat.hud-sandbox {
+  gap: 6px;
+  color: var(--purple);
+  border-color: color-mix(in srgb, var(--purple) 40%, transparent);
 }
 /* Endless: the countdown to the next boss wave. */
 .hud-boss-in {
@@ -7102,6 +7405,7 @@ button.cd-mastery:hover {
 }
 .journal-bookmark.champions { --bm: #2d4f86; }
 .journal-bookmark.bestiary { --bm: #3d6a3e; }
+.journal-bookmark.status { --bm: #5a3a78; width: 172px; }
 .journal-bookmark-dot {
   position: absolute;
   top: 7px;
@@ -7659,6 +7963,65 @@ body:has(.intro-root) > .modal-backdrop {
   font-size: 18px;
 }
 
+/* ---- Status Effects: an effect's mark in place of a figure ---- */
+.js-intro {
+  margin: 0 0 12px;
+  font-family: var(--font-story);
+  font-style: italic;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--ink-soft);
+  text-align: center;
+}
+.js-frame {
+  background:
+    radial-gradient(46% 40% at 50% 52%, color-mix(in srgb, var(--fx) 30%, transparent), transparent 75%),
+    radial-gradient(70% 56% at 50% 40%, rgba(255, 250, 232, 0.75), transparent 72%),
+    repeating-linear-gradient(45deg, rgba(107, 83, 53, 0.06) 0 1px, transparent 1px 7px),
+    linear-gradient(180deg, #efdfbb, #dcc293);
+}
+/* A wax-like medallion carrying the effect's glyph in its colour. */
+.js-mark {
+  width: 104px;
+  height: 104px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: color-mix(in srgb, var(--fx) 82%, #000);
+  background: radial-gradient(circle at 38% 32%, rgba(255, 250, 232, 0.9), rgba(243, 226, 189, 0.6) 60%, color-mix(in srgb, var(--fx) 22%, #dcc293));
+  border: 2px solid color-mix(in srgb, var(--fx) 70%, var(--ink));
+  box-shadow:
+    inset 0 0 0 4px rgba(255, 250, 232, 0.5),
+    inset 0 0 0 5px color-mix(in srgb, var(--fx) 40%, transparent),
+    0 3px 8px rgba(60, 40, 10, 0.2);
+}
+.js-mark .icon {
+  width: 56px;
+  height: 56px;
+}
+.js-mark .icon .ic-fill {
+  fill: color-mix(in srgb, var(--fx) 34%, transparent);
+}
+.js-mark.small {
+  width: 50px;
+  height: 50px;
+  border-width: 1.5px;
+  box-shadow: inset 0 0 0 3px rgba(255, 250, 232, 0.5);
+}
+.js-mark.small .icon {
+  width: 26px;
+  height: 26px;
+}
+.js-card .j-card-art {
+  background: radial-gradient(50% 50% at 50% 50%, color-mix(in srgb, var(--fx) 22%, transparent), transparent 80%);
+}
+/* No ledger on an effect's page: a rule under its name leads into the text. */
+.js-entry .j-notes {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(107, 83, 53, 0.45);
+}
+
 /* Shorter screens: smaller plates and roster art so a page still fits. */
 @media (max-height: 760px) {
   .j-frame { width: 140px; height: 146px; }
@@ -7676,11 +8039,14 @@ body:has(.intro-root) > .modal-backdrop {
   .book-ribbon { display: none; }
   /* Champions and Bestiary need both pages: stack them and scroll. */
   .book-spread.sec-champions,
-  .book-spread.sec-bestiary { flex-direction: column; overflow-y: auto; }
+  .book-spread.sec-bestiary,
+  .book-spread.sec-status { flex-direction: column; overflow-y: auto; }
   .book-spread.sec-champions .book-page,
-  .book-spread.sec-bestiary .book-page { display: block; flex: none; border-radius: 6px; padding: 26px 18px 34px; }
-  .journal-bookmarks { left: 6px; gap: 6px; }
-  .journal-bookmark { width: 108px; font-size: 11.5px; padding: 10px 8px 0; }
+  .book-spread.sec-bestiary .book-page,
+  .book-spread.sec-status .book-page { display: block; flex: none; border-radius: 6px; padding: 26px 18px 34px; }
+  .journal-bookmarks { left: 6px; right: 6px; gap: 4px; }
+  .journal-bookmark,
+  .journal-bookmark.status { flex: 1 1 0; width: auto; min-width: 0; font-size: 11px; padding: 10px 6px 0; }
   .creator-body { flex-direction: column; align-items: center; }
   .creator-panel { width: 100%; }
   .creator-cats { max-height: none; min-height: 0; }
@@ -9012,6 +9378,122 @@ button.cd-mastery.cd-armory:hover {
   font-size: 13px;
   color: var(--green);
   animation: fade-in 0.3s ease;
+}
+/* Sandbox map picker: one chip row per chapter (wider labels for its name). */
+.dev-sandbox-maps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dev-sandbox-maps .dev-chiprow {
+  align-items: flex-start;
+}
+.dev-sandbox-maps .dev-chiprow-label {
+  width: 92px;
+  padding-top: 7px;
+}
+
+/* --------------------------------------------- sandbox battle side panel */
+.sandbox-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sandbox-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+.sandbox-head b {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 14px;
+}
+.sandbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sandbox-label {
+  flex: none;
+  width: 42px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.sandbox-list {
+  max-height: 340px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  margin-right: -6px;
+  padding-right: 6px;
+}
+.sandbox-group {
+  margin: 4px 0 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.sandbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.sandbox-foe {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 4px 5px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--well);
+  color: var(--text-dim);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+.sandbox-foe:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--panel-hi);
+}
+.sandbox-foe:active {
+  transform: scale(0.95);
+}
+.sandbox-foe.boss {
+  border-color: rgba(255, 106, 90, 0.25);
+}
+.sandbox-foe.boss:hover {
+  border-color: rgba(255, 106, 90, 0.6);
+}
+.sandbox-foe-name {
+  width: 100%;
+  font-size: 10.5px;
+  line-height: 1.2;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sandbox-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sandbox-tools .btn {
+  flex: 1 1 auto;
+  padding: 6px 10px;
+  font-size: 12.5px;
 }
 @media (max-width: 760px) {
   .dev-grid,

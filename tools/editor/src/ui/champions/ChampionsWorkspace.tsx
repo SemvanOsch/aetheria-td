@@ -9,6 +9,7 @@ import {
   effectiveGenerate,
   formatAttackSpeed,
   upgradePaths,
+  vialDamageFactor,
   type AoeType,
   type UnitDef,
 } from '@game/domain/units';
@@ -24,6 +25,8 @@ import {
   CHAMPION_SHAPES,
   GENERATOR_FIELDS,
   RARITY_CHOICES,
+  BLEED_FIELDS,
+  POISON_FIELDS,
   SHATTER_FIELDS,
   SLOW_FIELDS,
   TARGETING_CHOICES,
@@ -43,6 +46,7 @@ import { useConfirm } from '../kitHooks';
 import { Chip, ListPane, type ListRow } from '../ListPane';
 import { UnitPreview } from '../SpritePreview';
 import { UpgradeEditor } from './UpgradeEditor';
+import { VialEditor, blankVial } from './VialEditor';
 import { useNav } from '../nav';
 
 type Role = 'all' | 'combat' | 'generator' | 'bard';
@@ -216,6 +220,7 @@ export function ChampionsWorkspace() {
 
 function ChampionDetail({ unit, project, onDelete }: { unit: UnitDef; project: ContentProject; onDelete: () => void }) {
   const { go } = useNav();
+  const confirm = useConfirm();
   const set = (label: string, fn: (d: UnitDef) => void, key?: string) => edit.unit(unit.id, label, fn, key);
   const role = roleOf(unit);
   const shape = shapeInfo(unit.visual.shape);
@@ -323,6 +328,41 @@ function ChampionDetail({ unit, project, onDelete }: { unit: UnitDef; project: C
               )}
               <InlineIssues path="shatter" />
             </div>
+            <div className="ed-sub-block" data-field="bleed">
+              <Toggle label="Bleed on hit" help="Every hit opens a stacking wound that deals a share of it again over 3 seconds (the Bandit)." checked={!!unit.bleed} onChange={(v) => set(v ? 'Add bleed' : 'Remove bleed', (x) => setOpt(x, 'bleed', v ? { damageMult: 0.5 } : undefined))} />
+              {unit.bleed && (
+                <div className="ed-grid tight">
+                  {BLEED_FIELDS.map((f) => (
+                    <NumField key={f.key} spec={f} path={`bleed.${f.key}`} value={unit.bleed![f.key as 'damageMult']} onChange={(v) => set(`Edit ${f.label.toLowerCase()}`, (x) => ((x.bleed![f.key as 'damageMult'] as number) = v ?? 0), `bl${f.key}`)} />
+                  ))}
+                </div>
+              )}
+              <InlineIssues path="bleed" />
+            </div>
+            <div className="ed-sub-block" data-field="poison">
+              <Toggle label="Poison on hit" help="Every hit adds a stacking poison that deals a share of the foe's max health over 5 seconds (a fifth of it on bosses); each new stack restarts them all." checked={!!unit.poison} onChange={(v) => set(v ? 'Add poison' : 'Remove poison', (x) => setOpt(x, 'poison', v ? { maxHealthFraction: 0.01 } : undefined))} />
+              {unit.poison && (
+                <div className="ed-grid tight">
+                  {POISON_FIELDS.map((f) => (
+                    <NumField key={f.key} spec={f} path={`poison.${f.key}`} value={unit.poison![f.key as 'maxHealthFraction']} onChange={(v) => set(`Edit ${f.label.toLowerCase()}`, (x) => ((x.poison![f.key as 'maxHealthFraction'] as number) = v ?? 0), `po${f.key}`)} />
+                  ))}
+                </div>
+              )}
+              <InlineIssues path="poison" />
+            </div>
+            <div className="ed-sub-block" data-field="vials">
+              <Toggle
+                label="Vial cycle"
+                help="Throws a cycle of vials, one per attack, each with its own damage, poison and bleed and its own in-stage levels (the Plague Doctor). Edited in the Vial cycle section below."
+                checked={!!unit.vials}
+                onChange={async (v) => {
+                  if (v) set('Add vial cycle', (x) => (x.vials = [blankVial(1)]));
+                  else if (await confirm({ title: 'Remove the vial cycle?', body: 'Every vial and its levels are deleted; the champion goes back to plain hits. You can undo this.', confirmLabel: 'Remove vials' })) {
+                    set('Remove vial cycle', (x) => delete x.vials);
+                  }
+                }}
+              />
+            </div>
             <div className="ed-sub-block" data-field="special">
               <Toggle label="Slow on hit" help="Hit foes are slowed for a while." checked={!!unit.special} onChange={(v) => set(v ? 'Add slow' : 'Remove slow', (x) => setOpt(x, 'special', v ? { slow: 0.3, slowDuration: 2 } : undefined))} />
               {unit.special && (
@@ -368,6 +408,7 @@ function ChampionDetail({ unit, project, onDelete }: { unit: UnitDef; project: C
           </Section>
 
           <UpgradeEditor unit={unit} />
+          <VialEditor unit={unit} />
         </div>
         <aside className="ed-aside">
           <DerivedStats unit={unit} project={project} />
@@ -396,7 +437,7 @@ function DerivedStats({ unit, project }: { unit: UnitDef; project: ContentProjec
     return {
       tier,
       ...s,
-      dps: s.damage * s.attackSpeed * masteryBurst(p.def, purchased),
+      dps: s.damage * s.attackSpeed * masteryBurst(p.def, purchased) * vialDamageFactor(p.def),
       shape: attackShapeLabel(p.def, effectiveAoe(p.def, tier)),
       bounces: effectiveBounces(p.def, tier),
       harvest: masteryHarvest(effectiveGenerate(p.def, tier), unit.id, purchased),

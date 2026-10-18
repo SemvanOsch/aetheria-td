@@ -46,7 +46,17 @@ import {
   effectiveGenerate,
   getUnit,
   nextUpgrade,
+  nextVialLevel,
+  vialCycle,
+  vialLevelCost,
+  vialUpgradesOpen,
+  BLEED_DURATION,
+  BLEED_MAX_STACKS,
+  POISON_BOSS_MULT,
+  POISON_DURATION,
+  POISON_MAX_STACKS,
   type UnitDef,
+  type VialEffect,
 } from '../domain/units';
 import {
   expForKill,
@@ -60,6 +70,7 @@ import {
   masteryBounceDamageMult,
   masteryBrittle,
   masteryChill,
+  masteryCritChanceVsBleeding,
   masteryShardSplit,
   masteryShatter,
   masteryFinalBounceDamageMult,
@@ -71,12 +82,21 @@ import {
   masteryUpgradeCost,
   masteryStats,
   masteryThrow,
+  masteryVials,
+  masteryDisableImmune,
+  masteryDisableResistAura,
+  masteryResistHaste,
   type MasteryStats,
 } from '../domain/mastery';
 import { critChanceFor, critMultiplierFor } from '../domain/combat';
+import { CHAMPION_DEBUFFS, type ChampionDebuffId } from '../domain/championDebuffs';
 import {
   attackAnimTime,
   CROSS_SLASH_ANIM_TIME,
+  BLEED_TICK,
+  BLOOD_RED,
+  POISON_TICK,
+  VIAL_MUZZLE,
   CROSS_SLASH_HIT_DELAY,
   EARTHSPLITTER_ANIM_TIME,
   EARTHSPLITTER_HIT_DELAY,
@@ -147,6 +167,11 @@ interface ScheduledSpawn {
 
 const SELL_REFUND = 0.7;
 
+/** Gold a sandbox battle starts with, and tops back up to on a refill. */
+export const SANDBOX_GOLD = 99999;
+/** Seconds between the foes of one sandbox send (several of a foe at once). */
+const SANDBOX_SPACING = 0.6;
+
 /**
  * Whether a tower is a Hero-rarity champion (the player's own adventurer). Hero
  * champions level up from wave-clear EXP rather than gold upgrades, so both
@@ -167,6 +192,7 @@ function fxElementFor(tower: Tower): FxElement {
   if (shape === 'frostWitch') return 'frost';
   if (shape === 'elf' || shape === 'player-magic' || shape === 'player-staff') return 'arcane';
   if (shape === 'bard') return 'holy';
+  if (tower.bleed) return 'blood';
   return tower.def.damageType === 'magic' ? 'arcane' : 'steel';
 }
 
@@ -266,6 +292,8 @@ export const PIERCE_HALF_WIDTH = 8;
 const FROST_MUZZLE = { x: 16, y: -18 };
 const ICE_MISSILE_SPEED = 430;
 const ICE_SHARD_SPEED = 240;
+// The Plague Doctor's vials fly slower than an arrow, a flask tumbling end over end.
+const VIAL_SPEED = 380;
 // Half-width of a shard's strike corridor (plus each foe's own radius).
 const SHARD_HALF_WIDTH = 3;
 // Shatter Storm's splinters: drawn smaller than a shard and flying a shorter way.
@@ -389,6 +417,9 @@ export type SfxName =
   // The Frost Witch: her ice missile loosed, and shattering on impact.
   | 'frostCast'
   | 'frostShatter'
+  // The Plague Doctor: a vial flung, and its glass breaking on a foe.
+  | 'vialThrow'
+  | 'vialShatter'
   | 'orbCast'
   | 'orbBurst'
   | 'greaterOrbCast'
@@ -489,6 +520,22 @@ const COWER_IN_TIME = 0.3;
 // another rather than all at once.
 const SUMMON_STAGGER = 0.2;
 const COWER_OUT_TIME = 0.7;
+
+/**
+ * Add a bleed wound or poison stack to a foe's list, holding it to `max`
+ * stacks. At the cap the new one replaces the weakest open stack if it is
+ * stronger (a harder hitter still raises the damage), else it is dropped; the
+ * caller has already restarted every open stack's clock either way.
+ */
+function addDotStack<T extends { dps: number }>(stacks: T[], stack: T, max: number): void {
+  if (stacks.length < max) {
+    stacks.push(stack);
+    return;
+  }
+  let weakest = 0;
+  for (let i = 1; i < stacks.length; i++) if (stacks[i].dps < stacks[weakest].dps) weakest = i;
+  if (stack.dps > stacks[weakest].dps) stacks[weakest] = stack;
+}
 
 export class GameEngine {
   readonly level: LevelDef;
@@ -609,6 +656,15 @@ export class GameEngine {
    */
   armorUnlocked = true;
 
+  /**
+   * A developer sandbox battle (Settings → Developer): no authored waves, the
+   * player sends foes by hand (`sandboxSpawn`), every lane is open from the
+   * start, the castle can't fall and the battle never ends on its own. The
+   * phase stays `'wave'` throughout, so spawns, harvests and music run as in a
+   * live wave.
+   */
+  readonly sandbox: boolean;
+
   private uidCounter = 1;
   private spawnQueue: ScheduledSpawn[] = [];
   /** Health-scaled enemy defs handed out by `spawnDef`, keyed `id@mult`. */
@@ -644,12 +700,16 @@ export class GameEngine {
     startingCurrency: number,
     masteryUpgrades: Record<string, string[]> = {},
     rng: () => number = Math.random,
+    options: { sandbox?: boolean } = {},
   ) {
     this.level = level;
+    this.sandbox = !!options.sandbox;
+    if (this.sandbox) this.phase = 'wave';
     // Building is forbidden on any *visible* lane's cells. Hidden `revealAtWave`
-    // lanes contribute their cells only once revealed (see `revealDueLanes`).
+    // lanes contribute their cells only once revealed (see `revealDueLanes`);
+    // a sandbox opens them all at once.
     this.laneRevealAt = level.lanes.map((l) => l.revealAtWave);
-    this.laneRevealed = level.lanes.map((l) => l.revealAtWave === undefined);
+    this.laneRevealed = level.lanes.map((l) => this.sandbox || l.revealAtWave === undefined);
     this.laneRevealAnim = this.laneRevealed.map((v) => (v ? 1 : 0));
     this.laneCells = level.lanes.map((l) => lanePathCells(l));
     this.pathCells = new Set();
@@ -679,8 +739,8 @@ export class GameEngine {
     this.lanes = level.lanes.map((lane) => this.buildLane(laneWaypoints(lane)));
 
     // Where along each lane its boss halts and ends the stage (`bossHaltAt`),
-    // for lanes that pass through that cell.
-    const halt = level.bossHaltAt ? cellCenter(level.bossHaltAt.col, level.bossHaltAt.row) : null;
+    // for lanes that pass through that cell. A sandbox has no ending to halt for.
+    const halt = level.bossHaltAt && !this.sandbox ? cellCenter(level.bossHaltAt.col, level.bossHaltAt.row) : null;
     this.bossHaltDist = this.lanes.map((_, i) => (halt ? this.laneDistanceTo(i, halt) : null));
 
     // Lanes that start in a sewer entrance's mouth, and the first authored
@@ -690,7 +750,7 @@ export class GameEngine {
       const s = l.pathTurns[0];
       return !!s && sewers.some((p) => propCells(p).some((c) => c.col === s.col && c.row === s.row));
     });
-    if (!level.endless) {
+    if (!level.endless && !this.sandbox) {
       for (let i = 0; i < level.lanes.length; i++) {
         if (!this.sewerMouthLane[i]) continue;
         const w = level.lanes[i].waves.findIndex((wave) => wave.groups.some((g) => getEnemy(g.enemyId).entrance === 'sewerBurst'));
@@ -779,9 +839,9 @@ export class GameEngine {
     return this.waveIndex === before ? 0.65 : 1;
   }
 
-  /** Number of waves in the stage — `Infinity` for an endless run. */
+  /** Number of waves in the stage — `Infinity` for an endless run or a sandbox. */
   get totalWaves(): number {
-    return this.level.endless ? Infinity : levelTotalWaves(this.level);
+    return this.level.endless || this.sandbox ? Infinity : levelTotalWaves(this.level);
   }
 
   /** Enemies still to spawn or alive in the current wave. */
@@ -908,6 +968,12 @@ export class GameEngine {
       chill: masteryChill(def, purchased),
       brittle: masteryBrittle(def.id, purchased) ?? null,
       shardSplit: masteryShardSplit(def.id, purchased),
+      bleed: def.bleed ?? null,
+      poison: def.poison ?? null,
+      vialLevels: (def.vials ?? []).map(() => 0),
+      vialNext: 0,
+      vialMastery: masteryVials(def, purchased),
+      critChanceVsBleeding: masteryCritChanceVsBleeding(def.id, purchased),
       iceStorm: effectiveIceStorm(def, 0),
       bounceDamageMult: masteryBounceDamageMult(def.id, purchased),
       finalBounceMult: masteryFinalBounceDamageMult(def.id, purchased),
@@ -955,6 +1021,12 @@ export class GameEngine {
       storm: null,
       stun: 0,
       stunMax: 0,
+      disableImmune: masteryDisableImmune(def.id, purchased),
+      resistAura: masteryDisableResistAura(def.id, purchased),
+      resistChance: 0,
+      resistHaste: masteryResistHaste(def.id, purchased) ?? null,
+      resistHasteMult: 1,
+      resistHasteTimer: 0,
       ability,
       abilityCooldown: 0,
       abilityCooldownMax: ability?.cooldown ?? 0,
@@ -993,6 +1065,8 @@ export class GameEngine {
    *  - Guiding Gale (Wizard): a ranged ally within an emitter's range has
    *    its `range` multiplied by the aura (non-stacking; the emitter never
    *    buffs itself).
+   *  - Warding Fumes (Plague Doctor): an ally within an emitter's range gets
+   *    its `resistChance` against champion debuffs (non-stacking, likewise).
    */
   private recomputeAdjacency(): void {
     for (const t of this.towers) {
@@ -1057,6 +1131,19 @@ export class GameEngine {
           t.range = Math.round(baseRange.get(t.uid)! * mult);
           changed = true; // a newly-buffed emitter may now reach further
         }
+      }
+    }
+    // Warding Fumes (the Plague Doctor): allies within an emitter's effective
+    // range resist champion debuffs at its chance. Never the emitter itself, and
+    // overlapping fumes don't stack.
+    const fumes = this.towers.filter((t) => t.resistAura > 0);
+    for (const t of this.towers) {
+      t.resistChance = 0;
+      for (const w of fumes) {
+        if (w === t) continue;
+        const dx = w.pos.x - t.pos.x;
+        const dy = w.pos.y - t.pos.y;
+        if (dx * dx + dy * dy <= w.range * w.range) t.resistChance = Math.max(t.resistChance, w.resistAura);
       }
     }
   }
@@ -1539,6 +1626,7 @@ export class GameEngine {
       t.attackSpeed *
       t.attackSpeedBuffMult *
       t.abilitySpeedBuffMult *
+      t.resistHasteMult *
       Math.max(1, t.burstCount) *
       (t.ability?.speedMult ?? 1);
     return rate > 0 ? 1 / rate : Infinity;
@@ -1650,6 +1738,29 @@ export class GameEngine {
   }
 
   /**
+   * Buy the next level of one of a tower's vials (the Plague Doctor). The vials
+   * level independently, each up to its own `levels`, and only once every
+   * regular tier is bought. Paid in gold like a tier, less any mastery discount
+   * (Careful Measure, see `vialLevelCost`). Returns true on success.
+   */
+  upgradeVial(uid: number, vial: number): boolean {
+    if (this.outcome !== 'playing') return false;
+    const tower = this.towers.find((t) => t.uid === uid);
+    if (!tower || !vialUpgradesOpen(tower.def, tower.upgradeTier)) return false;
+    const v = tower.def.vials![vial];
+    if (!v) return false;
+    const next = nextVialLevel(v, tower.vialLevels[vial] ?? 0);
+    if (!next) return false;
+    const cost = vialLevelCost(next, tower.vialMastery.discount);
+    if (this.currency < cost) return false;
+    this.currency -= cost;
+    this.currencyEarned -= cost;
+    tower.invested += cost;
+    tower.vialLevels[vial] = (tower.vialLevels[vial] ?? 0) + 1;
+    return true;
+  }
+
+  /**
    * Refold a tower's effective combat/economy stats for its *current*
    * `upgradeTier` (damage, attack speed, range, attack shape, bounces, harvest
    * yield). Shared by both upgrade paths — the gold `upgradeTower` and the Hero
@@ -1701,28 +1812,34 @@ export class GameEngine {
     for (const t of this.towers) {
       if (!isHeroTower(t)) continue;
       t.heroExp += exp * masteryHeroExpMult(t.def.id, this.masteryUpgrades[t.def.id] ?? []);
-      // Drain the pool into as many tiers as it now affords.
-      let up = nextUpgrade(t.def, t.upgradeTier);
-      // Heroes have no forks; should one ever get one, it waits rather than guessing.
-      while (up && !up.choices && t.heroExp >= up.cost) {
-        t.heroExp -= up.cost;
-        t.upgradeTier += 1;
-        this.applyTierStats(t);
-        this.floaters.push({
-          pos: { x: t.pos.x, y: t.pos.y - 16 },
-          text: `LEVEL ${t.upgradeTier}!`,
-          color: '#ffd76a',
-          ttl: 1.2,
-          maxTtl: 1.2,
-          size: 16,
-        });
-        leveled = true;
-        this.emitFx({ kind: 'cast', ability: 'levelUp', x: t.pos.x, y: t.pos.y, color: '#ffd76a', radius: 36 });
-        up = nextUpgrade(t.def, t.upgradeTier);
-      }
+      if (this.levelHero(t)) leveled = true;
     }
     // A hero's higher base damage rescales adjacency auras; recompute once.
     if (leveled) this.recomputeAdjacency();
+  }
+
+  /** Drain a hero's EXP pool into as many tiers as it now affords; whether it levelled. */
+  private levelHero(t: Tower): boolean {
+    let leveled = false;
+    let up = nextUpgrade(t.def, t.upgradeTier);
+    // Heroes have no forks; should one ever get one, it waits rather than guessing.
+    while (up && !up.choices && t.heroExp >= up.cost) {
+      t.heroExp -= up.cost;
+      t.upgradeTier += 1;
+      this.applyTierStats(t);
+      this.floaters.push({
+        pos: { x: t.pos.x, y: t.pos.y - 16 },
+        text: `LEVEL ${t.upgradeTier}!`,
+        color: '#ffd76a',
+        ttl: 1.2,
+        maxTtl: 1.2,
+        size: 16,
+      });
+      leveled = true;
+      this.emitFx({ kind: 'cast', ability: 'levelUp', x: t.pos.x, y: t.pos.y, color: '#ffd76a', radius: 36 });
+      up = nextUpgrade(t.def, t.upgradeTier);
+    }
+    return leveled;
   }
 
   /**
@@ -1976,6 +2093,12 @@ export class GameEngine {
       stormSlow: 0,
       brittle: 0,
       brittleMult: 1,
+      bleeds: [],
+      bleedTick: BLEED_TICK,
+      bleedDue: 0,
+      poisons: [],
+      poisonTick: POISON_TICK,
+      poisonDue: 0,
       cower: 0,
       dead: false,
       hitFlash: 0,
@@ -1984,9 +2107,9 @@ export class GameEngine {
       rise: burst || fromWater || fromThrone ? 1 : 0,
       riseFrom: burst ? 'sewer' : fromWater ? 'water' : 'throne',
       // An enemy with intro lines walks in a short way (-1) before speaking. In
-      // endless runs it starts past its last line, so it never stops to speak.
-      speechIndex: !def.spawnLines ? 0 : this.level.endless ? def.spawnLines.length : -1,
-      speechTimer: def.spawnLines && !this.level.endless ? SPEECH_LINE_TIME : 0,
+      // endless runs and sandboxes it starts past its last line, so it never stops to speak.
+      speechIndex: !def.spawnLines ? 0 : this.level.endless || this.sandbox ? def.spawnLines.length : -1,
+      speechTimer: def.spawnLines && !this.level.endless && !this.sandbox ? SPEECH_LINE_TIME : 0,
       dodge: 0,
       wardReduction: 0,
       shield: def.shieldHits ?? 0,
@@ -2017,8 +2140,9 @@ export class GameEngine {
       if (e.hitFlash > 0) e.hitFlash = Math.max(0, e.hitFlash - dt);
       if (e.dodge > 0) e.dodge = Math.max(0, e.dodge - dt);
       // Regenerating foes (the Sludge Brute) heal a little every frame, so the
-      // health bar refills smoothly rather than jumping once a second.
-      if (e.def.regen && e.health < e.def.health) {
+      // health bar refills smoothly rather than jumping once a second. An open
+      // wound stops it: a bleeding foe does not regenerate (poison does not).
+      if (e.def.regen && e.health < e.def.health && e.bleeds.length === 0) {
         e.health = Math.min(e.def.health, e.health + e.def.health * e.def.regen * dt);
       }
       if (e.slowTimer > 0) {
@@ -2028,6 +2152,14 @@ export class GameEngine {
       if (e.brittle > 0) {
         e.brittle -= dt;
         if (e.brittle <= 0) e.brittleMult = 1;
+      }
+      if (e.bleeds.length > 0) {
+        this.updateBleed(e, dt);
+        if (e.dead || e.dying) continue;
+      }
+      if (e.poisons.length > 0) {
+        this.updatePoison(e, dt);
+        if (e.dead || e.dying) continue;
       }
       // Tick down this enemy's shared knockback cooldown.
       if (e.knockbackCooldown > 0) e.knockbackCooldown -= dt;
@@ -2101,6 +2233,8 @@ export class GameEngine {
         // A boss reaching the base is an instant defeat, regardless of how much
         // base health is left — letting the boss through is never survivable.
         this.emitFx({ kind: 'breach', x: exit.x, y: exit.y, boss: e.def.boss });
+        // The sandbox castle can't fall: a foe getting through just leaves the board.
+        if (this.sandbox) continue;
         if (e.def.boss) {
           this.baseHealth = 0;
           this.floaters.push({
@@ -2219,6 +2353,11 @@ export class GameEngine {
         t.abilitySpeedBuffTimer -= dt;
         if (t.abilitySpeedBuffTimer <= 0) t.abilitySpeedBuffMult = 1;
       }
+      // And the haste of a resisted debuff (Toxic Resilience).
+      if (t.resistHasteTimer > 0) {
+        t.resistHasteTimer -= dt;
+        if (t.resistHasteTimer <= 0) t.resistHasteMult = 1;
+      }
 
       // Stunned (a Sludge Father's spit): stuck fast in the sludge, it does
       // nothing at all until it wears off.
@@ -2277,9 +2416,10 @@ export class GameEngine {
       }
 
       // Effective firing rate, hastened by a Bard's tune *and* this champion's
-      // own ability haste (Quickdraw) — the two stack multiplicatively. Every
+      // own ability haste (Quickdraw) and resist haste (Toxic Resilience) — they
+      // stack multiplicatively. Every
       // reload/preload cadence below reads this instead of the raw attack speed.
-      const rate = t.attackSpeed * t.attackSpeedBuffMult * t.abilitySpeedBuffMult;
+      const rate = t.attackSpeed * t.attackSpeedBuffMult * t.abilitySpeedBuffMult * t.resistHasteMult;
 
       // Acquire the aim target EVERY frame (not just when firing) so the
       // beam / marker tracks the enemy smoothly between shots as well.
@@ -2558,7 +2698,11 @@ export class GameEngine {
       this.fireIceMissile(tower, target);
       return;
     }
-    const crit = this.rollCrit(tower);
+    if (tower.def.vials?.length) {
+      this.throwVial(tower, target);
+      return;
+    }
+    const crit = this.rollCrit(tower, target);
     const dmg = tower.damage * (crit ? tower.critMultiplier : 1);
 
     if (
@@ -2613,11 +2757,12 @@ export class GameEngine {
       return;
     }
 
-    // Swordsman melee slash — lands instantly at the target.
+    // Swordsman melee slash — lands instantly at the target (the Bandit's knife
+    // cuts in blood red rather than his dark cloak's colour).
     this.shots.push({
       from: { ...tower.pos },
       to: { ...target.pos },
-      color: tower.def.visual.color,
+      color: tower.bleed ? BLOOD_RED : tower.def.visual.color,
       ttl: 0.16,
       maxTtl: 0.16,
       style: 'slash',
@@ -2890,6 +3035,11 @@ export class GameEngine {
           this.shatterIce(dest, p, target);
           continue;
         }
+        // A vial breaks where it lands, splashing whether or not its foe lives.
+        if (p.vial) {
+          this.splashVial(dest, p, target);
+          continue;
+        }
         // Impact: deal the carried damage (if the target still lives) and pop a
         // small hit spark either way.
         if (target) {
@@ -3013,6 +3163,51 @@ export class GameEngine {
       maxTtl: 0.18,
       radius: radius * 0.4,
     });
+  }
+
+  /**
+   * The Plague Doctor's attack: he flings the next vial of his cycle (Verdant
+   * Venom → Ruin Tonic → Sanguine Solvent → The Grand Formula, once learned →
+   * …), a homing flask carrying that vial's effect at its bought level and
+   * mastery potency (`vialCycle`) and its pre-rolled impact damage. It shatters
+   * on landing (see `splashVial`).
+   */
+  private throwVial(tower: Tower, target: Enemy): void {
+    const cycle = vialCycle(tower.def, tower.vialLevels, tower.vialMastery);
+    const i = tower.vialNext % cycle.length;
+    tower.vialNext = (i + 1) % cycle.length;
+    const vial = cycle[i];
+    const effect = vial.effect;
+    const crit = this.rollCrit(tower, target);
+    const dir = target.pos.x >= tower.pos.x ? 1 : -1;
+    this.sfx.push('vialThrow');
+    this.projectiles.push({
+      pos: { x: tower.pos.x + dir * VIAL_MUZZLE.x, y: tower.pos.y + VIAL_MUZZLE.y },
+      targetUid: target.uid,
+      last: { ...target.pos },
+      speed: VIAL_SPEED,
+      damage: tower.damage * effect.damageMult * (crit ? tower.critMultiplier : 1),
+      crit,
+      color: vial.color,
+      scale: 1,
+      style: 'vial',
+      source: tower,
+      bounces: 0,
+      vial: effect,
+    });
+  }
+
+  /**
+   * A vial landing at `pos`: if its target still lives the vial strikes it
+   * (its damage, poison and bleed, see `damageEnemy`); it splashes either way.
+   */
+  private splashVial(pos: Vec2, p: Projectile, target: Enemy | undefined): void {
+    if (target) {
+      const landed = this.damageEnemy(target, p.damage, p.source, false, p.vial);
+      if (landed && p.crit && p.damage > 0) this.critFloater(target.pos);
+    }
+    this.sfx.push('vialShatter');
+    this.emitFx({ kind: 'vialSplash', x: pos.x, y: pos.y, color: p.color, crit: p.crit });
   }
 
   /**
@@ -3202,9 +3397,55 @@ export class GameEngine {
     });
   }
 
-  /** Roll whether this attack crits, using the tower's crit chance. */
-  private rollCrit(tower: Tower): boolean {
-    return this.rng() < tower.critChance;
+  /**
+   * Roll whether this attack crits, using the tower's crit chance, plus Blood in
+   * the Water's bonus when `target` is bleeding.
+   */
+  private rollCrit(tower: Tower, target?: Enemy): boolean {
+    const vsBleeding = target && target.bleeds.length > 0 ? tower.critChanceVsBleeding : 0;
+    return this.rng() < tower.critChance + vsBleeding;
+  }
+
+  /**
+   * Run a foe's open wounds: each bleeds its share of this frame into
+   * `bleedDue` and loses `dt` of its time. Every `BLEED_TICK`, or once the last
+   * wound closes, what is due lands as one hit (credited to the newest wound's
+   * champion), so a wound always deals exactly its full damage.
+   */
+  private updateBleed(e: Enemy, dt: number): void {
+    for (const w of e.bleeds) {
+      e.bleedDue += w.dps * Math.min(dt, w.left);
+      w.left -= dt;
+    }
+    const source = e.bleeds[e.bleeds.length - 1].source;
+    e.bleeds = e.bleeds.filter((w) => w.left > 0);
+    e.bleedTick -= dt;
+    if (e.bleedTick > 0 && e.bleeds.length > 0) return;
+    e.bleedTick = BLEED_TICK;
+    const due = e.bleedDue;
+    e.bleedDue = 0;
+    if (due > 0) this.damageEnemy(e, due, source, true);
+  }
+
+  /**
+   * Run a foe's poison stacks, exactly as `updateBleed` runs its wounds: each
+   * adds its share of this frame to `poisonDue`, and every `POISON_TICK` (or
+   * once the last stack wears off) what is due lands as one tick, credited to
+   * the newest stack's champion.
+   */
+  private updatePoison(e: Enemy, dt: number): void {
+    for (const p of e.poisons) {
+      e.poisonDue += p.dps * Math.min(dt, p.left);
+      p.left -= dt;
+    }
+    const source = e.poisons[e.poisons.length - 1].source;
+    e.poisons = e.poisons.filter((p) => p.left > 0);
+    e.poisonTick -= dt;
+    if (e.poisonTick > 0 && e.poisons.length > 0) return;
+    e.poisonTick = POISON_TICK;
+    const due = e.poisonDue;
+    e.poisonDue = 0;
+    if (due > 0) this.damageEnemy(e, due, source, true);
   }
 
   /**
@@ -3660,8 +3901,13 @@ export class GameEngine {
    * dealt the blow — it is credited with mastery EXP if the hit is a kill.
    * Returns whether the hit actually landed: `false` if the enemy was already
    * dead or evaded the blow, so callers can skip the crit popup on a dodge.
+   * `dot` marks a damage-over-time tick (a wound's in `updateBleed`, a poison
+   * stack's in `updatePoison`): it can't be dodged or turned aside by a shield,
+   * draws no hit, and never opens a wound or adds a poison stack of its own.
+   * `vial`, for a Plague Doctor's thrown vial, decides the hit's poison, bleed
+   * and whether it ignores resistance, in place of the source's own.
    */
-  private damageEnemy(enemy: Enemy, amount: number, source?: Tower): boolean {
+  private damageEnemy(enemy: Enemy, amount: number, source?: Tower, dot = false, vial?: VialEffect): boolean {
     if (enemy.dead) return false;
     // Already playing out its death animation — no further hits register.
     if (enemy.dying) return false;
@@ -3671,7 +3917,7 @@ export class GameEngine {
     // Evasive enemies (the nimble Garrick Vane) slip aside from a fraction of
     // blows, taking no damage. Rolled here so it covers every attack type that
     // funnels through this choke point — melee, projectiles, line-AoE, gusts.
-    if (enemy.def.dodgeChance && this.rng() < enemy.def.dodgeChance) {
+    if (!dot && enemy.def.dodgeChance && this.rng() < enemy.def.dodgeChance) {
       enemy.dodge = DODGE_ANIM_TIME; // trigger the sidestep-weave in the renderer
       this.emitFx({ kind: 'dodge', x: enemy.pos.x, y: enemy.pos.y });
       this.floaters.push({
@@ -3686,7 +3932,7 @@ export class GameEngine {
     // Shielded enemies (the Man-at-Arms) turn aside their first hits entirely:
     // each hit, however big, costs one shield point and deals nothing. Counted
     // here so every attack type (melee cuts, arrows, AoE ticks, beams) is one hit.
-    if (enemy.shield > 0) {
+    if (!dot && enemy.shield > 0) {
       enemy.shield -= 1;
       enemy.hitFlash = 0.12;
       const broke = enemy.shield === 0;
@@ -3711,32 +3957,57 @@ export class GameEngine {
     // for turning authored resist fractions into a multiplier. A nearby
     // protective aura (The Iron Warden's Aegis) then softens it further.
     // A Brittle foe (the Frost Witch's Icebreak) takes extra from every hit.
+    // A Ruin Tonic vial eats straight through resistance.
     const dealt =
       amount *
-      resistMultiplier(enemy.def, source?.def.damageType, source?.magicPen) *
+      (vial?.ignoreResist ? 1 : resistMultiplier(enemy.def, source?.def.damageType, source?.magicPen)) *
       (1 - enemy.wardReduction) *
       (enemy.brittle > 0 ? enemy.brittleMult : 1);
     // A foe that can't die (Captain Draven) takes every hit, but never drops
     // below 1 HP.
     enemy.health = enemy.def.unkillable ? Math.max(1, enemy.health - dealt) : enemy.health - dealt;
-    enemy.hitFlash = 0.12;
     const from = source?.pos ?? enemy.pos;
     const element = source ? fxElementFor(source) : 'steel';
-    this.emitFx({
-      kind: 'hit',
-      x: enemy.pos.x,
-      y: enemy.pos.y,
-      fromX: from.x,
-      fromY: from.y,
-      enemyUid: enemy.uid,
-      color: source?.def.visual.color ?? '#ffffff',
-      element,
-      crit: false,
-      melee: source?.def.attackType === 'melee',
-      amount: dealt,
-      weight: Math.min(1, dealt / Math.max(1, enemy.def.health)),
-      tint: fxTintFor(source),
-    });
+    if (!dot) {
+      enemy.hitFlash = 0.12;
+      this.emitFx({
+        kind: 'hit',
+        x: enemy.pos.x,
+        y: enemy.pos.y,
+        fromX: from.x,
+        fromY: from.y,
+        enemyUid: enemy.uid,
+        color: source?.bleed ? BLOOD_RED : source?.def.visual.color ?? '#ffffff',
+        element,
+        crit: false,
+        melee: source?.def.attackType === 'melee',
+        amount: dealt,
+        weight: Math.min(1, dealt / Math.max(1, enemy.def.health)),
+        tint: fxTintFor(source),
+      });
+      // A bleeding champion's hit (the Bandit) opens a wound that bleeds a share
+      // of its damage stat over the next few seconds (see `updateBleed`), and
+      // restarts the clock on every wound already open, so a steady stream of
+      // cuts keeps them all bleeding. Sized from the stat, not the blow, so a
+      // crit opens the same wound as any other hit.
+      // A vial carries its own bleed and poison instead of the thrower's.
+      const bleedMult = vial ? vial.bleed ?? 0 : source?.bleed?.damageMult ?? 0;
+      if (source && bleedMult > 0 && enemy.health > 0) {
+        for (const w of enemy.bleeds) w.left = BLEED_DURATION;
+        addDotStack(enemy.bleeds, { dps: (source.damage * bleedMult) / BLEED_DURATION, left: BLEED_DURATION, source }, BLEED_MAX_STACKS);
+      }
+      // A poisoning champion's hit adds a stack worth a share of the foe's max
+      // health (not of the blow) over `POISON_DURATION`, and resets every stack
+      // already ticking to the full duration, so steady hits keep them all going.
+      // Bosses shrug off most of it (`POISON_BOSS_MULT`).
+      const poisonShare = vial ? vial.poison ?? 0 : source?.poison?.maxHealthFraction ?? 0;
+      if (source && poisonShare > 0 && enemy.health > 0) {
+        for (const p of enemy.poisons) p.left = POISON_DURATION;
+        const share = poisonShare * (enemy.def.boss ? POISON_BOSS_MULT : 1);
+        const dps = (enemy.def.health * share) / POISON_DURATION;
+        addDotStack(enemy.poisons, { dps, left: POISON_DURATION, source }, POISON_MAX_STACKS);
+      }
+    }
     if (enemy.health <= 0) {
       enemy.health = 0;
       this.emitFx({ kind: 'kill', enemy, fromX: from.x, fromY: from.y, element, tint: fxTintFor(source) });
@@ -3955,6 +4226,7 @@ export class GameEngine {
       this.emitFx({ kind: 'sludgeSplash', x: g.to.x, y: g.to.y + 6, radius: 10, stain: 12 });
       this.sfx.push('sludgeSplat');
       if (!t) continue;
+      if (!this.disableTower(t, 'sludged')) continue;
       // A fresh glob restarts the stun (never shortens a longer one left).
       if (g.stun >= t.stun) {
         t.stun = g.stun;
@@ -3966,8 +4238,35 @@ export class GameEngine {
       t.slam = null;
       t.burstLeft = 0;
       t.targetUid = null;
-      this.floaters.push({ pos: { x: t.pos.x, y: t.pos.y - 26 }, text: 'Stunned!', color: '#b8e05a', ttl: 1.1, maxTtl: 1.1, size: 12 });
+      this.floaters.push({ pos: { x: t.pos.x, y: t.pos.y - 26 }, text: 'Stunned!', color: CHAMPION_DEBUFFS.sludged.color, ttl: 1.1, maxTtl: 1.1, size: 12 });
     }
+  }
+
+  /**
+   * The choke point every champion debuff passes through (see
+   * `CHAMPION_DEBUFFS`): returns whether `debuff` takes hold of `t`, and the
+   * caller applies it only then. An immune champion (Self Inoculation) always
+   * shrugs it off; one inside an ally's Warding Fumes resists at its
+   * `resistChance`. A champion that resists gets its own Toxic Resilience haste.
+   */
+  private disableTower(t: Tower, debuff: ChampionDebuffId): boolean {
+    const resisted = t.disableImmune || (t.resistChance > 0 && this.rng() < t.resistChance);
+    if (!resisted) return true;
+    const def = CHAMPION_DEBUFFS[debuff];
+    this.floaters.push({
+      pos: { x: t.pos.x, y: t.pos.y - 26 },
+      text: t.disableImmune ? 'Immune!' : 'Resisted!',
+      color: def.color,
+      ttl: 1.1,
+      maxTtl: 1.1,
+      size: 12,
+    });
+    if (t.resistHaste) {
+      t.resistHasteMult = t.resistHaste.mult;
+      t.resistHasteTimer = t.resistHaste.duration;
+      this.emitFx({ kind: 'cast', ability: 'resist', x: t.pos.x, y: t.pos.y, color: def.color, radius: 22 });
+    }
+    return false;
   }
 
   /**
@@ -4132,7 +4431,7 @@ export class GameEngine {
   }
 
   private checkWaveEnd(): void {
-    if (this.phase !== 'wave') return;
+    if (this.phase !== 'wave' || this.sandbox) return;
     const allSpawned = this.spawnCursor >= this.spawnQueue.length;
     const noneAlive = this.enemies.every((e) => e.dead) || this.enemies.length === 0;
     if (allSpawned && noneAlive) {
@@ -4266,6 +4565,62 @@ export class GameEngine {
     const at = this.positionAtDistance(this.lanes[this.burstLane], 0);
     this.emitFx({ kind: 'sewerStir', x: at.x, y: at.y });
     this.sfx.push('sewerStir');
+  }
+
+  // ----------------------------------------------------------------- sandbox
+  /**
+   * Sandbox only: send `count` of foe `enemyId` down lane `lane` (or down every
+   * lane for `'all'`), `SANDBOX_SPACING` apart, through the same spawn path
+   * authored waves use (water emerges, sewer bursts, boss flares).
+   */
+  sandboxSpawn(enemyId: string, lane: number | 'all', count = 1): boolean {
+    if (!this.sandbox || this.outcome !== 'playing') return false;
+    const lanes = lane === 'all' ? this.level.lanes.map((_, i) => i) : [lane];
+    // Drop what has already spawned, then slot the new foes in by time.
+    this.spawnQueue = this.spawnQueue.slice(this.spawnCursor);
+    this.spawnCursor = 0;
+    for (const laneIndex of lanes) {
+      if (!this.lanes[laneIndex]) continue;
+      for (let i = 0; i < count; i++) {
+        this.spawnQueue.push({ enemyId, time: this.waveClock + i * SANDBOX_SPACING, laneIndex });
+      }
+    }
+    this.spawnQueue.sort((a, b) => a.time - b.time);
+    if (getEnemy(enemyId).boss) this.bossWaveStarted = true;
+    return true;
+  }
+
+  /** Sandbox only: remove every foe on the board and every send still queued. */
+  sandboxClear(): void {
+    if (!this.sandbox) return;
+    for (const e of this.enemies) e.dead = true;
+    this.enemies = [];
+    this.spawnQueue = [];
+    this.spawnCursor = 0;
+    this.globs.length = 0;
+  }
+
+  /** Sandbox only: top the gold back up to `SANDBOX_GOLD`. */
+  sandboxRefillGold(): void {
+    if (this.sandbox) this.currency = Math.max(this.currency, SANDBOX_GOLD);
+  }
+
+  /**
+   * Sandbox only: raise every deployed hero one tier (there are no cleared
+   * waves to level them), granting exactly the EXP the next tier costs.
+   */
+  sandboxLevelHeroes(): boolean {
+    if (!this.sandbox) return false;
+    let leveled = false;
+    for (const t of this.towers) {
+      if (!isHeroTower(t)) continue;
+      const up = nextUpgrade(t.def, t.upgradeTier);
+      if (!up || up.choices) continue;
+      t.heroExp = Math.max(t.heroExp, up.cost);
+      if (this.levelHero(t)) leveled = true;
+    }
+    if (leveled) this.recomputeAdjacency();
+    return leveled;
   }
 
   /** Concede the battle — how the player ends an endless run on their own terms. */

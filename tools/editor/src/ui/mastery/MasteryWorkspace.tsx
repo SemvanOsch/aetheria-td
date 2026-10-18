@@ -21,6 +21,14 @@ const GAP_X = 22;
 const GAP_Y = 46;
 const GROUP_HUES = [42, 200, 330, 140, 270, 15, 90];
 
+/** A node's prerequisites as a list (any one unlocks it). */
+const reqs = (n: MasteryUpgradeDef): string[] => (n.requires == null ? [] : typeof n.requires === 'string' ? [n.requires] : n.requires);
+
+/** Write a prerequisite list back: none, one id, or several (any one will do). */
+function setReqs(n: MasteryUpgradeDef, list: string[]) {
+  setOpt(n, 'requires', list.length === 0 ? undefined : list.length === 1 ? list[0] : list);
+}
+
 export function MasteryWorkspace() {
   const { working } = useEditor();
   const { nav, go } = useNav();
@@ -84,8 +92,9 @@ function depthOf(tree: MasteryUpgradeDef[]): Map<string, number> {
   const memo = new Map<string, number>();
   const visit = (n: MasteryUpgradeDef, seen: Set<string>): number => {
     if (memo.has(n.id)) return memo.get(n.id)!;
-    const parent = n.requires ? byId.get(n.requires) : undefined;
-    const d = !parent || seen.has(parent.id) ? 0 : visit(parent, new Set([...seen, n.id])) + 1;
+    // Below the deepest of its prerequisites.
+    const parents = reqs(n).map((id) => byId.get(id)).filter((p): p is MasteryUpgradeDef => !!p && !seen.has(p.id));
+    const d = parents.length === 0 ? 0 : Math.max(...parents.map((p) => visit(p, new Set([...seen, n.id])))) + 1;
     memo.set(n.id, d);
     return d;
   };
@@ -93,7 +102,7 @@ function depthOf(tree: MasteryUpgradeDef[]): Map<string, number> {
   return memo;
 }
 
-/** EXP to learn a node including its whole prerequisite chain. */
+/** EXP to learn a node including its whole prerequisite chain (through its first prerequisite). */
 function chainCost(tree: MasteryUpgradeDef[], n: MasteryUpgradeDef): number {
   const byId = new Map(tree.map((x) => [x.id, x]));
   let sum = 0;
@@ -102,7 +111,8 @@ function chainCost(tree: MasteryUpgradeDef[], n: MasteryUpgradeDef): number {
   while (cur && !seen.has(cur.id)) {
     seen.add(cur.id);
     sum += cur.cost || 0;
-    cur = cur.requires ? byId.get(cur.requires) : undefined;
+    const up: string | undefined = reqs(cur)[0];
+    cur = up ? byId.get(up) : undefined;
   }
   return sum;
 }
@@ -151,20 +161,23 @@ function TreeEditor({ unitId, ownerName, tree, issues }: { unitId: string; owner
     });
   const remove = async () => {
     if (!sel) return;
-    const dependents = tree.filter((n) => n.requires === sel.id);
+    const dependents = tree.filter((n) => reqs(n).includes(sel.id));
     const ok = await confirm({
       title: `Delete "${sel.name}"?`,
       body: (
         <>
           <p>The node is removed from {ownerName}'s tree. Players who learned it lose its effect (their EXP isn't refunded).</p>
-          {dependents.length > 0 && <p className="ed-warn">{plural(dependents.length, 'node')} require it ({dependents.map((d) => d.name).join(', ')}); they will require {sel.requires ? `"${sel.requires}"` : 'nothing'} instead.</p>}
+          {dependents.length > 0 && <p className="ed-warn">{plural(dependents.length, 'node')} require it ({dependents.map((d) => d.name).join(', ')}); they will require {reqs(sel).length ? reqs(sel).map((r) => `"${r}"`).join(' or ') : 'nothing'} in its place.</p>}
         </>
       ),
       confirmLabel: 'Delete node',
     });
     if (!ok) return;
     set('Delete node', (d) => {
-      for (const n of d) if (n.requires === sel.id) setOpt(n, 'requires', sel.requires);
+      for (const n of d) {
+        const r = reqs(n);
+        if (r.includes(sel.id)) setReqs(n, [...new Set(r.flatMap((id) => (id === sel.id ? reqs(sel) : [id])))]);
+      }
       d.splice(selIndex, 1);
     });
     go({ node: null });
@@ -217,8 +230,8 @@ function TreeEditor({ unitId, ownerName, tree, issues }: { unitId: string; owner
           <div className="ed-tree-scroll">
             <div className="ed-tree" style={{ width, height }} role="list" aria-label={`${ownerName} skill tree`}>
               <svg width={width} height={height} aria-hidden="true">
-                {tree.map((n) => {
-                  const a = n.requires ? pos.get(n.requires) : undefined;
+                {tree.flatMap((n) => reqs(n).map((r) => {
+                  const a = pos.get(r);
                   const b = pos.get(n.id);
                   if (!a || !b) return null;
                   const x1 = a.x + NODE_W / 2;
@@ -226,14 +239,14 @@ function TreeEditor({ unitId, ownerName, tree, issues }: { unitId: string; owner
                   const x2 = b.x + NODE_W / 2;
                   const y2 = b.y;
                   const my = (y1 + y2) / 2;
-                  const on = sel && (sel.id === n.id || sel.id === n.requires);
-                  return <path key={n.id} d={`M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`} className={`edge${on ? ' on' : ''}`} />;
-                })}
+                  const on = sel && (sel.id === n.id || sel.id === r);
+                  return <path key={`${n.id}<${r}`} d={`M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`} className={`edge${on ? ' on' : ''}`} />;
+                }))}
               </svg>
               {tree.map((n, i) => {
                 const p = pos.get(n.id)!;
                 const c = nodeIssueCount(i);
-                const missing = n.requires && !tree.some((x) => x.id === n.requires);
+                const missing = reqs(n).some((r) => !tree.some((x) => x.id === r));
                 return (
                   <button
                     key={`${n.id}-${i}`}
@@ -242,7 +255,7 @@ function TreeEditor({ unitId, ownerName, tree, issues }: { unitId: string; owner
                     className={`ed-node${sel === n ? ' on' : ''}${n.major ? ' major' : ''}${n.exclusiveGroup ? ' excl' : ''}`}
                     style={{ left: p.x, top: p.y, width: NODE_W, height: NODE_H, '--hue': hue(n.exclusiveGroup) } as CSSProperties}
                     aria-pressed={sel === n}
-                    aria-label={`${n.name}, ${n.cost} EXP${n.requires ? `, requires ${n.requires}` : ''}${n.exclusiveGroup ? `, exclusive group ${n.exclusiveGroup}` : ''}`}
+                    aria-label={`${n.name}, ${n.cost} EXP${reqs(n).length ? `, requires ${reqs(n).join(' or ')}` : ''}${n.exclusiveGroup ? `, exclusive group ${n.exclusiveGroup}` : ''}`}
                     onClick={() => go({ node: n.id })}
                   >
                     <span className="nm">{n.name || n.id}</span>
@@ -282,7 +295,7 @@ function NodeForm({ unitId, tree, index, groups }: { unitId: string; tree: Maste
   const rename = (v: string) => {
     if (!v || v === n.id) return;
     edit.tree(unitId, `Rename node ${n.id} → ${v}`, (d) => {
-      for (const x of d) if (x.requires === n.id) x.requires = v;
+      for (const x of d) if (reqs(x).includes(n.id)) setReqs(x, reqs(x).map((r) => (r === n.id ? v : r)));
       d[index].id = v;
     });
     go({ node: v });
@@ -314,10 +327,26 @@ function NodeForm({ unitId, tree, index, groups }: { unitId: string; tree: Maste
           <Field label="EXP cost" path="cost">
             {(id, d, inv) => <NumberInput id={id} describedBy={d} invalid={inv} value={n.cost} spec={{ kind: 'int', min: 0, step: 25 }} onChange={(v) => set('Edit node cost', (x) => (x.cost = v ?? 0), 'cost')} />}
           </Field>
-          <Field label="Requires" path="requires" help="The node that must be learned first. None = it branches straight from the champion.">
-            {(id, d, inv) => (
-              <Select id={id} describedBy={d} invalid={inv} value={n.requires ?? ''} options={[{ value: '', label: 'Nothing (a root node)' }, ...tree.filter((x) => x !== n).map((x) => ({ value: x.id, label: `${x.name} (${x.id})` }))]} onChange={(v) => set('Change prerequisite', (x) => setOpt(x, 'requires', v || undefined))} />
-            )}
+          <Field label="Requires" path="requires" help="The node that must be learned first. None = it branches straight from the champion. Add alternatives when any one of several nodes should unlock it.">
+            {(id, d, inv) => {
+              const list = reqs(n);
+              const opts = (keep?: string) => tree.filter((x) => x !== n && (x.id === keep || !list.includes(x.id))).map((x) => ({ value: x.id, label: `${x.name} (${x.id})` }));
+              return (
+                <>
+                  <Select id={id} describedBy={d} invalid={inv} value={list[0] ?? ''} options={[{ value: '', label: 'Nothing (a root node)' }, ...opts(list[0])]} onChange={(v) => set('Change prerequisite', (x) => setReqs(x, v ? [v, ...list.slice(1)] : []))} />
+                  {list.slice(1).map((r, i) => (
+                    <div key={r} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                      <span className="ed-muted small">or</span>
+                      <Select ariaLabel={`Alternative prerequisite ${i + 1}`} value={r} options={opts(r)} onChange={(v) => set('Change prerequisite', (x) => setReqs(x, list.map((o, j) => (j === i + 1 ? v : o))))} />
+                      <Button size="sm" tone="plain" icon="trash" title="Remove this alternative" onClick={() => set('Remove prerequisite', (x) => setReqs(x, list.filter((_, j) => j !== i + 1)))} />
+                    </div>
+                  ))}
+                  {list.length > 0 && opts().length > 0 && (
+                    <Button size="sm" icon="plus" onClick={() => set('Add prerequisite', (x) => setReqs(x, [...list, opts()[0].value]))}>Or also…</Button>
+                  )}
+                </>
+              );
+            }}
           </Field>
           <Toggle label="Major node" help="Purely cosmetic: a golden outline for capstones and defining effects." checked={!!n.major} onChange={(v) => set(v ? 'Mark major' : 'Unmark major', (x) => setOpt(x, 'major', v || undefined))} />
           <Field label="Exclusive group" path="exclusiveGroup" help="Nodes sharing a group can all be learned, but only one is active at a time. Leave empty for an always-on node." hint={n.exclusiveGroup ? `${tree.filter((x) => x.exclusiveGroup === n.exclusiveGroup).length} node(s) in this group` : undefined}>

@@ -28,7 +28,7 @@
 import { BOARD_HEIGHT, BOARD_WIDTH, TILE, cellKey, type Vec2 } from '../domain/grid';
 import { DEFAULT_PATH_LAYERS, propCells, type BoardTheme } from '../domain/decor';
 import { atmosphereFor, type Atmosphere } from '../domain/atmosphere';
-import { coneAngleDeg, getUnit } from '../domain/units';
+import { coneAngleDeg, getUnit, vialColorAt } from '../domain/units';
 import { getEnemy } from '../domain/enemies';
 import {
   drawBladeTrails,
@@ -50,6 +50,7 @@ import {
   magicOrbAnchor,
   magicOrbRadius,
   paladinBladeTip,
+  plagueVialHand,
   staffTip,
 } from './sprites';
 import { BOSS_BOX, DEFAULT_BOX, paintFigure, type FigureStyle } from './figure';
@@ -82,6 +83,7 @@ import {
 } from './GameEngine';
 import {
   attackAnimTime,
+  VIAL_WINDUP_TIME,
   currentSpeechLine,
   EARTHSPLITTER_HIT_DELAY,
   GREATER_ORB_APEX,
@@ -98,6 +100,9 @@ import {
   PIERCING_CAST_ANIM_TIME,
   specialAnimTime,
   CHILL_FADE,
+  DOT_FADE,
+  BLOOD_RED,
+  POISON_GREEN,
 } from './types';
 import type { Enemy, SludgeGlob, Tower } from './types';
 
@@ -851,6 +856,11 @@ function collectLights(engine: GameEngine, st: BoardState, time: number, scene?:
         out.push({ x: t.pos.x, y: t.pos.y - 6, radius: 30 + 60 * c, family: fam, intensity: 0.4 + 0.5 * c, tint });
       }
     }
+    // The Plague Doctor's next vial glows faintly in its colour in his hand.
+    const held = vialColorAt(t.def, t.vialNext);
+    if (held && t.attackAnim / attackAnimTime('plagueDoctor') < 0.45) {
+      out.push({ x: t.pos.x + (t.aimTarget && t.aimTarget.x < t.pos.x ? -6 : 6), y: t.pos.y - 6, radius: 22, family: 'arcane', intensity: 0.28, glow: 0.2, tint: held });
+    }
     // The Mana Storm's hoisted crystal lights a wide pool, pulsing with each bolt.
     const stance = manaStormStance(t);
     if (stance > 0) {
@@ -887,6 +897,7 @@ function collectLights(engine: GameEngine, st: BoardState, time: number, scene?:
     else if (p.style === 'mana' && !(p.seek && p.seek.delay > 0)) out.push({ x: p.pos.x, y: p.pos.y, radius: 40, family: 'arcane', intensity: 0.55, tint: p.color });
     else if (p.style === 'ice') out.push({ x: p.pos.x, y: p.pos.y, radius: 48, family: 'frost', intensity: 0.6 });
     else if (p.style === 'shard') out.push({ x: p.pos.x, y: p.pos.y, radius: 18 * p.scale, family: 'frost', intensity: 0.35 });
+    else if (p.style === 'vial') out.push({ x: p.pos.x, y: p.pos.y, radius: 24, family: 'arcane', intensity: 0.3, tint: p.color });
   }
   for (const s of engine.slices) {
     const lx = s.pos.x + Math.cos(s.angle) * s.lead;
@@ -1732,7 +1743,9 @@ function drawTower(
         ? charging
           ? 1 - t.charge / t.chargeMax
           : 0
-        : bowDraw(t, !!target);
+        : shape === 'plagueDoctor'
+          ? vialWindup(t, !!target)
+          : bowDraw(t, !!target);
     // Finer steps for the slow orb charge (so the cupping hands track the orb)
     // and the heft; finer still for the Greater Orb's leap, whose arms sweep
     // overhead in a short slice of a long charge.
@@ -1766,15 +1779,19 @@ function drawTower(
     }
     // Empowered Wizard/Elf flourishes animate from inside the sprite: no cache.
     const live = empowered && (t.def.visual.shape === 'elf' || t.def.visual.shape === 'wizard');
+    // The Plague Doctor holds the vial he throws next.
+    const vial = vialColorAt(t.def, t.vialNext);
     paintFigure(
       ctx,
       (g) =>
-        drawUnitSprite(g, t.def.visual.shape, t.def.visual.color, faceLeft, anim, throwing, empowered, t.def.visual.playerConfig, draw),
+        drawUnitSprite(g, t.def.visual.shape, t.def.visual.color, faceLeft, anim, throwing, empowered, t.def.visual.playerConfig, draw, vial),
       style,
       live
         ? undefined
-        : `u|${t.def.visual.shape}|${t.def.visual.color}|${faceLeft ? 1 : 0}|${anim}|${throwing ? 1 : 0}|${empowered ? 1 : 0}|${draw}|${cfgKey(t.def.visual.playerConfig)}`,
+        : `u|${t.def.visual.shape}|${t.def.visual.color}|${faceLeft ? 1 : 0}|${anim}|${throwing ? 1 : 0}|${empowered ? 1 : 0}|${draw}|${cfgKey(t.def.visual.playerConfig)}|${vial ?? ''}`,
     );
+    // A soft glow round that vial, outside the compositor so it stays clean light.
+    if (vial) drawHeldVialGlow(ctx, faceLeft, anim, draw, vial);
     // The Blade adventurer's slash streaks and the Claymore's smear, outside the
     // compositor so they stay clean light (from the unquantized anim, so they
     // sweep smoothly).
@@ -1820,6 +1837,7 @@ function drawTower(
   }
   if (t.preloadMax > 0) drawPreloadGem(ctx, t.preloaded > 0);
   if (t.rangeBuffed) drawGale(ctx, 'front', t.uid * 0.37);
+  if (t.resistChance > 0) drawWardingWisp(ctx, t.uid * 0.53, time);
   if (goo > 0) drawStunGoo(ctx, 'cover', goo, time);
   ctx.restore();
 }
@@ -1893,6 +1911,33 @@ function drawStunGoo(ctx: CanvasRenderingContext2D, layer: 'floor' | 'cover', k:
     ctx.beginPath();
     ctx.arc(3.5, -20.5, 0.6 + 1.8 * b, 0, TAU);
     ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
+ * A champion inside a Plague Doctor's Warding Fumes, in its local space (feet
+ * at y ≈ 11): two thin threads of pale green fume curl up from the ground at
+ * its sides and thin out by its shoulders. Kept faint: it marks the champion,
+ * it doesn't fog the board.
+ */
+function drawWardingWisp(ctx: CanvasRenderingContext2D, seed: number, time: number): void {
+  ctx.save();
+  for (let w = 0; w < 2; w++) {
+    const side = w === 0 ? -1 : 1;
+    const u = (time * 0.32 + seed + w * 0.5) % 1; // 0..1 rise
+    for (let i = 0; i < 7; i++) {
+      const k = i / 6; // along the thread, base → tip
+      const t = u - k * 0.22;
+      if (t < 0 || t > 1) continue;
+      const y = 10 - t * 34;
+      const x = side * (11 - t * 4) + Math.sin(t * 7 + seed * 5 + w) * 2.6;
+      const a = Math.sin(Math.PI * t) * (1 - k * 0.7) * 0.32;
+      ctx.fillStyle = withAlpha('#b6dc8a', a);
+      ctx.beginPath();
+      ctx.arc(x, y, 1.3 + t * 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   ctx.restore();
 }
@@ -2208,6 +2253,17 @@ function chillLevel(e: Enemy): number {
   return Math.max(chill, e.storm * 0.7);
 }
 
+/**
+ * How strongly a damage-over-time status shows, 0..1: full while any wound or
+ * stack has time left, fading over the last `DOT_FADE` before the last one runs
+ * out (each hit resets them all, so they end together).
+ */
+function dotLevel(stacks: readonly { left: number }[]): number {
+  let left = 0;
+  for (const s of stacks) left = Math.max(left, s.left);
+  return Math.min(1, left / DOT_FADE);
+}
+
 const RIME = '#cfefff';
 const RIME_DEEP = '#7fb8e6';
 
@@ -2309,6 +2365,144 @@ function drawBrittle(ctx: CanvasRenderingContext2D, r: number, level: number, se
       ctx.beginPath();
       pts.forEach(([px, py], k) => (k ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
       ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/**
+ * A bleeding foe (the Bandit's wounds), drawn in its ground space (origin at
+ * its position, feet near y = r × 0.7). The `back` layer, under the figure, is
+ * a dark pool of blood spreading round the feet with a few spatters; the
+ * `front` layer, over it, cuts gashes across the body, each swelling a drop
+ * that falls into the pool. Even one wound shows two gashes so a light bleed
+ * still reads; more open wounds (`wounds`) add more, up to four. `level`
+ * (`dotLevel`) fades it all out as the last wound closes; `seed` (its uid)
+ * places the gashes and desyncs the drops.
+ */
+function drawBleeding(ctx: CanvasRenderingContext2D, r: number, wounds: number, seed: number, level: number, layer: 'back' | 'front'): void {
+  const fy = r * 0.7;
+  const t = now() / 1000;
+  ctx.save();
+  ctx.globalAlpha = level;
+  if (layer === 'back') {
+    ctx.fillStyle = withAlpha('#5e0c14', 0.6);
+    ctx.beginPath();
+    ctx.ellipse(0, fy, r * 0.62, r * 0.24, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = withAlpha(BLOOD_RED, 0.55);
+    ctx.beginPath();
+    ctx.ellipse(-r * 0.08, fy - r * 0.03, r * 0.38, r * 0.13, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = withAlpha('#5e0c14', 0.7);
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + hash2(seed, i, 107) * 1.2;
+      const d = 0.75 + 0.3 * hash2(i, seed, 109);
+      ctx.beginPath();
+      ctx.ellipse(Math.cos(a) * r * d, fy + Math.sin(a) * r * 0.36 * d, 1.1, 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+    return;
+  }
+  ctx.lineCap = 'round';
+  for (let i = 0; i < Math.min(4, wounds + 1); i++) {
+    const gx = (hash2(seed, i, 83) - 0.5) * r * 1.1;
+    const gy = -r * (0.45 + 0.9 * hash2(i, seed, 89));
+    const a = (hash2(seed, i, 97) - 0.5) * 1.2;
+    const len = r * (0.38 + 0.2 * hash2(seed, i, 101));
+    ctx.beginPath();
+    ctx.moveTo(gx - Math.cos(a) * len * 0.5, gy - Math.sin(a) * len * 0.5);
+    ctx.lineTo(gx + Math.cos(a) * len * 0.5, gy + Math.sin(a) * len * 0.5);
+    ctx.strokeStyle = '#3d060c';
+    ctx.lineWidth = 2.4;
+    ctx.stroke();
+    ctx.strokeStyle = BLOOD_RED;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    // One drop per gash: it swells at the cut, then falls into the pool.
+    const u = (t * 1.1 + hash2(seed, i, 103)) % 1;
+    ctx.fillStyle = BLOOD_RED;
+    ctx.beginPath();
+    if (u < 0.4) {
+      const k = u / 0.4;
+      ctx.ellipse(gx, gy + 0.8 + k * 0.9, 0.7 + k * 0.6, 0.8 + k * 1, 0, 0, Math.PI * 2);
+    } else {
+      const f = (u - 0.4) / 0.6;
+      const dy = gy + 1.7 + (fy - 1 - gy - 1.7) * f * f;
+      ctx.ellipse(gx, dy, 1, 1.6, 0, 0, Math.PI * 2);
+    }
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/**
+ * A poisoned foe, drawn in its ground space. The `back` layer, under the
+ * figure, is a puddle of venom round the feet; the `front` layer, over it, is
+ * a sickly green haze hugging the body with venom bubbles welling up off it,
+ * each swelling as it rises (dark-rimmed, so it reads on any floor) and popping
+ * in a thin ring. Even one stack raises three bubbles so a light poison still
+ * reads; more stacks (`stacks`) add more, up to six. `level` (`dotLevel`)
+ * fades it all out as the last stack wears off; `seed` (its uid) places and
+ * desyncs the bubbles.
+ */
+function drawPoisoned(ctx: CanvasRenderingContext2D, r: number, stacks: number, seed: number, level: number, layer: 'back' | 'front'): void {
+  const fy = r * 0.7;
+  const t = now() / 1000;
+  ctx.save();
+  ctx.globalAlpha = level;
+  if (layer === 'back') {
+    const pulse = 0.5 + 0.5 * Math.sin(t * 3 + seed);
+    ctx.fillStyle = withAlpha(POISON_GREEN, 0.32 + 0.08 * pulse);
+    ctx.beginPath();
+    ctx.ellipse(0, fy, r * 0.85, r * 0.32, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = withAlpha('#c8f08a', 0.6);
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+  // The haze: a green wash hugging the body.
+  const haze = ctx.createRadialGradient(0, -r * 0.8, 0, 0, -r * 0.8, r * 1.25);
+  haze.addColorStop(0, withAlpha(POISON_GREEN, 0.28 + 0.03 * Math.min(4, stacks)));
+  haze.addColorStop(1, withAlpha(POISON_GREEN, 0));
+  ctx.fillStyle = haze;
+  ctx.beginPath();
+  ctx.arc(0, -r * 0.8, r * 1.25, 0, Math.PI * 2);
+  ctx.fill();
+  for (let i = 0; i < Math.min(6, stacks + 2); i++) {
+    const bx = (hash2(seed, i, 131) - 0.5) * r * 1.3;
+    const by = -r * (0.4 + 0.8 * hash2(i, seed, 137));
+    const u = (t * (0.7 + 0.3 * hash2(seed, i, 139)) + hash2(seed, i, 149)) % 1;
+    const sway = Math.sin((t + i) * 5) * 0.6;
+    if (u < 0.8) {
+      // Rising and swelling.
+      const k = u / 0.8;
+      const y = by - k * r * 0.7;
+      const rad = 0.8 + k * 1.3;
+      ctx.fillStyle = withAlpha(POISON_GREEN, 0.95);
+      ctx.strokeStyle = '#2c5410';
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      ctx.arc(bx + sway, y, rad, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(235, 255, 210, 0.85)';
+      ctx.beginPath();
+      ctx.arc(bx + sway - rad * 0.35, y - rad * 0.35, rad * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Pop: a thin ring spreading and fading.
+      const f = (u - 0.8) / 0.2;
+      ctx.globalAlpha = level * (1 - f);
+      ctx.strokeStyle = POISON_GREEN;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.arc(bx + sway, by - r * 0.7, 2 + f * 1.8, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = level;
     }
   }
   ctx.restore();
@@ -2696,6 +2890,11 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
   // Slowed by ice: frost spreads on the ground under it.
   const chill = surfacing ? 0 : chillLevel(e);
   if (chill > 0) drawChill(ctx, R, chill, e.uid, 'back');
+  // Bleeding / poisoned: a pool of blood or venom under it.
+  const bleedLv = surfacing ? 0 : dotLevel(e.bleeds);
+  const poisonLv = surfacing ? 0 : dotLevel(e.poisons);
+  if (bleedLv > 0) drawBleeding(ctx, R, e.bleeds.length, e.uid, bleedLv, 'back');
+  if (poisonLv > 0) drawPoisoned(ctx, R, e.poisons.length, e.uid, poisonLv, 'back');
   const aura = ROYAL_AURA.has(e.def.id);
   if (aura) drawRoyalAura(ctx, R, now() / 1000, 'back');
   const holy = PALADIN_AURA.has(e.def.id) && !surfacing;
@@ -2726,6 +2925,14 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
     if (chill > 0) {
       style.tint = FEEDBACK.chill;
       style.tintAmount = Math.round(chill * 4) / 10;
+    } else if (poisonLv > 0) {
+      // Sickly green while poisoned, else flushed red while bleeding (one tint
+      // at a time; quantized like the frost).
+      style.tint = POISON_GREEN;
+      style.tintAmount = Math.round(poisonLv * 3) / 10;
+    } else if (bleedLv > 0) {
+      style.tint = BLOOD_RED;
+      style.tintAmount = Math.round(bleedLv * 2) / 10;
     }
     if (ui.selectedEnemyUid === e.uid) {
       style.ink = INK.select;
@@ -2804,6 +3011,18 @@ function drawEnemy(ctx: CanvasRenderingContext2D, ui: RenderUiState, st: BoardSt
     ctx.save();
     ctx.translate(x + dodgeX + rc.dx * 0.5, groundY + dodgeY + rc.dy * 0.5);
     drawBrittle(ctx, R, Math.min(1, e.brittle / CHILL_FADE), e.uid);
+    ctx.restore();
+  }
+  if (bleedLv > 0) {
+    ctx.save();
+    ctx.translate(x + dodgeX + rc.dx * 0.5, groundY + dodgeY + rc.dy * 0.5);
+    drawBleeding(ctx, R, e.bleeds.length, e.uid, bleedLv, 'front');
+    ctx.restore();
+  }
+  if (poisonLv > 0) {
+    ctx.save();
+    ctx.translate(x + dodgeX + rc.dx * 0.5, groundY + dodgeY + rc.dy * 0.5);
+    drawPoisoned(ctx, R, e.poisons.length, e.uid, poisonLv, 'front');
     ctx.restore();
   }
   if (aura) {
@@ -3982,6 +4201,10 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, engine: GameEngine, vfx:
       drawManaBolt(ctx, p.color);
     } else if (p.style === 'ice') {
       drawIceMissile(ctx, p.color);
+    } else if (p.style === 'vial') {
+      // A flask tumbling end over end: its spin follows the ground it covers.
+      ctx.rotate(-ang + (p.pos.x + p.pos.y) * 0.09);
+      drawVialFlask(ctx, p.color);
     } else if (p.style === 'shard') {
       // Fade out over the last stretch of its reach as it melts away.
       ctx.globalAlpha = Math.min(1, (p.shard?.travelLeft ?? 0) / 12);
@@ -4147,6 +4370,35 @@ function drawManaBolt(ctx: CanvasRenderingContext2D, color: string): void {
  * cold streak behind it, a pale halo, then a jagged lump of glacier ice (a deep
  * blue underside, the pale body, a white lit facet) with a sharp point.
  */
+/**
+ * A Plague Doctor's vial in flight, centred on its bulb: a round glass flask of
+ * `color` liquid with a short neck and a cork, a dark outline so it reads over
+ * any floor, and a glint on the glass.
+ */
+function drawVialFlask(ctx: CanvasRenderingContext2D, color: string): void {
+  ctx.fillStyle = 'rgba(20,12,8,0.6)'; // outline
+  ctx.beginPath();
+  ctx.arc(0, 1, 4.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(-2, -5.6, 4, 4.4);
+  ctx.fillStyle = 'rgba(225,240,240,0.55)'; // glass neck
+  ctx.fillRect(-1.2, -4.8, 2.4, 3.6);
+  ctx.fillStyle = '#8a6036'; // cork
+  ctx.fillRect(-1.5, -6.4, 3, 1.8);
+  ctx.fillStyle = color; // the liquid
+  ctx.beginPath();
+  ctx.arc(0, 1, 3.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = shade(color, 0.65); // its shadowed underside
+  ctx.beginPath();
+  ctx.arc(0, 1, 3.6, 0.15 * Math.PI, 0.85 * Math.PI);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'; // glint
+  ctx.beginPath();
+  ctx.arc(-1.3, -0.4, 1, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawIceMissile(ctx: CanvasRenderingContext2D, color: string): void {
   const sg = ctx.createLinearGradient(-22, 0, -3, 0);
   sg.addColorStop(0, withAlpha(color, 0));
@@ -4661,6 +4913,37 @@ const BOW_DRAW_TIME = 0.32;
  * last `BOW_DRAW_TIME` of the reload when it has a target, relaxed otherwise.
  * 0 for every other champion.
  */
+/**
+ * The Plague Doctor's wind-up (0..1): over the last `VIAL_WINDUP_TIME` before
+ * his next throw, with a foe in reach, he cocks the vial back over his shoulder.
+ */
+function vialWindup(t: Tower, hasTarget: boolean): number {
+  if (!hasTarget || t.attackAnim > 0) return 0;
+  return ease.inOutSine(Math.max(0, Math.min(1, 1 - t.cooldown / VIAL_WINDUP_TIME)));
+}
+
+/**
+ * A faint glow of `color` round the vial in the Plague Doctor's hand (where
+ * `plagueVialHand` puts it), so the next throw reads at a glance. Drawn in the
+ * figure's own space, after the figure.
+ */
+function drawHeldVialGlow(ctx: CanvasRenderingContext2D, faceLeft: boolean, toss: number, windup: number, color: string): void {
+  const hand = plagueVialHand(toss, windup);
+  if (!hand.held) return;
+  const x = (faceLeft ? -1 : 1) * (hand.x + 0.3);
+  const y = hand.y - 1.5;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const g = ctx.createRadialGradient(x, y, 0, x, y, 5.5);
+  g.addColorStop(0, withAlpha(color, 0.45));
+  g.addColorStop(1, withAlpha(color, 0));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, 5.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function bowDraw(t: Tower, hasTarget: boolean): number {
   if (t.def.visual.shape !== 'player-bow') return 0;
   if (t.burstLeft > 0) return 1;

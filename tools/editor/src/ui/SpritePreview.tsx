@@ -65,9 +65,14 @@ export function UnitPreview({ unit, size = 96 }: { unit: UnitDef; size?: number 
       ctx.scale(s, s);
       const cycle = t % 2.4;
       const anim = cycle > 1.9 ? 1 - (cycle - 1.9) / 0.5 : 0;
-      paintFigure(ctx, (g) => drawUnitSprite(g, shape, color, false, anim, false, false, playerConfig), style(color, false));
+      // A vial thrower winds up before each throw and holds its vials in turn.
+      const windup = cycle > 1.55 && cycle <= 1.9 ? (cycle - 1.55) / 0.35 : 0;
+      const vials = unit.vials ?? [];
+      const throws = Math.floor(t / 2.4) + (cycle > 1.9 ? 1 : 0);
+      const vial = vials.length ? vials[throws % vials.length].color : undefined;
+      paintFigure(ctx, (g) => drawUnitSprite(g, shape, color, false, anim, false, false, playerConfig, windup, vial), style(color, false));
     },
-    [shape, color, playerConfig],
+    [shape, color, playerConfig, unit.vials],
   );
   if (!drawable) return <span className="ed-sprite-fallback" style={{ width: size, height: size, fontSize: size * 0.45 }}>{icon}</span>;
   return <canvas ref={ref} className="ed-sprite" style={{ width: size, height: size }} role="img" aria-label={`${unit.name} sprite`} />;

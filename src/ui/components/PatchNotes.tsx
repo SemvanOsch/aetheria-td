@@ -20,6 +20,26 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-10-18 · Blood and Poison',
+    changes: [
+      'New Common champion, the Bandit: a hooded cutthroat with a short knife. Every hit opens a bleeding wound that deals 50% of his damage again over 3 seconds. Wounds stack up to 5, and each new hit restarts the clock on every open wound. A bleeding foe can’t regenerate. Up to 3 can be deployed.',
+      'Bandit in-stage upgrades: Deep Cuts (more damage) and Rapid Cuts (faster attacks, stacking wounds quicker).',
+      'Bandit skill tree: Exploit Weakness I and II (Critical Damage raised to ×2, then ×2.5), then Blood in the Water (+15% Critical Chance against bleeding foes).',
+      'New Epic champion, the Plague Doctor: a masked physician who throws a different vial every attack, cycling through three. Verdant Venom poisons for 10% of the foe’s max health, Ruin Tonic hits for 200% damage and ignores resistances, and Sanguine Solvent opens a wound worth 200% of his damage. Up to 3 can be deployed.',
+      'Plague Doctor in-stage upgrades: Measured Doses (faster throws) and Potent Formula (more damage). Once both are bought, each vial levels up on its own, in any order, three levels each: more poison, a harder Ruin Tonic, a deeper bleed. The champion panel shows every vial’s level, what the next level does, and which vial is thrown next.',
+      'Plague Doctor skill tree: Extended Delivery (+10% range) and Careful Measure (vial levels cost 18 gold instead of 20), then two rival paths. Refined Reagents (every vial 25% more potent) leads to a choice of Verdant Distillation, Ruinous Refinement or Sanguine Extraction (one vial 50% more potent), and any of them leads to The Grand Formula: after each round of three vials he throws a fourth carrying all of their effects at once. Self Inoculation (immune to disabling effects such as the Sludge Father’s sludge) leads to Warding Fumes (champions in his range get a 25% chance to resist disabling effects) and Toxic Resilience (each resisted disabling effect gives +100% attack speed for 6 seconds).',
+      'New status effects on foes: Bleeding (a dark pool of blood, gashes and falling drops) and Poisoned (a venom puddle and green bubbles; poison deals a share of the foe’s own max health, only a fifth as much on bosses, and stacks up to 5). Both show in the click-to-inspect foe panel.',
+      'The journal has a fourth bookmark, Status Effects, with notes on the conditions your champions lay on foes: Bleeding, Poisoned and Brittle.',
+      'Keywords like bleed, poison, slow and Brittle in champion and skill-tree descriptions are now highlighted, and show what they do when you hover them. Stat tiles on champion pages have hover tips too.',
+      'The champion panel in a stage now lists buffs from Toxic Resilience and a nearby Plague Doctor’s Warding Fumes.',
+      'Skill trees can now have a node that opens from any one of several paths, drawn joined to all of them.',
+      'Frost Witch: Shatter Storm’s splinters now deal 75% of the shard’s damage (was 50%).',
+      'DPS figures for the Bandit and the Plague Doctor include the bleed their hits open.',
+      'New sounds for the Plague Doctor’s throw and his vials shattering, and a blood spray on the Bandit’s hits.',
+      'Developer menu: a new Sandbox to play any map with no waves, sending any foe or boss yourself, with plenty of gold, a castle that can’t fall and nothing banked. The skill-tree EXP grant is now 500.',
+    ],
+  },
+  {
     version: '2026-10-17 · The Frost Witch',
     changes: [
       'Epic champions can now be summoned from the crystal ball.',

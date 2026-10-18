@@ -51,6 +51,7 @@ import {
 import {
   activeMasteryUpgrades,
   getMasteryUpgrade,
+  isMasteryUpgradeUnlocked,
   masterySpent,
   masteryTree,
   masteryUnlocksArmor,
@@ -827,7 +828,7 @@ export function hasAffordableMasteryUpgrade(
   const owned = masteryUpgradesFor(state, unitId);
   return masteryTree(unitId).some((node) => {
     if (owned.includes(node.id)) return false;
-    if (node.requires && !owned.includes(node.requires)) return false;
+    if (!isMasteryUpgradeUnlocked(unitId, node.id, owned)) return false;
     return available >= node.cost;
   });
 }
@@ -846,7 +847,7 @@ export function buyMasteryUpgrade(
   if (!def) return state;
   if (hasMasteryUpgrade(state, unitId, upgradeId)) return state;
   // Enforce the node's prerequisite (sequential trees).
-  if (def.requires && !hasMasteryUpgrade(state, unitId, def.requires)) return state;
+  if (!isMasteryUpgradeUnlocked(unitId, upgradeId, masteryUpgradesFor(state, unitId))) return state;
   if (availableMasteryExp(state, unitId) < def.cost) return state;
   const owned = masteryUpgradesFor(state, unitId);
   const next: GameState = {
