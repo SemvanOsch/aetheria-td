@@ -173,7 +173,7 @@ export const PROP_PALETTE: PropInfo[] = [
   { kind: 'torch', label: 'Torch', category: 'castle' },
   { kind: 'throne', label: 'Throne', category: 'castle' },
   { kind: 'chandelier', label: 'Chandelier', category: 'castle' },
-  { kind: 'banner', label: 'Banner', category: 'castle', color: '#8e1f2d' },
+  { kind: 'banner', label: 'Banner', category: 'castle', color: '#25397a' },
   { kind: 'diningTable', label: 'Table', category: 'castle' },
   { kind: 'bed', label: 'Bed', category: 'castle' },
   { kind: 'chest', label: 'Chest', category: 'castle' },
@@ -359,7 +359,7 @@ export const CASTLE_DECOR_CELLS: Record<number, ReadonlyArray<readonly [number, 
 };
 
 /** Default banner tint when a banner is placed without an explicit colour. */
-export const DEFAULT_BANNER_COLOR = '#8e1f2d';
+export const DEFAULT_BANNER_COLOR = '#25397a';
 
 /** Default checker colours when a stage declares no theme. */
 export const DEFAULT_THEME: BoardTheme = {

@@ -233,7 +233,7 @@ export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, ret
             </div>
           </div>
         ) : (
-          /* The wall: panelling, a moonlit window between star-sewn drapes. */
+          /* The wall: panelling, a moonlit window between rebel-slashed star drapes. */
           <div className="desk-wall" aria-hidden="true">
             <div className="desk-panel left" />
             <div className="desk-panel right" />

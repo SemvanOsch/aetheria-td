@@ -36,7 +36,7 @@ const POISONED: StatusNote = {
   color: '#5f9e2a',
   kind: 'Damage over time',
   effect:
-    "Every hit that lands adds a stack of poison that eats away a share of the foe's own max health over the next 5 seconds, however hard the hit itself struck, so it bites the biggest foes hardest. Bosses resist most of it, taking only a fifth. " +
+    "Every hit that lands adds a stack of poison that eats away a share of the foe's own max health over the next 5 seconds, however hard the hit itself struck, so it bites the biggest foes hardest. Bosses resist most of it, taking only an eighth. " +
     'Stacks add up, to at most 5 at a time, and each new stack restarts the clock on every stack already working. Poison cannot be dodged or turned aside by a shield.',
 };
 

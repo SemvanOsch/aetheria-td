@@ -27,6 +27,7 @@ export const isFlatProp = (k: PropKind) => propFootprint(k).length === 0;
 export const STAGE_ENDINGS = [
   { id: 'getaway', label: 'The Getaway (wagon ride)', help: 'The party piles into the Escape Wagon and rides off. Needs an Escape Wagon prop.' },
   { id: 'sludgeFather', label: 'The Sludge Father (sewers)', help: 'The Sludge Father rises from the cistern and crushes the halted boss. Pair with "Boss halts at" and a Cistern prop.' },
+  { id: 'throneRoom', label: 'The rebel flag (throne room)', help: 'The hero plants the rebel flag in the throne, then the party flees from the guards. Needs a Throne prop.' },
 ] as const;
 
 // ------------------------------------------------------------- champion shapes
@@ -259,7 +260,7 @@ export const BLEED_FIELDS: NumField[] = [
 ];
 
 export const POISON_FIELDS: NumField[] = [
-  { key: 'maxHealthFraction', label: 'Poison (max HP)', kind: 'fraction', above: 0, max: 1, step: 0.005, help: 'Each hit adds a stack dealing this share of the foe\'s max health over 5 seconds (0.01 = 1%); bosses take a fifth of it.' },
+  { key: 'maxHealthFraction', label: 'Poison (max HP)', kind: 'fraction', above: 0, max: 1, step: 0.005, help: 'Each hit adds a stack dealing this share of the foe\'s max health over 5 seconds (0.01 = 1%); bosses take an eighth of it.' },
 ];
 
 /**
@@ -268,7 +269,7 @@ export const POISON_FIELDS: NumField[] = [
  */
 export const VIAL_EFFECT_FIELDS: NumField[] = [
   { key: 'damageMult', label: 'Impact damage ×', kind: 'multiplier', min: 0, max: 50, step: 0.25, help: 'Impact damage as a multiple of the champion\'s damage (1 = a plain hit, 0 = none).' },
-  { key: 'poison', label: 'Poison (max HP)', kind: 'fraction', min: 0, max: 1, step: 0.005, help: 'A poison stack dealing this share of the foe\'s max health over 5 seconds (0.03 = 3%); bosses take a fifth of it.' },
+  { key: 'poison', label: 'Poison (max HP)', kind: 'fraction', min: 0, max: 1, step: 0.005, help: 'A poison stack dealing this share of the foe\'s max health over 5 seconds (0.03 = 3%); bosses take an eighth of it.' },
   { key: 'bleed', label: 'Bleed ×', kind: 'multiplier', min: 0, max: 50, step: 0.25, help: 'A bleed wound dealing this share of the champion\'s damage over 3 seconds (1 = 100%).' },
 ];
 export const VIAL_KEYS = new Set(['name', 'description', 'color', 'damageMult', 'poison', 'bleed', 'ignoreResist', 'levels']);

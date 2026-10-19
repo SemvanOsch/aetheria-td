@@ -1,7 +1,8 @@
 /**
- * Synthesized sound for the getaway ending (`GetawayCutscene`): one-shot cues
- * (`playCutsceneSound`) and the ride's running loop of hoofbeats and wheel
- * rumble (`RideAudio`, its pace following the wagon). Like every other sound in
+ * Synthesized sound for the ending cutscenes (the Getaway, the Sewers, the
+ * Throne Room): one-shot cues (`playCutsceneSound`) and the ride's running
+ * loop of hoofbeats and wheel rumble (`RideAudio`, its pace following the
+ * wagon). Like every other sound in
  * the game, all Web Audio primitives through the shared bus — the combat
  * category, so the effects slider and mute apply.
  */
@@ -37,7 +38,12 @@ export type CutsceneSound =
   | 'stir'
   | 'sear'
   | 'shed'
-  | 'crumble';
+  | 'crumble'
+  // The Throne Room's ending (`ThroneRoomCutscene`).
+  | 'step'
+  | 'plant'
+  | 'unfurl'
+  | 'cheer';
 
 let noiseBuf: AudioBuffer | null = null;
 function noise(ac: AudioContext): AudioBuffer {
@@ -435,6 +441,75 @@ export function playCutsceneSound(sound: CutsceneSound): void {
       tone(ac, out, t, 90, 40, 0.35, 0.1, 'sine', 0.004);
       burst(ac, out, t, 900, 180, 0.4, 0.08, 'lowpass', 0.8);
       burst(ac, out, t + 0.05, 4800, 3600, 0.5, 0.015, 'highpass', 0.7);
+      break;
+    }
+    case 'step': {
+      // A boot on the throne room's stone, unhurried.
+      tone(ac, out, t, 150, 85, 0.08, 0.03, 'sine', 0.004);
+      burst(ac, out, t, 600, 300, 0.06, 0.012, 'lowpass', 0.7);
+      break;
+    }
+    case 'plant': {
+      // The pole driven down through the royal seat: a heavy thunk, the
+      // carved wood cracking, and splinters and gilt pattering on the dais.
+      tone(ac, out, t, 115, 42, 0.4, 0.15, 'triangle', 0.003);
+      burst(ac, out, t, 900, 160, 0.45, 0.09, 'lowpass', 0.8);
+      burst(ac, out, t + 0.01, 2800, 1200, 0.14, 0.06, 'bandpass', 2.5);
+      for (const [at, f0] of [[0.12, 3200], [0.2, 2500], [0.29, 3600], [0.4, 2200]] as const) {
+        burst(ac, out, t + at, f0, f0 * 0.75, 0.05, 0.02, 'bandpass', 7);
+      }
+      break;
+    }
+    case 'unfurl': {
+      // The cloth letting go and snapping open in the hall's draught, then a
+      // short rising call of brass: the rebels' answer to the royal horn,
+      // bright and in a major key.
+      burst(ac, out, t, 700, 1500, 0.22, 0.035, 'bandpass', 1.4);
+      burst(ac, out, t + 0.28, 900, 1300, 0.12, 0.03, 'bandpass', 1.6);
+      burst(ac, out, t + 0.5, 1000, 1400, 0.1, 0.02, 'bandpass', 1.6);
+      const call: [number, number, number][] = [
+        [0.25, 0.22, 60],
+        [0.5, 0.22, 64],
+        [0.75, 1.3, 67],
+      ];
+      for (const [at, dur, m] of call) {
+        brass(ac, out, t + at, mtof(m), dur, 0.026);
+        brass(ac, out, t + at, mtof(m - 12), dur, 0.018);
+      }
+      brass(ac, out, t + 0.75, mtof(72), 1.3, 0.012);
+      break;
+    }
+    case 'cheer': {
+      // The party's cheer: a handful of voices whooping up together on an
+      // open 'ah', and a stamp of boots and clash of weapons with it.
+      const f = ac.createBiquadFilter();
+      f.type = 'bandpass';
+      f.frequency.value = 950;
+      f.Q.value = 1.4;
+      f.connect(out);
+      for (let i = 0; i < 5; i++) {
+        const at = t + i * 0.05 + Math.random() * 0.05;
+        const pitch = 170 + Math.random() * 120;
+        const o = ac.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(pitch, at);
+        o.frequency.linearRampToValueAtTime(pitch * 1.45, at + 0.22);
+        o.frequency.exponentialRampToValueAtTime(pitch * 1.1, at + 0.9);
+        const v = ac.createGain();
+        v.gain.value = 0; // silent until its envelope starts
+        v.gain.setValueAtTime(0.0001, at);
+        v.gain.linearRampToValueAtTime(0.012, at + 0.08);
+        v.gain.setValueAtTime(0.01, at + 0.5);
+        v.gain.exponentialRampToValueAtTime(0.0001, at + 0.95);
+        o.connect(v).connect(f);
+        o.start(at);
+        o.stop(at + 1);
+      }
+      burst(ac, out, t, 900, 1500, 0.8, 0.014, 'bandpass', 0.9);
+      for (const at of [0.05, 0.4]) {
+        tone(ac, out, t + at, 120, 60, 0.12, 0.05, 'sine', 0.004);
+        burst(ac, out, t + at + 0.01, 3000, 2200, 0.12, 0.012, 'bandpass', 6);
+      }
       break;
     }
     case 'birds': {

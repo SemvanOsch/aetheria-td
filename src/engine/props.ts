@@ -24,6 +24,7 @@ import { BOARD_WIDTH, TILE } from '../domain/grid';
 import { DEFAULT_BANNER_COLOR, type PropKind } from '../domain/decor';
 import { clearFigureCache, paintFigure, type FigureBox } from './figure';
 import { MATERIAL, rng, shade, withAlpha } from './palette';
+import { fillStar8 } from './sprites';
 import { LANTERN_GLASS } from './types';
 
 // Dev only: when this file's drawing code is hot-swapped, drop the cached
@@ -612,7 +613,7 @@ const chandelier: PropArt = {
   },
 };
 
-// --- Banner: heraldic swallowtail on a gilded rod. --------------------------
+// --- Banner: the kingdom's starred swallowtail on a gilded rod. ------------
 const banner: PropArt = {
   origin: [0, 0],
   ink: '#2a1418',
@@ -655,30 +656,10 @@ const banner: PropArt = {
     g.lineTo(9, 31.5);
     g.lineTo(9, 4);
     g.stroke();
-    // Heraldic charge: a small crowned shield.
-    g.fillStyle = '#f2e6c8';
-    g.beginPath();
-    g.moveTo(-4.5, 10);
-    g.lineTo(4.5, 10);
-    g.lineTo(4.5, 15);
-    g.quadraticCurveTo(4.5, 19.5, 0, 21.5);
-    g.quadraticCurveTo(-4.5, 19.5, -4.5, 15);
-    g.closePath();
-    g.fill();
-    g.fillStyle = shade(c, -0.2);
-    g.fillRect(-0.8, 11, 1.6, 9);
-    g.fillRect(-3.5, 13.5, 7, 1.6);
-    g.fillStyle = GOLD;
-    g.beginPath();
-    g.moveTo(-3.5, 9.4);
-    g.lineTo(-3.5, 6.6);
-    g.lineTo(-1.6, 8.2);
-    g.lineTo(0, 6);
-    g.lineTo(1.6, 8.2);
-    g.lineTo(3.5, 6.6);
-    g.lineTo(3.5, 9.4);
-    g.closePath();
-    g.fill();
+    // Heraldic charge: the kingdom's gold eight-pointed star, the same badge
+    // its army carries on shields, tabards and standards.
+    fillStar8(g, 0.4, 14.4, 7, shade(c, -0.45)); // a stitched shadow under it
+    fillStar8(g, 0, 14, 7, GOLD);
     // Rod with finials.
     g.fillStyle = vgrad(g, 0, 3.4, [[0, '#f2cf6a'], [1, '#8a6420']]);
     g.fillRect(-14, 0, 28, 3.2);

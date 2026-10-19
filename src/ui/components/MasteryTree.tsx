@@ -307,14 +307,9 @@ export function MasteryTree({
         </button>
       );
     } else if (st === 'inactive') {
-      // Activating a node after a swapped-out member activates that member.
-      let rival: MasteryUpgradeDef | undefined = selected;
-      while (rival && !(rival.exclusiveGroup && !active.includes(rival.id))) {
-        rival = upOf(rival);
-      }
-      const target = rival ?? selected;
+      // Activates every swapped-out member on the path up to this node too.
       action = (
-        <button className="btn primary mt-action" onClick={() => onSetActive(target.id)}>
+        <button className="btn primary mt-action" onClick={() => onSetActive(selected.id)}>
           <Icon name="forward" /> Activate path
         </button>
       );

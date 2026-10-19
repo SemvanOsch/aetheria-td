@@ -2840,9 +2840,10 @@ export function drawGrunt2(
 
 /**
  * The Capital's eight-pointed gold star centred on `(cx, cy)` with outer radius
- * `r`: the royal army's badge on the Man-at-Arms' tower shield and tabard.
+ * `r`: the royal army's badge on the Man-at-Arms' tower shield and tabard, and
+ * the charge on the castle's banners (`props.ts`).
  */
-function fillStar8(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, fill: string): void {
+export function fillStar8(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, fill: string): void {
   ctx.fillStyle = fill;
   ctx.beginPath();
   for (let i = 0; i < 16; i++) {

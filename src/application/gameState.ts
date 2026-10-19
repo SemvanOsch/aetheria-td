@@ -52,6 +52,7 @@ import {
   activeMasteryUpgrades,
   getMasteryUpgrade,
   isMasteryUpgradeUnlocked,
+  masteryRequires,
   masterySpent,
   masteryTree,
   masteryUnlocksArmor,
@@ -875,26 +876,40 @@ export function buyMasteryUpgrade(
 }
 
 /**
- * Choose which learned member of an exclusive skill-tree group is active for a
- * champion. No-op unless the node is learned and belongs to a group. Deselects
- * any other member of the same group so exactly one stays active.
+ * Make a learned skill-tree node live for a champion by activating the whole
+ * path up to it: the node itself if it belongs to an exclusive group, and every
+ * exclusive member on the way up (each deselecting the rest of its group, so
+ * exactly one stays active). Where a node has several learned prerequisites
+ * (The Grand Formula), the path runs up through the one last activated in its
+ * group, else the first. No-op unless the node is learned.
  */
 export function setActiveMasteryUpgrade(
   state: GameState,
   unitId: string,
   upgradeId: string,
 ): GameState {
-  const def = getMasteryUpgrade(unitId, upgradeId);
-  if (!def?.exclusiveGroup) return state;
   if (!hasMasteryUpgrade(state, unitId, upgradeId)) return state;
-  const active = activeMasteryFor(state, unitId).filter(
-    (id) => getMasteryUpgrade(unitId, id)?.exclusiveGroup !== def.exclusiveGroup,
-  );
+  const purchased = masteryUpgradesFor(state, unitId);
+  const groupOf = (id: string) => getMasteryUpgrade(unitId, id)?.exclusiveGroup;
+  const before = activeMasteryFor(state, unitId);
+  let active = before;
+  const seen = new Set<string>();
+  let id: string | undefined = upgradeId;
+  while (id && !seen.has(id)) {
+    seen.add(id);
+    const def = getMasteryUpgrade(unitId, id);
+    if (!def) break;
+    const group = def.exclusiveGroup;
+    if (group) active = [...active.filter((a) => groupOf(a) !== group), id];
+    const reqs = masteryRequires(def).filter((r) => purchased.includes(r));
+    id = reqs.find((r) => active.includes(r)) ?? reqs[0];
+  }
+  if (active.length === before.length && active.every((a) => before.includes(a))) return state;
   return {
     ...state,
     activeMastery: {
       ...state.activeMastery,
-      [unitId]: [...active, upgradeId],
+      [unitId]: active,
     },
   };
 }

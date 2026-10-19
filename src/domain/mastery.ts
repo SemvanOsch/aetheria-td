@@ -825,7 +825,7 @@ export const MASTERY_TREES: Record<string, MasteryUpgradeDef[]> = {
     {
       id: 'careful_measure',
       name: 'Careful Measure',
-      description: 'Careful measurements reduce the gold cost of each Verdant Venom, Ruin Tonic, and Sanguine Solvent upgrade from 20 to 18.',
+      description: 'Careful measurements reduce the gold cost of each Verdant Venom, Ruin Tonic, and Sanguine Solvent upgrade from 🪙20 to 🪙18.',
       cost: 150,
       requires: 'extended_delivery',
       vialDiscount: 2,

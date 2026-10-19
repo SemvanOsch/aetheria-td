@@ -302,6 +302,9 @@ function validateLevel(level: EditorLevel, enemies: Map<string, EnemyDef>, push:
     if (!decor.some((p) => p.kind === 'cistern')) push('warning', 'ending', 'Set pieces', 'The Sludge Father ending rises from a cistern, but the board has none.', 'Place a Cistern prop.');
     if (!level.bossHaltAt) push('warning', 'ending', 'Set pieces', 'The Sludge Father ending plays when the boss halts, but no halt cell is set.', 'Set "Boss halts at".');
   }
+  if (level.ending === 'throneRoom' && !decor.some((p) => p.kind === 'throne')) {
+    push('warning', 'ending', 'Set pieces', 'The rebel flag ending plants the flag in a throne, but the board has none.', 'Place a Throne prop.');
+  }
   if (level.mist && !decor.some((p) => LIGHTABLE_PROPS[p.kind])) {
     push('warning', 'mist', 'Set pieces', 'The stage is misty but has no lantern posts to light.', 'Place Lantern Post props, or every champion fights at 70% range all stage.');
   }

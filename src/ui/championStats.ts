@@ -7,7 +7,6 @@ import {
   rangeLabel,
   effectiveVial,
   potentVial,
-  vialCycle,
   vialEffectLabel,
   type UnitDef,
   type VialDef,
@@ -259,14 +258,6 @@ export function championStatTiles(unit: UnitDef, purchased: string[]): StatTile[
       ? [{ label: 'Poison', value: pct(unit.poison.maxHealthFraction), sub: `of max health, over ${POISON_DURATION}s`, hint: poisonHint(unit) ?? undefined }]
       : []),
     ...(unit.vials ?? []).map((v, i) => vialTile(v, vialMastery.potency[i] ?? 1)),
-    ...vialCycle(unit, [], vialMastery)
-      .filter((c) => c.formula)
-      .map((c) => ({
-        label: c.name,
-        value: ordinal((unit.vials?.length ?? 0) + 1),
-        sub: 'throw: every vial at once',
-        hint: { title: c.name, icon: 'poison' as const, accent: c.color, text: `After a full round of vials, one more carrying all of their effects: ${vialEffectLabel(c.effect)}.` },
-      })),
     ...(vsBleeding > 0
       ? [{ label: 'Crit vs bleeding', value: `+${pct(vsBleeding)}`, sub: 'chance on bleeding foes' }]
       : []),

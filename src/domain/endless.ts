@@ -7,7 +7,8 @@
  * in waves rolled at random from a budget that grows every wave. Every
  * `ENDLESS_BOSS_EVERY`th wave brings a boss: the chapter's stage bosses in stage
  * order, looping forever with more health each lap. Clearing a boss wave pays
- * `ENDLESS_BOSS_GEMS` gems.
+ * `ENDLESS_BOSS_GEMS` gems. Past wave `SURGE_FROM_WAVE` (50) everything scales
+ * harder: bigger budgets and faster-compounding health on foes and bosses alike.
  *
  * Waves aren't authored — the engine asks `generateEndlessWave` for each one as
  * it starts. An endless stage is otherwise an ordinary `LevelDef` (its `endless`
@@ -40,6 +41,12 @@ const BOSS_LAP_HEALTH_MULT = 3.2;
 const FOE_SCALING_FROM_WAVE = 10;
 /** …compounding by this much per wave past it. */
 const FOE_HEALTH_GROWTH = 1.04;
+/** Past this wave the run turns brutal: everything scales harder… */
+const SURGE_FROM_WAVE = 50;
+/** …foe and boss health compound by this much more per wave past it… */
+const SURGE_HEALTH_GROWTH = 1.03;
+/** …and each wave's budget grows by this many extra points per wave past it. */
+const SURGE_BUDGET_PER_WAVE = 2;
 /** Endless stage ids live far above the campaign's so id-keyed tables never match. */
 const ENDLESS_ID_BASE = 1000;
 
@@ -180,12 +187,17 @@ export function endlessBossHealthMult(lap: number): number {
 
 /** Regular-foe health multiplier for 1-based wave `waveNumber`. */
 export function endlessFoeHealthMult(waveNumber: number): number {
-  return Math.pow(FOE_HEALTH_GROWTH, Math.max(0, waveNumber - FOE_SCALING_FROM_WAVE));
+  return Math.pow(FOE_HEALTH_GROWTH, Math.max(0, waveNumber - FOE_SCALING_FROM_WAVE)) * endlessSurgeHealthMult(waveNumber);
+}
+
+/** Extra health on everything (foes and bosses) past `SURGE_FROM_WAVE`; 1 before it. */
+export function endlessSurgeHealthMult(waveNumber: number): number {
+  return Math.pow(SURGE_HEALTH_GROWTH, Math.max(0, waveNumber - SURGE_FROM_WAVE));
 }
 
 /** Budget points a wave spends on foes (see `EndlessFoe.cost`). */
 function waveBudget(waveNumber: number): number {
-  return 4 + 2 * waveNumber;
+  return 4 + 2 * waveNumber + SURGE_BUDGET_PER_WAVE * Math.max(0, waveNumber - SURGE_FROM_WAVE);
 }
 
 /** Wave number (1-based) at which a foe first joins the run. */
@@ -235,7 +247,7 @@ export function generateEndlessWave(rules: EndlessRules, waveNumber: number, rng
 
   if (bossWave) {
     const { enemyId, lap } = endlessBossFor(rules, waveNumber);
-    const mult = endlessBossHealthMult(lap);
+    const mult = endlessBossHealthMult(lap) * endlessSurgeHealthMult(waveNumber);
     groups.push({ enemyId, count: 1, delay: +(prevDuration * 0.5 + 2).toFixed(2), healthMult: mult > 1 ? mult : undefined });
   }
   return { groups };

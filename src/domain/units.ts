@@ -241,7 +241,7 @@ export const POISON_DURATION = 5;
 export const POISON_MAX_STACKS = 5;
 
 /** Share of its usual strength a poison stack has on a boss. */
-export const POISON_BOSS_MULT = 0.2;
+export const POISON_BOSS_MULT = 0.125;
 
 /**
  * Poison: every hit that lands adds a stack that deals `maxHealthFraction` of
@@ -805,7 +805,7 @@ export const UNITS: Record<string, UnitDef> = {
     name: 'Bandit',
     description: 'A cutthroat who trades heavy blows for lingering wounds. Each quick strike applies bleed, letting the damage build while foes struggle onward.',
     rarity: 'common',
-    damage: 6,
+    damage: 8,
     attackSpeed: 1.4,
     range: 60,
     targeting: 'first',
@@ -820,7 +820,7 @@ export const UNITS: Record<string, UnitDef> = {
         name: 'Deep Cuts',
         description: 'His knives cut deeper dealing more damage.',
         cost: 25,
-        damage: 3,
+        damage: 4,
       },
       {
         name: 'Rapid Cuts',

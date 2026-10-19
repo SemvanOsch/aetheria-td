@@ -340,7 +340,7 @@ function ChampionDetail({ unit, project, onDelete }: { unit: UnitDef; project: C
               <InlineIssues path="bleed" />
             </div>
             <div className="ed-sub-block" data-field="poison">
-              <Toggle label="Poison on hit" help="Every hit adds a stacking poison that deals a share of the foe's max health over 5 seconds (a fifth of it on bosses); each new stack restarts them all." checked={!!unit.poison} onChange={(v) => set(v ? 'Add poison' : 'Remove poison', (x) => setOpt(x, 'poison', v ? { maxHealthFraction: 0.01 } : undefined))} />
+              <Toggle label="Poison on hit" help="Every hit adds a stacking poison that deals a share of the foe's max health over 5 seconds (an eighth of it on bosses); each new stack restarts them all." checked={!!unit.poison} onChange={(v) => set(v ? 'Add poison' : 'Remove poison', (x) => setOpt(x, 'poison', v ? { maxHealthFraction: 0.01 } : undefined))} />
               {unit.poison && (
                 <div className="ed-grid tight">
                   {POISON_FIELDS.map((f) => (

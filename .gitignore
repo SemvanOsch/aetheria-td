@@ -12,3 +12,6 @@ dist-ssr
 
 # Balance simulator output (npm run balance)
 /tools/balance-sim/out/
+
+# Blender auto-backups
+*.blend1

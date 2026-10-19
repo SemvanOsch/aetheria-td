@@ -85,7 +85,7 @@ export interface LaneDef {
 }
 
 /** Ending cutscenes a stage can close on (`LevelDef.ending`). */
-export type StageEnding = 'getaway' | 'sludgeFather';
+export type StageEnding = 'getaway' | 'sludgeFather' | 'throneRoom';
 
 export interface LevelDef {
   id: number;
@@ -125,7 +125,8 @@ export interface LevelDef {
   /**
    * A cutscene the stage ends on when won, played before the result card
    * (`ui/components/GetawayCutscene.tsx` for `getaway`,
-   * `SludgeFatherCutscene.tsx` for `sludgeFather`). Cosmetic only.
+   * `SludgeFatherCutscene.tsx` for `sludgeFather`, `ThroneRoomCutscene.tsx`
+   * for `throneRoom`). Cosmetic only.
    */
   ending?: StageEnding;
   /**
@@ -365,6 +366,9 @@ const CASTLE_SPECS: LevelSpec[] = [
     subtitle: 'His throne, ringed by loyal guards.',
     baseHealth: 10, gem: 150,
     mood: 'crimsonThrone',
+    // Won: the hero plants the rebel flag in the throne, then the party flees
+    // the guards storming the hall (`ThroneRoomCutscene`).
+    ending: 'throneRoom',
     theme: {
       groundEven: '#2c2430',
       groundOdd: '#352a38',
@@ -374,8 +378,8 @@ const CASTLE_SPECS: LevelSpec[] = [
     },
     decor: [
       { kind: 'throne', col: 6, row: 1 },
-      { kind: 'banner', col: 5, row: 0, color: '#8e1f2d' },
-      { kind: 'banner', col: 9, row: 0, color: '#8e1f2d' },
+      { kind: 'banner', col: 5, row: 0, color: '#25397a' },
+      { kind: 'banner', col: 9, row: 0, color: '#25397a' },
       { kind: 'pillar', col: 2, row: 2 },
       { kind: 'pillar', col: 12, row: 2 },
       { kind: 'statue', col: 7, row: 7 },

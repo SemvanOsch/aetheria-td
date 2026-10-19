@@ -1221,7 +1221,7 @@ button:disabled .icon {
     linear-gradient(180deg, transparent calc(26% - 4px), #2c170c calc(26% - 4px), #3e2414 26%, #2c170c calc(26% + 4px), transparent calc(26% + 4px)),
     linear-gradient(115deg, transparent 22%, rgba(200, 220, 255, 0.07) 30%, transparent 36%, transparent 62%, rgba(200, 220, 255, 0.05) 68%, transparent 72%);
 }
-/* Star-sewn drapes hanging from the rod, banner-pointed at the hem. */
+/* Rebel-defaced star drapes hanging from the rod, banner-pointed at the hem. */
 .desk-drape {
   position: relative;
   z-index: 2;
@@ -1242,7 +1242,8 @@ button:disabled .icon {
 /* Gold trim down the inner edge. */
 .desk-drape.left { box-shadow: inset -4px 0 0 rgba(201, 148, 74, 0.5), inset 0 -8px 0 rgba(201, 148, 74, 0.55); }
 .desk-drape.right { box-shadow: inset 4px 0 0 rgba(201, 148, 74, 0.5), inset 0 -8px 0 rgba(201, 148, 74, 0.55); }
-/* A gold eight-pointed star on each drape. */
+/* The king's gold eight-pointed star on each drape, defaced by the rebels with
+   a dripping crimson slash daubed across it. */
 .desk-drape::after {
   content: '';
   position: absolute;
@@ -1251,8 +1252,11 @@ button:disabled .icon {
   width: 46%;
   aspect-ratio: 1;
   transform: translate(-50%, -50%);
-  opacity: 0.72;
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-50 -50 100 100'%3E%3Cg fill='%23c9944a'%3E%3Cpath d='M0-48L8-8 0 0-8-8Z'/%3E%3Cpath d='M0 48L8 8 0 0-8 8Z'/%3E%3Cpath d='M-48 0L-8-8 0 0-8 8Z'/%3E%3Cpath d='M48 0L8-8 0 0 8 8Z'/%3E%3Cpath d='M-28-28L-4 0 0 0 0-4Z'/%3E%3Cpath d='M28-28L4 0 0 0 0-4Z'/%3E%3Cpath d='M-28 28L-4 0 0 0 0 4Z'/%3E%3Cpath d='M28 28L4 0 0 0 0 4Z'/%3E%3C/g%3E%3Ccircle r='30' fill='none' stroke='%23c9944a' stroke-width='2'/%3E%3C/svg%3E")
+  opacity: 0.8;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-50 -50 100 100'%3E%3Cg fill='%23c4303a'%3E%3Cpath d='M47-50C36-38 20-22 5-7-10 8-28 25-50 42L-47 46-41 47C-24 33-6 18 9 4 23-9 38-24 50-38L49-44Z'/%3E%3Cpath d='M-3 1Q-2 14-3 21Q0 25 2 21Q3 11 6-4Z'/%3E%3Cpath d='M-28 25Q-27 33-28 38Q-25 41-24 37Q-23 30-21 20Z'/%3E%3Cpath d='M19-13Q20-6 19-2Q22 1 23-3Q24-9 26-19Z'/%3E%3Ccircle cx='-26' cy='44' r='2'/%3E%3C/g%3E%3C/svg%3E")
+      center / contain no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-50 -50 100 100'%3E%3Cg fill='%23c9944a'%3E%3Cpath d='M0-48L8-8 0 0-8-8Z'/%3E%3Cpath d='M0 48L8 8 0 0-8 8Z'/%3E%3Cpath d='M-48 0L-8-8 0 0-8 8Z'/%3E%3Cpath d='M48 0L8-8 0 0 8 8Z'/%3E%3Cpath d='M-28-28L-4 0 0 0 0-4Z'/%3E%3Cpath d='M28-28L4 0 0 0 0-4Z'/%3E%3Cpath d='M-28 28L-4 0 0 0 0 4Z'/%3E%3Cpath d='M28 28L4 0 0 0 0 4Z'/%3E%3C/g%3E%3Ccircle r='30' fill='none' stroke='%23c9944a' stroke-width='2'/%3E%3C/svg%3E")
     center / contain no-repeat;
 }
 /* The windowsill the desk is pushed up against. */
@@ -5320,6 +5324,9 @@ button.cd-mastery:hover {
   text-align: center;
   padding: 32px 40px;
   max-width: 420px;
+  /* Never taller than the board it sits on: a long endless run's loot scrolls instead. */
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
   animation: pop-in 0.4s cubic-bezier(0.18, 0.9, 0.3, 1.2);
 }
 .result-card h2 {
@@ -5328,10 +5335,12 @@ button.cd-mastery:hover {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   margin-bottom: 6px;
+  /* Icon above the title, so a title that wraps ("New Record") stays centred. */
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
+  gap: 4px;
+  line-height: 1.1;
 }
 .result-card.win {
   border-color: var(--border-strong);
@@ -5355,6 +5364,12 @@ button.cd-mastery:hover {
   color: var(--gold);
   font-weight: 700;
   margin: 12px 0 22px;
+}
+/* Short windows shrink the board: tighten the card so it still fits whole. */
+@media (max-height: 760px) {
+  .result-card { padding: 20px 28px; }
+  .result-card h2 { font-size: 32px; }
+  .result-card .reward { margin: 8px 0 14px; }
 }
 
 /* --------------------------------------------------- game side panel */
@@ -5615,6 +5630,78 @@ button.cd-mastery:hover {
   flex-wrap: wrap;
   justify-content: center;
   gap: 6px;
+}
+/* "i" button at the card's top-left: opens the full stat sheet over the card
+   (the battle keeps running). */
+.selected-tower-box .t-info {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 3;
+}
+.t-info-btn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.t-info-btn:hover,
+.t-info-btn.open {
+  border-color: var(--border-strong);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+.t-info-pop {
+  position: absolute;
+  top: 30px;
+  left: 0;
+  width: 230px;
+  padding: 10px 12px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  box-shadow: var(--shadow-lift);
+  backdrop-filter: blur(14px);
+  animation: pop-in 0.16s ease-out;
+}
+.t-info-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.t-info-close {
+  display: grid;
+  place-items: center;
+  padding: 2px;
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.t-info-close:hover { color: var(--text); }
+.stat-row.t-info-stats {
+  grid-template-columns: 1fr;
+  margin-top: 8px;
+}
+.t-info-stats .s {
+  justify-content: space-between;
+}
+@media (prefers-reduced-motion: reduce) {
+  .t-info-pop { animation: none; }
 }
 /* badge already sits after the name via the title's flex gap */
 .selected-tower-box .t-title .tier-badge {
@@ -9018,7 +9105,8 @@ button.cd-mastery.cd-armory:hover {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  width: 82px;
+  /* Narrow enough that the three tiles and "+N more" share one row. */
+  width: 74px;
   padding: 6px 4px;
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--rarity) 65%, transparent);
@@ -9029,6 +9117,10 @@ button.cd-mastery.cd-armory:hover {
   line-height: 1.2;
   color: var(--rarity);
   text-align: center;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 .loot-item-more {
   --rarity: var(--text-dim, #9fb2c8);

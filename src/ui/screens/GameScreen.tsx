@@ -20,7 +20,6 @@ import {
   upgradeEffectLabel,
   nextVialLevel,
   vialCycle,
-  vialDamageFactor,
   vialLevelCost,
   vialEffectLabel,
   vialLevelLabel,
@@ -45,6 +44,8 @@ import { battleTrackFor, setMusicIntensity, setMusicTrack } from '../music';
 import { GetawayCutscene } from '../components/GetawayCutscene';
 import { SludgeFatherCutscene } from '../components/SludgeFatherCutscene';
 import { SludgeFatherScene } from '../../engine/cutscene/sludgeFather';
+import { ThroneRoomCutscene } from '../components/ThroneRoomCutscene';
+import { ThroneRoomScene } from '../../engine/cutscene/throneRoom';
 import { playUiSound } from '../uiAudio';
 import { UnitSprite } from '../components/UnitSprite';
 import { Icon, type IconName } from '../components/Icon';
@@ -199,6 +200,26 @@ export function GameScreen({ levelId, sandbox = false, onExit, onHome, onRetry }
   const [flash, setFlash] = useState<string | null>(null);
   // Whether the selected champion's "Active Buffs" list is expanded.
   const [showBuffs, setShowBuffs] = useState(false);
+  // Whether the selected champion's "i" stat sheet is open (the battle keeps
+  // running underneath); it closes when another champion is selected.
+  const [showInfo, setShowInfo] = useState(false);
+  const infoRef = useRef<HTMLDivElement>(null);
+  useEffect(() => setShowInfo(false), [selectedTowerUid]);
+  useEffect(() => {
+    if (!showInfo) return;
+    const onDown = (e: PointerEvent) => {
+      if (!infoRef.current?.contains(e.target as Node)) setShowInfo(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowInfo(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [showInfo]);
   const [hud, setHud] = useState<Hud | null>(null);
   // The foe clicked to inspect, and its live snapshot (refreshed each frame).
   const [selectedEnemyUid, setSelectedEnemyUid] = useState<number | null>(null);
@@ -529,6 +550,11 @@ export function GameScreen({ levelId, sandbox = false, onExit, onHome, onRetry }
       // The party gone through the tunnel, Draven crushed, and the Sludge
       // Father left breathing in the cistern behind them.
       const aftermath = new SludgeFatherScene(engineRef.current);
+      aftermath.settle();
+      uiRef.current.scene = aftermath.boardScene;
+    } else if (level.ending === 'throneRoom' && engineRef.current) {
+      // The hall emptied, and the rebel flag standing in the throne.
+      const aftermath = new ThroneRoomScene(engineRef.current);
       aftermath.settle();
       uiRef.current.scene = aftermath.boardScene;
     } else {
@@ -954,6 +980,15 @@ export function GameScreen({ levelId, sandbox = false, onExit, onHome, onRetry }
                   onClosed={() => setCutsceneOpen(false)}
                 />
               )}
+              {cutsceneOpen && engineRef.current && level.ending === 'throneRoom' && (
+                <ThroneRoomCutscene
+                  engine={engineRef.current}
+                  section={level.section}
+                  from={endingFromRef.current}
+                  onDone={finishEnding}
+                  onClosed={() => setCutsceneOpen(false)}
+                />
+              )}
               {cutsceneOpen && engineRef.current && level.ending === 'getaway' && (
                 <GetawayCutscene
                   engine={engineRef.current}
@@ -1188,24 +1223,51 @@ export function GameScreen({ levelId, sandbox = false, onExit, onHome, onRetry }
                 // Buffed stats are recoloured by category (no trailing icons): attack
                 // speed → blue, damage → red, range → green, crit → yellow, DPS → its
                 // own violet.
+                // The card keeps the four headline stats; everything else is in
+                // the "i" sheet at its top-left.
                 return (
-                  <div className="stat-row" style={{ marginTop: 4 }}>
-                    <div className={`s${dmgBuffed ? ' buff-dmg' : ''}`}>DMG <b>{selectedTower.damage}</b></div>
-                    <div className={`s${spdBuffed ? ' buff-spd' : ''}`}>SPD <b>{formatAttackSpeed(spd)}/s</b></div>
-                    <div className={`s${rangeBuffed ? ' buff-range' : selectedTower.mistMult < 1 ? ' debuff-range' : ''}`}>Range <b>{selectedTower.range}</b></div>
-                    <div className={`s${dpsBuffed ? ' buff-dps' : ''}`}>DPS <b>{(selectedTower.damage * spd * vialDamageFactor(selectedTower.def, selectedTower.vialLevels, selectedTower.vialMastery)).toFixed(0)}{selectedTower.burstCount > 1 ? ` x${selectedTower.burstCount}` : ''}</b></div>
-                    <div className={`s${critBuffed ? ' buff-crit' : ''}`}>Crit <b>{+(selectedTower.critChance * 100).toFixed(2)}%</b></div>
-                    <div className={`s${critBuffed ? ' buff-crit' : ''}`}>Crit Dmg <b>{selectedTower.critMultiplier}×</b></div>
-                    {selectedTower.bleed && (
-                      <div className="s">Bleed <b>{Math.round(selectedTower.bleed.damageMult * 100)}% / {BLEED_DURATION}s</b></div>
-                    )}
-                    {selectedTower.poison && (
-                      <div className="s">Poison <b>{+(selectedTower.poison.maxHealthFraction * 100).toFixed(2)}% max HP / {POISON_DURATION}s</b></div>
-                    )}
-                    {selectedTower.critChanceVsBleeding > 0 && (
-                      <div className="s">Crit vs bleeding <b>+{+(selectedTower.critChanceVsBleeding * 100).toFixed(2)}%</b></div>
-                    )}
-                  </div>
+                  <>
+                    <div className="stat-row" style={{ marginTop: 4 }}>
+                      <div className={`s${dmgBuffed ? ' buff-dmg' : ''}`}>DMG <b>{selectedTower.damage}</b></div>
+                      <div className={`s${spdBuffed ? ' buff-spd' : ''}`}>SPD <b>{formatAttackSpeed(spd)}/s</b></div>
+                      <div className={`s${rangeBuffed ? ' buff-range' : selectedTower.mistMult < 1 ? ' debuff-range' : ''}`}>Range <b>{selectedTower.range}</b></div>
+                      <div className={`s${dpsBuffed ? ' buff-dps' : ''}`}>DPS <b>{(selectedTower.damage * spd).toFixed(0)}{selectedTower.burstCount > 1 ? ` x${selectedTower.burstCount}` : ''}</b></div>
+                    </div>
+                    <div className="t-info" ref={infoRef}>
+                      <button
+                        className={`t-info-btn${showInfo ? ' open' : ''}`}
+                        onClick={() => setShowInfo((v) => !v)}
+                        aria-expanded={showInfo}
+                        aria-label="Other stats"
+                        title="Other stats"
+                      >
+                        <Icon name="info" />
+                      </button>
+                      {showInfo && (
+                        <div className="t-info-pop" role="dialog" aria-label={`${selectedTower.def.name} stats`}>
+                          <div className="t-info-head">
+                            <span>{selectedTower.def.name} · stats</span>
+                            <button className="t-info-close" onClick={() => setShowInfo(false)} aria-label="Close">
+                              <Icon name="close" />
+                            </button>
+                          </div>
+                          <div className="stat-row t-info-stats">
+                            <div className={`s${critBuffed ? ' buff-crit' : ''}`}>Crit <b>{+(selectedTower.critChance * 100).toFixed(2)}%</b></div>
+                            <div className={`s${critBuffed ? ' buff-crit' : ''}`}>Crit Dmg <b>{selectedTower.critMultiplier}×</b></div>
+                            {selectedTower.bleed && (
+                              <div className="s">Bleed <b>{Math.round(selectedTower.bleed.damageMult * 100)}% / {BLEED_DURATION}s</b></div>
+                            )}
+                            {selectedTower.poison && (
+                              <div className="s">Poison <b>{+(selectedTower.poison.maxHealthFraction * 100).toFixed(2)}% max HP / {POISON_DURATION}s</b></div>
+                            )}
+                            {selectedTower.critChanceVsBleeding > 0 && (
+                              <div className="s">Crit vs bleeding <b>+{+(selectedTower.critChanceVsBleeding * 100).toFixed(2)}%</b></div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </>
                 );
               })()}
 
