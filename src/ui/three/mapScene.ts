@@ -8,6 +8,8 @@ import {
   addDeskLights,
   contactShadeTexture,
   createDeskRenderer,
+  createInkPass,
+  skipInk,
   loadDeskModel,
 } from './deskThree';
 
@@ -159,7 +161,7 @@ function buildScene(model: GLTF): MapScene {
   canvas.className = 'desk-map-canvas';
   canvas.setAttribute('aria-hidden', 'true');
 
-  const { renderer, envMap } = createDeskRenderer(canvas, 1.55);
+  const { renderer, envMap } = createDeskRenderer(canvas, 1.2);
   const scene = new THREE.Scene();
   scene.environment = envMap;
   scene.environmentIntensity = 0.35;
@@ -181,8 +183,11 @@ function buildScene(model: GLTF): MapScene {
     const mat = mesh.material as THREE.MeshStandardMaterial;
     for (const tex of [mat.map, mat.normalMap, mat.roughnessMap]) if (tex) tex.anisotropy = maxAniso;
     if (glass) {
+      skipInk(mesh);
       mat.depthWrite = false;
-      mat.envMapIntensity = 2.2;
+      // A light sheen, not a milky lens over the dial.
+      mat.envMapIntensity = 1.4;
+      mat.opacity = 0.08;
     }
   });
   if (!sheet || !needle || !pin) throw new Error('adventurers_map.glb is missing an object');
@@ -238,6 +243,7 @@ function buildScene(model: GLTF): MapScene {
   const ink = new THREE.Mesh(sheetMesh.geometry, inkMat);
   ink.receiveShadow = true;
   ink.renderOrder = 1;
+  skipInk(ink);
   sheetMesh.add(ink);
 
   // The ring of ink pulsing round the pin.
@@ -254,6 +260,7 @@ function buildScene(model: GLTF): MapScene {
   });
   const ring = new THREE.Mesh(ringGeo, ringMat);
   ring.renderOrder = 2;
+  skipInk(ring);
   map.add(ring);
 
   // The cast shadow, on an invisible desk.
@@ -261,6 +268,7 @@ function buildScene(model: GLTF): MapScene {
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = box.min.y - 0.0004;
   floor.receiveShadow = true;
+  skipInk(floor);
   scene.add(floor);
 
   // Contact shade under the sheet and its rolls.
@@ -277,11 +285,13 @@ function buildScene(model: GLTF): MapScene {
   const contact = new THREE.Mesh(new THREE.PlaneGeometry(fw + 2 * CONTACT_MARGIN, fd + 2 * CONTACT_MARGIN), contactMat);
   contact.rotation.x = -Math.PI / 2;
   contact.position.set((box.min.x + box.max.x) / 2, box.min.y + 0.0002, (box.min.z + box.max.z) / 2);
+  skipInk(contact);
   scene.add(contact);
 
   const { key, hearth } = addDeskLights(scene, 0.42);
 
   const camera = new THREE.PerspectiveCamera(FOV, 1, 0.01, 10);
+  const inkPass = createInkPass(renderer, scene, camera);
   const centre = box.getCenter(new THREE.Vector3());
   const dir = new THREE.Vector3(0, Math.sin(ELEVATION), Math.cos(ELEVATION));
 
@@ -356,7 +366,7 @@ function buildScene(model: GLTF): MapScene {
   };
   const render = (now = performance.now()) => {
     pose(now);
-    renderer.render(scene, camera);
+    inkPass.render();
     lastDraw = now;
   };
   const busy = () => hover !== hoverTarget || tween !== null;
@@ -448,6 +458,7 @@ function buildScene(model: GLTF): MapScene {
       const ratio = Math.min(2.5, dpr * 1.5, Math.sqrt(7_000_000 / (width * height)));
       renderer.setPixelRatio(ratio);
       renderer.setSize(width, height, false);
+      inkPass.resize();
       camera.aspect = b.w / b.h;
       frame();
       camera.setViewOffset(b.w, b.h, -b.x, -b.y, width, height);
@@ -467,6 +478,7 @@ function buildScene(model: GLTF): MapScene {
       ringGeo.dispose();
       ringMat.dispose();
       envMap.dispose();
+      inkPass.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
     },
@@ -475,9 +487,11 @@ function buildScene(model: GLTF): MapScene {
   // Warm up: compile every shader and upload the textures now, behind the
   // loading screen, rather than on the desk's first frame.
   renderer.setSize(64, 64, false);
+  inkPass.resize();
   frame();
   api.setHere('castle');
   renderer.compile(scene, camera);
+  inkPass.compile();
   render();
   return api;
 }

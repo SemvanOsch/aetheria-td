@@ -6,6 +6,8 @@ import {
   addDeskLights,
   contactShadeTexture,
   createDeskRenderer,
+  createInkPass,
+  skipInk,
   loadDeskModel,
 } from './deskThree';
 
@@ -115,7 +117,10 @@ function buildScene(model: GLTF): JournalScene {
   // The book, in a holder that carries the hover lift.
   const book = model.scene.clone(true);
   book.traverse((o) => {
-    if ((o as THREE.Mesh).isMesh) o.castShadow = true;
+    if (!(o as THREE.Mesh).isMesh) return;
+    o.castShadow = true;
+    // The stitches are drawn in the texture's own colour; inked, they read as dots.
+    if (o.name.startsWith('Stitching')) skipInk(o);
   });
   const holder = new THREE.Group();
   holder.add(book);
@@ -129,6 +134,7 @@ function buildScene(model: GLTF): JournalScene {
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = box.min.y - 0.0004;
   floor.receiveShadow = true;
+  skipInk(floor);
   scene.add(floor);
 
   // Contact shade: a soft dark patch right under the book that seats it on the
@@ -151,12 +157,14 @@ function buildScene(model: GLTF): JournalScene {
   const contactPivot = new THREE.Group();
   contactPivot.rotation.y = YAW;
   contactPivot.add(contact);
+  skipInk(contact);
   scene.add(contactPivot);
 
   // The desk's candlelit lighting (shared with the map).
   const { key, hearth } = addDeskLights(scene, 0.22);
 
   const camera = new THREE.PerspectiveCamera(FOV, 1, 0.01, 10);
+  const ink = createInkPass(renderer, scene, camera);
   const centre = box.getCenter(new THREE.Vector3());
   const dir = new THREE.Vector3(0, Math.sin(ELEVATION), Math.cos(ELEVATION));
 
@@ -205,7 +213,7 @@ function buildScene(model: GLTF): JournalScene {
     key.intensity = KEY_INTENSITY * (1 + 0.12 * hover);
     contactMat.opacity = CONTACT_OPACITY * (1 - 0.6 * hover);
     contact.scale.setScalar(1 + 0.06 * hover);
-    renderer.render(scene, camera);
+    ink.render();
   };
   const tick = (now: number) => {
     raf = 0;
@@ -222,8 +230,10 @@ function buildScene(model: GLTF): JournalScene {
   // Warm up: compile every shader and upload the textures now, behind the
   // loading screen, rather than on the desk's first frame.
   renderer.setSize(64, 64, false);
+  ink.resize();
   frame();
   renderer.compile(scene, camera);
+  ink.compile();
   render();
 
   return {
@@ -248,6 +258,7 @@ function buildScene(model: GLTF): JournalScene {
       // Extra resolution so the book stays crisp through the desk's zoom.
       renderer.setPixelRatio(Math.min(3, (window.devicePixelRatio || 1) * 1.6));
       renderer.setSize(width, height, false);
+      ink.resize();
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       frame();
@@ -262,6 +273,7 @@ function buildScene(model: GLTF): JournalScene {
       contactMat.dispose();
       contactTex.dispose();
       envMap.dispose();
+      ink.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
     },

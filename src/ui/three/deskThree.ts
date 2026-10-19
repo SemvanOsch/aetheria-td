@@ -70,6 +70,159 @@ export function createDeskRenderer(canvas: HTMLCanvasElement, exposure: number) 
   return { renderer, envMap };
 }
 
+/** Layer for things the ink pass must not outline (shadow catchers, glass, decals). */
+export const NO_INK_LAYER = 1;
+
+/** Keep `obj` out of the ink outline (it still renders). */
+export function skipInk(obj: THREE.Object3D) {
+  obj.layers.set(NO_INK_LAYER);
+}
+
+/**
+ * The desk's finishing pass, the 3D twin of the figure compositor's ink: the
+ * scene renders into a buffer, a second pass renders view normals and depth
+ * (only layer 0, so shadows, glass and decals are left out), and a full-screen
+ * pass draws a warm ink line wherever the silhouette, the depth or the surface
+ * direction breaks, then tone-maps onto the canvas. The ink takes a darkened
+ * shade of the colour under it (as `inkFor` does for figures), so it reads
+ * brown on paper and bronze on brass rather than a flat black.
+ */
+export function createInkPass(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
+  camera.layers.enable(NO_INK_LAYER);
+  const color = new THREE.WebGLRenderTarget(1, 1, { samples: 4, type: THREE.HalfFloatType });
+  const depth = new THREE.DepthTexture(1, 1);
+  const normals = new THREE.WebGLRenderTarget(1, 1, { depthTexture: depth });
+  const normalMat = new THREE.MeshNormalMaterial();
+  const cam = camera as THREE.PerspectiveCamera;
+  const quadMat = new THREE.ShaderMaterial({
+    uniforms: {
+      tColor: { value: color.texture },
+      tNormal: { value: normals.texture },
+      tDepth: { value: depth },
+      texel: { value: new THREE.Vector2() },
+      width: { value: 1.5 },
+      ink: { value: new THREE.Color(0x24140c) },
+      cameraNear: { value: 0.01 },
+      cameraFar: { value: 10 },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+    fragmentShader: /* glsl */ `
+      #include <packing>
+      uniform sampler2D tColor;
+      uniform sampler2D tNormal;
+      uniform sampler2D tDepth;
+      uniform vec2 texel;
+      uniform float width;
+      uniform vec3 ink;
+      uniform float cameraNear;
+      uniform float cameraFar;
+      varying vec2 vUv;
+      float viewZ(vec2 uv) {
+        return -perspectiveDepthToViewZ(texture2D(tDepth, uv).x, cameraNear, cameraFar);
+      }
+      void main() {
+        vec4 c = texture2D(tColor, vUv);
+        vec4 n0 = texture2D(tNormal, vUv);
+        float z0 = viewZ(vUv);
+        float edge = 0.0;
+        for (int i = 0; i < 8; i++) {
+          float a = float(i) * 0.7853982;
+          vec2 uv = vUv + vec2(cos(a), sin(a)) * texel * width;
+          vec4 n = texture2D(tNormal, uv);
+          // Silhouette: one side covered, the other not.
+          edge = max(edge, abs(n.a - n0.a));
+          if (n.a > 0.5 && n0.a > 0.5) {
+            // Creases: the surface turns sharply.
+            float turn = 1.0 - dot(normalize(n.rgb * 2.0 - 1.0), normalize(n0.rgb * 2.0 - 1.0));
+            edge = max(edge, smoothstep(0.25, 0.55, turn));
+            // Steps: one surface lying over another.
+            float z = viewZ(uv);
+            edge = max(edge, smoothstep(0.004, 0.012, abs(z - z0) / min(z, z0)));
+          }
+        }
+        vec3 base = c.a > 0.001 ? c.rgb / c.a : vec3(0.0);
+        // The ink: a deep shade of the colour beneath, pulled toward warm brown.
+        vec3 local = n0.a > 0.5 ? base : ink;
+        vec3 inkCol = mix(ink, local * 0.22, 0.45);
+        // Ink laid over what's there (premultiplied "over").
+        float k = edge * 0.9;
+        float alpha = k + c.a * (1.0 - k);
+        vec3 rgb = (inkCol * k + base * c.a * (1.0 - k)) / max(alpha, 1e-4);
+        gl_FragColor = vec4(rgb, alpha);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        gl_FragColor.rgb *= gl_FragColor.a;
+      }`,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.NoBlending,
+  });
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), quadMat);
+  quad.frustumCulled = false;
+  const quadScene = new THREE.Scene();
+  quadScene.add(quad);
+  const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const size = new THREE.Vector2();
+  const clear = new THREE.Color();
+
+  let widthCss = 1.2;
+  return {
+    /** Ink line width in CSS pixels. */
+    setWidth(px: number) {
+      widthCss = px;
+      quadMat.uniforms.width.value = widthCss * renderer.getPixelRatio();
+    },
+    /** Follow the renderer's drawing-buffer size (call after `setSize`/`setPixelRatio`). */
+    resize() {
+      renderer.getDrawingBufferSize(size);
+      color.setSize(size.x, size.y);
+      normals.setSize(size.x, size.y);
+      quadMat.uniforms.texel.value.set(1 / size.x, 1 / size.y);
+      quadMat.uniforms.width.value = widthCss * renderer.getPixelRatio();
+    },
+    render() {
+      quadMat.uniforms.cameraNear.value = cam.near;
+      quadMat.uniforms.cameraFar.value = cam.far;
+      const alpha = renderer.getClearAlpha();
+      renderer.getClearColor(clear);
+      renderer.setRenderTarget(color);
+      renderer.setClearColor(0x000000, 0);
+      renderer.clear();
+      renderer.render(scene, camera);
+      // Normals and depth of the inked objects only.
+      scene.overrideMaterial = normalMat;
+      camera.layers.disable(NO_INK_LAYER);
+      renderer.setRenderTarget(normals);
+      renderer.clear();
+      const shadows = renderer.shadowMap.autoUpdate;
+      renderer.shadowMap.autoUpdate = false;
+      renderer.render(scene, camera);
+      renderer.shadowMap.autoUpdate = shadows;
+      camera.layers.enable(NO_INK_LAYER);
+      scene.overrideMaterial = null;
+      renderer.setRenderTarget(null);
+      renderer.setClearColor(clear, alpha);
+      renderer.render(quadScene, quadCam);
+    },
+    /** Compile the finishing shaders too, behind the loading screen. */
+    compile() {
+      renderer.compile(quadScene, quadCam);
+    },
+    dispose() {
+      color.dispose();
+      normals.dispose();
+      depth.dispose();
+      normalMat.dispose();
+      quad.geometry.dispose();
+      quadMat.dispose();
+    },
+  };
+}
+
+export type InkPass = ReturnType<typeof createInkPass>;
+
 export interface DeskLights {
   /** Candles at the back right: the key light, and the one that casts. */
   key: THREE.DirectionalLight;

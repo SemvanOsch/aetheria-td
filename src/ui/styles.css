@@ -1713,6 +1713,29 @@ button:disabled .icon {
   width: 100%;
   height: 100%;
 }
+/* The 3D map (DeskMap3D): the box is the map lying flat; its canvas overflows
+   it (mostly upward) so the map can lift and rise to face you unclipped. */
+.desk-map-3d {
+  --mh: min(50cqh, 580px);
+  position: relative;
+  width: min(100%, 1040px, calc(var(--mh) * 1.8));
+  aspect-ratio: 1.8;
+  margin: 0 auto;
+}
+.desk-map-canvas {
+  position: absolute;
+  top: -42%;
+  left: -6%;
+  display: block;
+  width: 112%;
+  height: 152%;
+  pointer-events: none;
+}
+/* The rise itself happens in the 3D scene; keep the box still. */
+.desk-stage.leaving.to-play .desk-obj.map.three .desk-obj-lift {
+  transform: none;
+  filter: brightness(1.04);
+}
 
 /* Brass name plaques. */
 .desk-plaque {
@@ -2172,6 +2195,7 @@ button:disabled .icon {
   .desk-obj.map .desk-art { max-height: 32cqh; }
   .desk-obj.ball .desk-art { max-height: 25cqh; }
   .desk-journal-3d { --jh: 28cqh; }
+  .desk-map-3d { --mh: 26cqh; }
   .desk-drape { width: 13%; }
   .desk-rod { left: 4%; right: 4%; }
   .desk-window { border-width: 8px; }

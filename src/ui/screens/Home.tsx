@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { useGame } from '../../application/gameContext';
 import { hasAffordableMasteryUpgrade, isLevelUnlocked, isSectionCleared } from '../../application/gameState';
 import { canAffordSummon } from '../../application/summon';
@@ -27,6 +27,8 @@ import {
   TallowCandleArt,
 } from '../components/InnArt';
 import { DeskJournal3D } from '../components/DeskJournal3D';
+import { DeskMap3D } from '../components/DeskMap3D';
+import { getDeskLoad, subscribeDeskLoad } from '../deskAssets';
 
 interface Props {
   onPlay: () => void;
@@ -129,6 +131,8 @@ export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, ret
     state.prefs.showMasteryMarks && state.ownedUnits.some((id) => hasAffordableMasteryUpgrade(state, id));
   const summonReady = canAffordSummon(state.gems);
   const inn = isSectionCleared(state, 'capital');
+  // The map is a 3D model; the old drawing stands in only if it could not load (no WebGL).
+  const map3d = !useSyncExternalStore(subscribeDeskLoad, getDeskLoad).failed.includes('map');
   // Where the party is now: the first chapter, in story order, not yet won.
   const here = SECTIONS.find((s) => !isSectionCleared(state, s.id))?.id ?? SECTIONS[SECTIONS.length - 1].id;
   // Once the journal is open its veil lifts, so the (still zoomed) desk shows
@@ -277,8 +281,14 @@ export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, ret
           </DeskObject>
 
           <div className="desk-map-slot">
-            <DeskObject kind="map" label="Play" hint="Unroll the map to choose where to fight" onClick={choose('play')}>
-              <MapArt here={here} />
+            <DeskObject
+              kind="map"
+              label="Play"
+              hint="Unroll the map to choose where to fight"
+              onClick={choose('play')}
+              three={map3d}
+            >
+              {map3d ? <DeskMap3D here={here} inn={inn} /> : <MapArt here={here} />}
             </DeskObject>
             {next && (
               <button
