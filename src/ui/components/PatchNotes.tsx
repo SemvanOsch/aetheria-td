@@ -20,6 +20,20 @@ interface PatchEntry {
  */
 const PATCH_NOTES: PatchEntry[] = [
   {
+    version: '2026-10-19 · The Desk Comes to Life',
+    changes: [
+      'The Throne Room now ends on a cutscene: your hero plants the rebel flag in the king’s throne, then the party flees as the castle’s guards storm the hall.',
+      'The castle’s banners are now the kingdom’s blue, charged with its gold eight-pointed star.',
+      'The home desk’s journal, map and crystal ball are now 3D models, painted in the game’s storybook style and outlined in ink like the figures on the board. They lift and catch the candlelight when you hover them.',
+      'The 3D map’s pin and red road follow where your party is, and the map rises to face you when you choose Play. The crystal ball’s vortex spins up as you head into Summon and winds down when you come back.',
+      'A candlelit loading screen covers the desk while its 3D objects load, so nothing pops in. If your device can’t show them, the desk falls back to the drawn versions.',
+      'The candle and books that sat behind the journal are gone from the desk.',
+      'Endless: past wave 50 the run turns brutal, with bigger waves and foe and boss health climbing faster every wave.',
+      'Balance: the Bandit’s base damage is 8 (was 6) and Deep Cuts adds 4 (was 3). Poison on bosses is an eighth of its usual strength (was a fifth).',
+      'Skill trees: Activate path now switches on every swapped-out choice on the way up to the node, so a node like The Grand Formula goes live in one click.',
+    ],
+  },
+  {
     version: '2026-10-18 · Blood and Poison',
     changes: [
       'New Common champion, the Bandit: a hooded cutthroat with a short knife. Every hit opens a bleeding wound that deals 50% of his damage again over 3 seconds. Wounds stack up to 5, and each new hit restarts the clock on every open wound. A bleeding foe can’t regenerate. Up to 3 can be deployed.',

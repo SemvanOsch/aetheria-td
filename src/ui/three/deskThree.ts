@@ -109,7 +109,9 @@ export function createInkPass(renderer: THREE.WebGLRenderer, scene: THREE.Scene,
   camera.layers.enable(NO_INK_LAYER);
   const color = new THREE.WebGLRenderTarget(1, 1, { samples: 4, type: THREE.HalfFloatType });
   const depth = new THREE.DepthTexture(1, 1);
-  const normals = new THREE.WebGLRenderTarget(1, 1, { depthTexture: depth });
+  // Multisampled too, so silhouettes and creases resolve to soft values the
+  // ink can grade across, rather than stair-stepped hard edges.
+  const normals = new THREE.WebGLRenderTarget(1, 1, { depthTexture: depth, samples: 4 });
   const normalMat = new THREE.MeshNormalMaterial();
   const cam = camera as THREE.PerspectiveCamera;
   const quadMat = new THREE.ShaderMaterial({
@@ -140,26 +142,38 @@ export function createInkPass(renderer: THREE.WebGLRenderer, scene: THREE.Scene,
       float viewZ(vec2 uv) {
         return -perspectiveDepthToViewZ(texture2D(tDepth, uv).x, cameraNear, cameraFar);
       }
+      /** How strongly the surface at uv breaks from the one at the centre (0–1). */
+      float breakAt(vec2 uv, vec4 n0, float z0) {
+        vec4 n = texture2D(tNormal, uv);
+        // Silhouette: one side covered, the other not.
+        float e = abs(n.a - n0.a);
+        if (n.a > 0.5 && n0.a > 0.5) {
+          // Creases: the surface turns sharply.
+          float turn = 1.0 - dot(normalize(n.rgb * 2.0 - 1.0), normalize(n0.rgb * 2.0 - 1.0));
+          e = max(e, smoothstep(0.25, 0.55, turn));
+          // Steps: one surface lying over another.
+          float z = viewZ(uv);
+          e = max(e, smoothstep(0.004, 0.012, abs(z - z0) / min(z, z0)));
+        }
+        return e;
+      }
       void main() {
         vec4 c = texture2D(tColor, vUv);
         vec4 n0 = texture2D(tNormal, vUv);
         float z0 = viewZ(vUv);
-        float edge = 0.0;
-        for (int i = 0; i < 8; i++) {
-          float a = float(i) * 0.7853982;
-          vec2 uv = vUv + vec2(cos(a), sin(a)) * texel * width;
-          vec4 n = texture2D(tNormal, uv);
-          // Silhouette: one side covered, the other not.
-          edge = max(edge, abs(n.a - n0.a));
-          if (n.a > 0.5 && n0.a > 0.5) {
-            // Creases: the surface turns sharply.
-            float turn = 1.0 - dot(normalize(n.rgb * 2.0 - 1.0), normalize(n0.rgb * 2.0 - 1.0));
-            edge = max(edge, smoothstep(0.25, 0.55, turn));
-            // Steps: one surface lying over another.
-            float z = viewZ(uv);
-            edge = max(edge, smoothstep(0.004, 0.012, abs(z - z0) / min(z, z0)));
-          }
+        // Average the break over two rings of taps: a pixel right on an edge
+        // sees it from about half of them, one near the line's rim from only a
+        // few, so the line comes out graded (anti-aliased) instead of hard.
+        float sum = 0.0;
+        for (int i = 0; i < 12; i++) {
+          float a = float(i) * 0.5235988;
+          sum += breakAt(vUv + vec2(cos(a), sin(a)) * texel * width, n0, z0);
         }
+        for (int i = 0; i < 6; i++) {
+          float a = float(i) * 1.0471976 + 0.5235988;
+          sum += breakAt(vUv + vec2(cos(a), sin(a)) * texel * width * 0.5, n0, z0);
+        }
+        float edge = smoothstep(0.04, 0.4, sum / 18.0);
         vec3 base = c.a > 0.001 ? c.rgb / c.a : vec3(0.0);
         // The ink: a deep shade of the colour beneath, pulled toward warm brown.
         vec3 local = n0.a > 0.5 ? base : ink;
