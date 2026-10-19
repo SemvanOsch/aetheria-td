@@ -9,6 +9,7 @@ import {
   contactShadeTexture,
   createDeskRenderer,
   createInkPass,
+  cubicBezier,
   skipInk,
   loadDeskModel,
 } from './deskThree';
@@ -67,23 +68,6 @@ const NEEDLE_KEYS: [number, number][] = [
 ];
 const NEEDLE_PERIOD = 7;
 
-/** CSS-style cubic-bezier easing. */
-function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t: number) => number {
-  const bez = (a: number, b: number, t: number) => 3 * a * (1 - t) ** 2 * t + 3 * b * (1 - t) * t * t + t ** 3;
-  return (x) => {
-    if (x <= 0) return 0;
-    if (x >= 1) return 1;
-    let lo = 0;
-    let hi = 1;
-    let t = x;
-    for (let i = 0; i < 24; i++) {
-      t = (lo + hi) / 2;
-      if (bez(x1, x2, t) < x) lo = t;
-      else hi = t;
-    }
-    return bez(y1, y2, t);
-  };
-}
 export const EASE = {
   /** The stage's lean down onto the map (`.desk-stage.leaving.to-play`). */
   rise: cubicBezier(0.45, 0, 0.25, 1),

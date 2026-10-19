@@ -13,6 +13,24 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 /** Self-hosted decoder: DRACOLoader's own default URL breaks under Vite's dev pre-bundling. */
 const DRACO_URL = `${import.meta.env.BASE_URL}draco/`;
 
+/** CSS-style cubic-bezier easing, so a scene's motion keeps step with the stage's CSS. */
+export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t: number) => number {
+  const bez = (a: number, b: number, t: number) => 3 * a * (1 - t) ** 2 * t + 3 * b * (1 - t) * t * t + t ** 3;
+  return (x) => {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    let lo = 0;
+    let hi = 1;
+    let t = x;
+    for (let i = 0; i < 24; i++) {
+      t = (lo + hi) / 2;
+      if (bez(x1, x2, t) < x) lo = t;
+      else hi = t;
+    }
+    return bez(y1, y2, t);
+  };
+}
+
 export const KEY_INTENSITY = 2.6;
 export const HEARTH_INTENSITY = 1.5;
 
