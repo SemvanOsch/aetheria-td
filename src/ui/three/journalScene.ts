@@ -1,7 +1,13 @@
 import * as THREE from 'three';
-import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
+import {
+  HEARTH_INTENSITY,
+  KEY_INTENSITY,
+  addDeskLights,
+  contactShadeTexture,
+  createDeskRenderer,
+  loadDeskModel,
+} from './deskThree';
 
 /**
  * The home desk's journal as a real 3D model (`public/models/adventurers_journal.glb`,
@@ -23,8 +29,6 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
  */
 
 const MODEL_URL = `${import.meta.env.BASE_URL}models/adventurers_journal.glb`;
-/** Self-hosted decoder: DRACOLoader's own default URL breaks under Vite's dev pre-bundling. */
-const DRACO_URL = `${import.meta.env.BASE_URL}draco/`;
 /** Rough download size, for progress when the server sends no length. */
 const EXPECTED_BYTES = 3_100_000;
 
@@ -37,35 +41,9 @@ const YAW = 0.07;
 const LIFT = 0.024;
 /** Fraction of the remaining hover distance covered per second. */
 const HOVER_RATE = 9;
-const KEY_INTENSITY = 2.6;
-const HEARTH_INTENSITY = 1.5;
 /** The contact shade under the book: its darkness, and how far (m) it fades out past the book's edge. */
 const CONTACT_OPACITY = 0.7;
 const CONTACT_MARGIN = 0.012;
-
-/** Alpha map for the contact shade: the book's footprint, softly blurred out to
- *  nothing at the plane's edge (`CONTACT_MARGIN` past the book). */
-function contactShadeTexture(width: number, depth: number): THREE.CanvasTexture {
-  const w = width + 2 * CONTACT_MARGIN;
-  const d = depth + 2 * CONTACT_MARGIN;
-  const px = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = px;
-  canvas.height = Math.round((px * d) / w);
-  const ctx = canvas.getContext('2d')!;
-  const s = px / w;
-  const inset = CONTACT_MARGIN * s;
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.filter = `blur(${inset * 0.45}px)`;
-  ctx.fillStyle = '#fff';
-  ctx.beginPath();
-  ctx.roundRect(inset * 0.7, inset * 0.7, canvas.width - inset * 1.4, canvas.height - inset * 1.4, inset * 0.8);
-  ctx.fill();
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.NoColorSpace;
-  return tex;
-}
 
 export interface JournalScene {
   /** The scene's own canvas; the borrower places it in the page. */
@@ -85,13 +63,7 @@ let sharedInUse = false;
 /** The model is fetched and decoded once; every scene shares it. */
 function loadJournal(onProgress: (f: number) => void): Promise<GLTF> {
   if (!gltfPromise) {
-    const draco = new DRACOLoader().setDecoderPath(DRACO_URL);
-    gltfPromise = new GLTFLoader()
-      .setDRACOLoader(draco)
-      .loadAsync(MODEL_URL, (e) => {
-        onProgress(e.total ? e.loaded / e.total : 1 - Math.exp(-e.loaded / EXPECTED_BYTES));
-      })
-      .then((g) => (gltf = g));
+    gltfPromise = loadDeskModel(MODEL_URL, EXPECTED_BYTES, onProgress).then((g) => (gltf = g));
     gltfPromise.catch(() => {
       gltfPromise = null;
     });
@@ -135,20 +107,8 @@ function buildScene(model: GLTF): JournalScene {
   canvas.setAttribute('aria-hidden', 'true');
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'low-power' });
-  renderer.setClearColor(0x000000, 0);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.9;
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
-
+  const { renderer, envMap } = createDeskRenderer(canvas, 1.9);
   const scene = new THREE.Scene();
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  const room = new RoomEnvironment();
-  const envMap = pmrem.fromScene(room, 0.04).texture;
-  room.dispose();
-  pmrem.dispose();
   scene.environment = envMap;
   scene.environmentIntensity = 0.3;
 
@@ -174,7 +134,7 @@ function buildScene(model: GLTF): JournalScene {
   // Contact shade: a soft dark patch right under the book that seats it on the
   // desk. It thins out and spreads as the book lifts on hover.
   const footprint = { x0: box.min.x, x1: box.max.x, z0: -0.112, z1: 0.112 };
-  const contactTex = contactShadeTexture(footprint.x1 - footprint.x0, footprint.z1 - footprint.z0);
+  const contactTex = contactShadeTexture(footprint.x1 - footprint.x0, footprint.z1 - footprint.z0, CONTACT_MARGIN);
   const contactMat = new THREE.MeshBasicMaterial({
     color: 0x000000,
     transparent: true,
@@ -193,38 +153,8 @@ function buildScene(model: GLTF): JournalScene {
   contactPivot.add(contact);
   scene.add(contactPivot);
 
-  // Candles at the back right: the key light, and the one that casts. High
-  // enough that the shadow stays close under the book.
-  const key = new THREE.DirectionalLight(0xffc98e, KEY_INTENSITY);
-  key.position.set(0.4, 1.25, -0.25);
-  key.castShadow = true;
-  key.shadow.mapSize.set(1024, 1024);
-  key.shadow.radius = 10;
-  key.shadow.bias = -0.0004;
-  key.shadow.normalBias = 0.002;
-  const sc = key.shadow.camera;
-  sc.left = -0.22;
-  sc.right = 0.22;
-  sc.top = 0.22;
-  sc.bottom = -0.22;
-  sc.near = 0.1;
-  sc.far = 2.5;
-  scene.add(key);
-  // Moonlight through the window behind the desk.
-  const moon = new THREE.DirectionalLight(0x9db2ff, 0.55);
-  moon.position.set(-0.3, 0.8, -1.2);
-  scene.add(moon);
-  // The room's warm dark.
-  scene.add(new THREE.HemisphereLight(0x5a4030, 0x140b06, 1.2));
-  // A soft warm fill from the front so the cover never goes flat black.
-  const fill = new THREE.DirectionalLight(0xffd9b0, 0.8);
-  fill.position.set(-0.2, 0.6, 0.9);
-  scene.add(fill);
-  // The inn's hearth. Always in the scene (dark outside the inn) so switching
-  // rooms never recompiles the shaders.
-  const hearth = new THREE.DirectionalLight(0xff7a2e, 0);
-  hearth.position.set(-1.2, 0.35, 0.15);
-  scene.add(hearth);
+  // The desk's candlelit lighting (shared with the map).
+  const { key, hearth } = addDeskLights(scene, 0.22);
 
   const camera = new THREE.PerspectiveCamera(FOV, 1, 0.01, 10);
   const centre = box.getCenter(new THREE.Vector3());

@@ -8,6 +8,7 @@
  * stops under `prefers-reduced-motion`.
  */
 import type { SectionId } from '../../domain/levels';
+import { MAP_PLACES, MAP_ROADS, roadsTravelled } from '../mapRoute';
 
 /** Deterministic pseudo-random sequence (same drawing every render). */
 function seeded(seed: number) {
@@ -410,22 +411,6 @@ export function CrystalBallArt() {
 const CONTINENT =
   'M118 196 C112 170 128 146 150 136 C168 112 196 98 232 96 C262 94 282 84 312 88 C346 92 368 80 404 86 C440 92 470 100 494 118 C518 136 532 160 528 190 C524 214 538 236 530 262 C522 292 498 310 470 316 C440 322 420 336 388 334 C364 332 352 316 330 318 C306 320 296 338 268 336 C236 334 214 318 196 306 C176 294 160 286 150 268 C140 252 120 246 116 228 C115 216 120 208 118 196 Z';
 
-/** Where each chapter sits on the map (the pin's point, the route's stops),
- *  in story order. */
-const MAP_PLACES: Record<SectionId, [number, number]> = {
-  castle: [196, 202],
-  capital: [234, 210],
-  inn: [392, 212],
-  forest: [470, 194],
-};
-const MAP_ORDER: SectionId[] = ['castle', 'capital', 'inn', 'forest'];
-/** The road between consecutive places (castle→capital, capital→inn, inn→forest). */
-const MAP_ROADS = [
-  'M196 202 C206 214 222 214 234 210',
-  'M234 210 C258 216 270 234 296 226 C330 218 352 206 392 212',
-  'M392 212 C420 214 448 202 470 194',
-];
-
 /** The old forest's trees: a jittered grid inside an oval, back to front. */
 const FOREST_TREES = (() => {
   const rnd = seeded(41);
@@ -481,7 +466,7 @@ export function MapArt({ here }: { here: SectionId }) {
   const bottom = jagged(576, 64, 398, 8, 29);
   const sheet = `M${top} L${bottom} Z`;
   const ink = '#4a3418';
-  const reached = Math.max(0, MAP_ORDER.indexOf(here));
+  const reached = roadsTravelled(here);
   const [px, py] = MAP_PLACES[here];
   return (
     <svg className="desk-art map-art" viewBox="0 0 640 440" aria-hidden="true">

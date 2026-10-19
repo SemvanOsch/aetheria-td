@@ -1,4 +1,5 @@
 import type * as JournalSceneModule from './three/journalScene';
+import type * as MapSceneModule from './three/mapScene';
 
 /**
  * The home desk's 3D objects, preloaded behind the loading screen
@@ -6,12 +7,12 @@ import type * as JournalSceneModule from './three/journalScene';
  * in. Each asset loads in parallel and reports its own 0–1 progress; the
  * screen shows their average and the label of the one furthest behind.
  *
- * To make another desk object 3D (the map, the crystal ball), add its entry
+ * To make another desk object 3D (the crystal ball), add its entry
  * to `DESK_ASSETS`: a `load` that dynamic-imports its three.js module (keeping
  * three.js out of the main bundle) and resolves once its scene is warm.
  */
 
-export type DeskAssetId = 'journal';
+export type DeskAssetId = 'journal' | 'map';
 
 interface DeskAsset {
   id: DeskAssetId;
@@ -21,6 +22,7 @@ interface DeskAsset {
 }
 
 let journalModule: typeof JournalSceneModule | null = null;
+let mapModule: typeof MapSceneModule | null = null;
 
 const DESK_ASSETS: DeskAsset[] = [
   {
@@ -31,6 +33,16 @@ const DESK_ASSETS: DeskAsset[] = [
         journalModule = m;
         onProgress(0.08);
         return m.preloadJournal((f) => onProgress(0.08 + 0.92 * f));
+      }),
+  },
+  {
+    id: 'map',
+    label: 'Unrolling the map',
+    load: (onProgress) =>
+      import('./three/mapScene').then((m) => {
+        mapModule = m;
+        onProgress(0.08);
+        return m.preloadMap((f) => onProgress(0.08 + 0.92 * f));
       }),
   },
 ];
@@ -100,4 +112,9 @@ export function preloadDesk(): Promise<void> {
 /** The journal's scene module, once `preloadDesk` has loaded it. */
 export function loadedJournalModule() {
   return journalModule;
+}
+
+/** The map's scene module, once `preloadDesk` has loaded it. */
+export function loadedMapModule() {
+  return mapModule;
 }
