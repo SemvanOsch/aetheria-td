@@ -48,7 +48,7 @@ const FOOT_AT = 290 / 320;
 const HOVER_LIFT = 0.0055;
 const HOVER_SCALE = 0.03;
 const HOVER_RATE = 9;
-const CONTACT_OPACITY = 0.7;
+const CONTACT_OPACITY = 0.55;
 /** The violet light inside the orb (cd), and how much hover brightens it. */
 const ORB_LIGHT = 0.0042;
 const ORB_LIGHT_HOVER = 0.65;
@@ -490,16 +490,10 @@ function buildScene(model: GLTF): BallScene {
   orbLight.position.copy(orbCentre);
   holder.add(orbLight);
 
-  // The cast shadow, on an invisible desk.
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.42 }));
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.y = box.min.y - 0.0004;
-  floor.receiveShadow = true;
-  skipInk(floor);
-  scene.add(floor);
-
-  // Contact shade under the plinth.
-  const contactTex = roundShadeTexture(0.78);
+  // No cast shadow on the desk (unlike the journal and map): under the orb's
+  // own violet pool it read as a dark smear. Only a tight contact shade seats
+  // the plinth's foot.
+  const contactTex = roundShadeTexture(0.84);
   const contactMat = new THREE.MeshBasicMaterial({
     color: 0x000000,
     transparent: true,
@@ -507,7 +501,7 @@ function buildScene(model: GLTF): BallScene {
     alphaMap: contactTex,
     opacity: CONTACT_OPACITY,
   });
-  const contact = new THREE.Mesh(new THREE.PlaneGeometry(footR * 2.3, footR * 2.3), contactMat);
+  const contact = new THREE.Mesh(new THREE.PlaneGeometry(footR * 2.15, footR * 2.15), contactMat);
   contact.rotation.x = -Math.PI / 2;
   contact.position.y = box.min.y + 0.0002;
   skipInk(contact);
@@ -700,8 +694,6 @@ function buildScene(model: GLTF): BallScene {
     dispose() {
       disposed = true;
       if (raf) cancelAnimationFrame(raf);
-      floor.geometry.dispose();
-      (floor.material as THREE.Material).dispose();
       contact.geometry.dispose();
       contactMat.dispose();
       contactTex.dispose();
