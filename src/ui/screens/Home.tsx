@@ -26,6 +26,7 @@ import {
   RoomKeyArt,
   TallowCandleArt,
 } from '../components/InnArt';
+import { DeskBall3D } from '../components/DeskBall3D';
 import { DeskJournal3D } from '../components/DeskJournal3D';
 import { DeskMap3D } from '../components/DeskMap3D';
 import { getDeskLoad, subscribeDeskLoad } from '../deskAssets';
@@ -131,8 +132,10 @@ export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, ret
     state.prefs.showMasteryMarks && state.ownedUnits.some((id) => hasAffordableMasteryUpgrade(state, id));
   const summonReady = canAffordSummon(state.gems);
   const inn = isSectionCleared(state, 'capital');
-  // The map is a 3D model; the old drawing stands in only if it could not load (no WebGL).
-  const map3d = !useSyncExternalStore(subscribeDeskLoad, getDeskLoad).failed.includes('map');
+  // The map and the orb are 3D models; the old drawings stand in only if they could not load (no WebGL).
+  const failed = useSyncExternalStore(subscribeDeskLoad, getDeskLoad).failed;
+  const map3d = !failed.includes('map');
+  const ball3d = !failed.includes('ball');
   // Where the party is now: the first chapter, in story order, not yet won.
   const here = SECTIONS.find((s) => !isSectionCleared(state, s.id))?.id ?? SECTIONS[SECTIONS.length - 1].id;
   // Once the journal is open its veil lifts, so the (still zoomed) desk shows
@@ -276,8 +279,9 @@ export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, ret
             hint="Gaze into the crystal ball to summon champions"
             ready={summonReady ? 'Ready' : undefined}
             onClick={choose('summon')}
+            three={ball3d}
           >
-            <CrystalBallArt />
+            {ball3d ? <DeskBall3D inn={inn} /> : <CrystalBallArt />}
           </DeskObject>
 
           <div className="desk-map-slot">

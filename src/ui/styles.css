@@ -1687,8 +1687,9 @@ button:disabled .icon {
   transform: perspective(1000px) translateY(-8px) rotateX(34deg);
   filter: drop-shadow(0 14px 16px rgba(0, 0, 0, 0.55)) brightness(1.06);
 }
-/* 3D desk objects (the journal, DeskJournal3D): the camera already looks down
-   on them and they lift themselves on hover, so their box stays flat. */
+/* 3D desk objects (DeskJournal3D, DeskMap3D, DeskBall3D): the camera already
+   looks at them and they lift and glow themselves on hover, so their box stays
+   flat (and the orb's drop-shadow glow never doubles up with its 3D one). */
 .desk-obj.three .desk-obj-lift,
 .desk-obj.three:hover .desk-obj-lift,
 .desk-obj.three:focus-visible .desk-obj-lift {
@@ -1729,6 +1730,25 @@ button:disabled .icon {
   display: block;
   width: 112%;
   height: 152%;
+  pointer-events: none;
+}
+/* The 3D crystal ball (DeskBall3D): the box is the drawing's (CrystalBallArt,
+   260×320), with the orb where the drawing put it, so the zoom into Summon
+   still centres on it; the canvas overflows it for the hover lift and glow. */
+.desk-ball-3d {
+  --bh: min(42cqh, 400px);
+  position: relative;
+  width: min(100%, 320px, calc(var(--bh) * 0.8125));
+  aspect-ratio: 0.8125;
+  margin: 0 auto;
+}
+.desk-ball-canvas {
+  position: absolute;
+  top: -12%;
+  left: -15%;
+  display: block;
+  width: 130%;
+  height: 124%;
   pointer-events: none;
 }
 /* The rise itself happens in the 3D scene; keep the box still. */
@@ -2194,6 +2214,7 @@ button:disabled .icon {
   .desk-objects { padding-bottom: 6cqh; }
   .desk-obj.map .desk-art { max-height: 32cqh; }
   .desk-obj.ball .desk-art { max-height: 25cqh; }
+  .desk-ball-3d { --bh: 25cqh; }
   .desk-journal-3d { --jh: 28cqh; }
   .desk-map-3d { --mh: 26cqh; }
   .desk-drape { width: 13%; }

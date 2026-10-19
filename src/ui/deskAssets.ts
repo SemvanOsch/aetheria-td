@@ -1,3 +1,4 @@
+import type * as BallSceneModule from './three/ballScene';
 import type * as JournalSceneModule from './three/journalScene';
 import type * as MapSceneModule from './three/mapScene';
 
@@ -7,12 +8,12 @@ import type * as MapSceneModule from './three/mapScene';
  * in. Each asset loads in parallel and reports its own 0–1 progress; the
  * screen shows their average and the label of the one furthest behind.
  *
- * To make another desk object 3D (the crystal ball), add its entry
- * to `DESK_ASSETS`: a `load` that dynamic-imports its three.js module (keeping
- * three.js out of the main bundle) and resolves once its scene is warm.
+ * To make another desk object 3D, add its entry to `DESK_ASSETS`: a `load`
+ * that dynamic-imports its three.js module (keeping three.js out of the main
+ * bundle) and resolves once its scene is warm.
  */
 
-export type DeskAssetId = 'journal' | 'map';
+export type DeskAssetId = 'journal' | 'map' | 'ball';
 
 interface DeskAsset {
   id: DeskAssetId;
@@ -23,6 +24,7 @@ interface DeskAsset {
 
 let journalModule: typeof JournalSceneModule | null = null;
 let mapModule: typeof MapSceneModule | null = null;
+let ballModule: typeof BallSceneModule | null = null;
 
 const DESK_ASSETS: DeskAsset[] = [
   {
@@ -43,6 +45,16 @@ const DESK_ASSETS: DeskAsset[] = [
         mapModule = m;
         onProgress(0.08);
         return m.preloadMap((f) => onProgress(0.08 + 0.92 * f));
+      }),
+  },
+  {
+    id: 'ball',
+    label: 'Waking the orb',
+    load: (onProgress) =>
+      import('./three/ballScene').then((m) => {
+        ballModule = m;
+        onProgress(0.08);
+        return m.preloadBall((f) => onProgress(0.08 + 0.92 * f));
       }),
   },
 ];
@@ -117,4 +129,9 @@ export function loadedJournalModule() {
 /** The map's scene module, once `preloadDesk` has loaded it. */
 export function loadedMapModule() {
   return mapModule;
+}
+
+/** The crystal ball's scene module, once `preloadDesk` has loaded it. */
+export function loadedBallModule() {
+  return ballModule;
 }
