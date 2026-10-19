@@ -14,6 +14,8 @@ import { hasAffordableMasteryUpgrade, hasCompletedIntro } from '../application/g
 import { type SectionId } from '../domain/levels';
 import { getBattleLevel } from '../domain/endless';
 import { SandboxLauncher } from './sandbox';
+import { preloadDesk } from './deskAssets';
+import { DeskLoading } from './components/DeskLoading';
 
 export type Screen = 'home' | 'summon' | 'modes' | 'story' | 'endless' | 'game';
 
@@ -43,6 +45,12 @@ export function App() {
   useEffect(() => {
     applyAudioSettings(state.audio);
   }, [state.audio]);
+
+  // The home desk's 3D objects start loading straight away (even under the
+  // first-launch intro); the desk waits behind `DeskLoading` until they're in.
+  useEffect(() => {
+    void preloadDesk();
+  }, []);
 
   // Background music: the menu theme everywhere outside a battle (the journal
   // intro included), the stage's chapter battle theme inside one.
@@ -123,6 +131,7 @@ export function App() {
         )}
         {screen !== 'game' && <TopBar />}
 
+        {screen === 'home' && <DeskLoading />}
         {screen === 'home' && (
           <Home
             onPlay={goPlay}

@@ -12,7 +12,6 @@ import {
   CoinsArt,
   CrystalBallArt,
   InkwellArt,
-  JournalArt,
   LanternBooksArt,
   MapArt,
   WindowView,
@@ -27,6 +26,7 @@ import {
   RoomKeyArt,
   TallowCandleArt,
 } from '../components/InnArt';
+import { DeskJournal3D } from '../components/DeskJournal3D';
 
 interface Props {
   onPlay: () => void;
@@ -305,8 +305,9 @@ export function Home({ onPlay, onContinue, onSummon, onJournal, journalOpen, ret
             hint="Open the Adventurer's Journal: your story, champions and bestiary"
             ready={unread > 0 ? `${unread} unread` : masteryReady ? 'Skill ready' : undefined}
             onClick={choose('journal')}
+            three
           >
-            <JournalArt />
+            <DeskJournal3D inn={inn} />
           </DeskObject>
         </div>
 
@@ -332,6 +333,7 @@ function DeskObject({
   hint,
   ready,
   onClick,
+  three,
   children,
 }: {
   kind: 'ball' | 'map' | 'journal';
@@ -339,12 +341,14 @@ function DeskObject({
   hint: string;
   ready?: string;
   onClick: (e: MouseEvent<HTMLButtonElement>) => void;
+  /** Drawn by a 3D scene that does its own tilt and hover lift. */
+  three?: boolean;
   children: ReactNode;
 }) {
   return (
     <button
       type="button"
-      className={`desk-obj ${kind}`}
+      className={`desk-obj ${kind}${three ? ' three' : ''}`}
       onClick={onClick}
       aria-label={ready ? `${label} (${ready})` : label}
       title={hint}

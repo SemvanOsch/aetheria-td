@@ -448,8 +448,7 @@ export function AleArt() {
   );
 }
 
-/** Back-right: a candle stuck in a wine bottle, years of wax run down it,
- *  and an iron chamberstick beside. */
+/** Back-right: a candle stuck in a wine bottle, years of wax run down it. */
 export function BottleCandleArt() {
   const p = 'bc';
   return (
@@ -462,19 +461,12 @@ export function BottleCandleArt() {
           <stop offset="0.55" stopColor="#184a2e" />
           <stop offset="1" stopColor="#06140c" />
         </linearGradient>
-        <linearGradient id="bc-iron" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0" stopColor="#1a1a20" />
-          <stop offset="0.35" stopColor="#5a5a64" />
-          <stop offset="1" stopColor="#141418" />
-        </linearGradient>
         <filter id="bc-soft" x="-30%" y="-30%" width="160%" height="160%">
           <feGaussianBlur stdDeviation="3" />
         </filter>
       </defs>
       <ellipse cx="136" cy="282" rx="64" ry="9" fill={`url(#${p}-pool)`} />
-      <ellipse cx="48" cy="282" rx="40" ry="7" fill={`url(#${p}-pool)`} />
       <ellipse cx="138" cy="283" rx="34" ry="6" fill="#000" opacity="0.55" filter="url(#bc-soft)" />
-      <ellipse cx="48" cy="283" rx="32" ry="5" fill="#000" opacity="0.55" filter="url(#bc-soft)" />
 
       {/* The bottle. */}
       <path d="M112 280 L112 206 Q112 188 128 180 L130 150 L142 150 L144 180 Q160 188 160 206 L160 280 Q136 286 112 280 Z" fill="url(#bc-glass)" stroke="#04100a" strokeWidth="1.2" />
@@ -499,14 +491,6 @@ export function BottleCandleArt() {
       ))}
       <ellipse cx="136" cy="143" rx="11" ry="3.5" fill="#f2e6c6" />
       <Candle p={p} x={136} base={143} h={52} w={14} delay={-0.3} />
-
-      {/* The chamberstick: an iron dish with a ring to carry it by. */}
-      <path d="M76 274 q14 -2 12 -12 q-2 -7 -10 -4" fill="none" stroke="url(#bc-iron)" strokeWidth="3.2" />
-      <ellipse cx="48" cy="276" rx="30" ry="7.5" fill="url(#bc-iron)" stroke="#08080a" strokeWidth="1" />
-      <ellipse cx="48" cy="273.5" rx="25" ry="4.6" fill="#2a2a30" />
-      <rect x="40" y="260" width="16" height="13" rx="1.5" fill="url(#bc-iron)" stroke="#08080a" strokeWidth="0.8" />
-      <ellipse cx="48" cy="273" rx="10" ry="2.4" fill="#e6d8b0" opacity="0.8" />
-      <Candle p={p} x={48} base={261} h={32} w={16} delay={-1.1} />
     </svg>
   );
 }

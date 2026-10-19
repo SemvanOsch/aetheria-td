@@ -125,7 +125,7 @@ export function CandleArt() {
   );
 }
 
-/** Back-right: a tall candlestick on two stacked books, a shorter one beside. */
+/** Back-right: a tall brass candlestick, kept clear of the journal. */
 export function CandleClusterArt() {
   const p = 'cc';
   return (
@@ -137,30 +137,10 @@ export function CandleClusterArt() {
         </filter>
       </defs>
       {/* Warm reflections on the polished desk, then contact shadows. */}
-      <ellipse cx="128" cy="282" rx="80" ry="9" fill={`url(#${p}-pool)`} />
-      <ellipse cx="52" cy="282" rx="40" ry="7" fill={`url(#${p}-pool)`} />
-      <ellipse cx="132" cy="283" rx="78" ry="7" fill="#000" opacity="0.55" filter="url(#cc-soft)" />
-      <ellipse cx="52" cy="283" rx="26" ry="5" fill="#000" opacity="0.55" filter="url(#cc-soft)" />
+      <ellipse cx="176" cy="282" rx="44" ry="9" fill={`url(#${p}-pool)`} />
+      <ellipse cx="178" cy="283" rx="30" ry="6" fill="#000" opacity="0.55" filter="url(#cc-soft)" />
 
-      {/* Two books lying flat. */}
-      <g>
-        <rect x="64" y="254" width="146" height="28" rx="3" fill="#4a1e1c" stroke="#160806" strokeWidth="1.2" />
-        <rect x="64" y="257" width="146" height="4" fill="#fff" opacity="0.07" />
-        <rect x="200" y="256" width="8" height="24" fill="#efdfba" />
-        {[262, 270].map((y) => (
-          <path key={y} d={`M201 ${y} h6`} stroke="#b89a64" strokeWidth="0.6" />
-        ))}
-        <rect x="84" y="254" width="5" height="28" fill="#c9944a" opacity="0.8" />
-        <rect x="186" y="254" width="5" height="28" fill="#c9944a" opacity="0.8" />
-        <rect x="74" y="230" width="128" height="24" rx="3" fill="#1f3a4a" stroke="#081218" strokeWidth="1.2" />
-        <rect x="74" y="233" width="128" height="3" fill="#fff" opacity="0.08" />
-        <rect x="193" y="232" width="7" height="20" fill="#efdfba" />
-        <rect x="92" y="230" width="4" height="24" fill="#c9944a" opacity="0.75" />
-        <path d="M120 242 h44" stroke="#e2b862" strokeWidth="1.2" opacity="0.6" />
-      </g>
-
-      <Candlestick p={p} x={136} base={232} stem={70} candle={78} />
-      <Candlestick p={p} x={46} base={281} stem={52} candle={46} delay={-0.9} />
+      <Candlestick p={p} x={176} base={281} stem={119} candle={78} />
     </svg>
   );
 }
@@ -855,142 +835,6 @@ export function MapArt({ here }: { here: SectionId }) {
         <path d="M-24 -10 A26 26 0 0 1 -6 -26 A30 30 0 0 0 -20 -6 Z" fill="#fff" opacity="0.38" />
         <path d="M14 22 A26 26 0 0 0 23 12" stroke="#fff" strokeWidth="1.4" fill="none" opacity="0.22" strokeLinecap="round" />
         <circle cx="-17" cy="-19" r="1.4" fill="#fff" opacity="0.85" />
-      </g>
-    </svg>
-  );
-}
-
-/* ------------------------------------------------------------ journal */
-
-/** The adventurer's journal: strapped leather, wax seal, ribbon and quill. */
-export function JournalArt() {
-  return (
-    <svg className="desk-art journal-art" viewBox="0 0 320 384" aria-hidden="true">
-      <defs>
-        <radialGradient id="jb-leather" cx="0.4" cy="0.35" r="0.85">
-          <stop offset="0" stopColor="#82522e" />
-          <stop offset="0.55" stopColor="#5a3420" />
-          <stop offset="1" stopColor="#2e180c" />
-        </radialGradient>
-        <linearGradient id="jb-pages" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0" stopColor="#d9c08c" />
-          <stop offset="1" stopColor="#f2e2bb" />
-        </linearGradient>
-        <linearGradient id="jb-brass" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#fff0bf" />
-          <stop offset="0.4" stopColor="#d6a64c" />
-          <stop offset="1" stopColor="#6e4812" />
-        </linearGradient>
-        <radialGradient id="jb-wax" cx="0.38" cy="0.32" r="0.7">
-          <stop offset="0" stopColor="#e0525a" />
-          <stop offset="0.6" stopColor="#a3202c" />
-          <stop offset="1" stopColor="#5e0e16" />
-        </radialGradient>
-        <linearGradient id="jb-vane" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0" stopColor="#1e2a44" />
-          <stop offset="0.5" stopColor="#4a6188" />
-          <stop offset="1" stopColor="#24324f" />
-        </linearGradient>
-        <linearGradient id="jb-edge" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#000" stopOpacity="0" />
-          <stop offset="1" stopColor="#3a2410" stopOpacity="0.35" />
-        </linearGradient>
-        <filter id="jb-grain" x="0" y="0" width="100%" height="100%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3" result="n" />
-          <feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.35 -0.1" />
-          <feComposite in2="SourceGraphic" operator="in" />
-        </filter>
-        <filter id="jb-shadow" x="-10%" y="-10%" width="130%" height="130%">
-          <feGaussianBlur stdDeviation="6" />
-        </filter>
-      </defs>
-
-      <rect x="30" y="40" width="254" height="326" rx="12" fill="#000" opacity="0.6" filter="url(#jb-shadow)" transform="translate(6 8)" />
-
-      {/* A loose, written-on page tucked beneath. */}
-      <g transform="rotate(7 230 180)">
-        <rect x="150" y="34" width="150" height="250" fill="#ead6a8" stroke="#a88a5a" strokeWidth="1" />
-        {Array.from({ length: 12 }, (_, i) => (
-          <path key={i} d={`M216 ${62 + i * 17} q20 -3 40 0 t30 0`} stroke="#5a3c1c" strokeWidth="1" fill="none" opacity="0.45" />
-        ))}
-        <path d="M226 270 q16 -8 30 0" stroke="#8a2a22" strokeWidth="1.2" fill="none" opacity="0.5" />
-      </g>
-
-      <g transform="rotate(-4 160 190)">
-        {/* The book's depth: the back board, then the page block along the
-            front and right edges. */}
-        <rect x="32" y="40" width="250" height="318" rx="10" fill="#2a1508" stroke="#140904" strokeWidth="1.5" />
-        <path d="M266 34 L278 42 L278 348 L40 348 L32 324 L266 324 Z" fill="url(#jb-pages)" stroke="#8a6a3a" strokeWidth="1" />
-        <path d="M32 324 L278 324 L278 348 L40 348 Z" fill="url(#jb-edge)" />
-        {Array.from({ length: 9 }, (_, i) => (
-          <path key={i} d={`M${267 + i * 1.2} ${40 + i} L${267 + i * 1.2} ${324 + i * 2.6}`} stroke="#b89a64" strokeWidth="0.6" opacity="0.55" />
-        ))}
-        {Array.from({ length: 9 }, (_, i) => (
-          <path key={`b${i}`} d={`M${36 + i * 0.6} ${326.5 + i * 2.5} L${277} ${326.5 + i * 2.5}`} stroke="#a88a58" strokeWidth="0.6" opacity="0.5" />
-        ))}
-        {/* Cover. */}
-        <rect x="30" y="30" width="236" height="294" rx="10" fill="url(#jb-leather)" stroke="#1e0f06" strokeWidth="2" />
-        <rect x="30" y="30" width="236" height="294" rx="10" fill="#fff" filter="url(#jb-grain)" />
-        <rect x="30" y="30" width="26" height="294" rx="8" fill="#2e180c" opacity="0.55" />
-        {[70, 150, 230, 290].map((y) => (
-          <rect key={y} x="30" y={y} width="26" height="6" rx="2" fill="#1e0f06" opacity="0.6" />
-        ))}
-        <path d="M58 34 V320" stroke="#c9944a" strokeWidth="0.8" strokeDasharray="3 3" opacity="0.4" />
-        <rect x="68" y="46" width="182" height="262" rx="6" fill="none" stroke="#c9944a" strokeWidth="1.2" strokeDasharray="3 3" opacity="0.55" />
-        <rect x="76" y="54" width="166" height="246" rx="4" fill="none" stroke="#1e0f06" strokeWidth="1.2" opacity="0.55" />
-
-        {/* Embossed star emblem. */}
-        <g transform="translate(159 140)">
-          <circle r="44" fill="none" stroke="#1e0f06" strokeWidth="2" opacity="0.5" />
-          <circle r="44" fill="none" stroke="#a87a44" strokeWidth="1" opacity="0.45" transform="translate(-1 -1)" />
-          {[0, 45, 90, 135, 180, 225, 270, 315].map((a) => (
-            <path
-              key={a}
-              d={a % 90 === 0 ? 'M0 -40 L7 -7 L0 0 L-7 -7 Z' : 'M0 -26 L5 -5 L0 0 L-5 -5 Z'}
-              transform={`rotate(${a})`}
-              fill="#2e180c"
-              stroke="#a87a44"
-              strokeWidth="0.8"
-              opacity="0.85"
-            />
-          ))}
-          <circle r="5" fill="#a87a44" />
-        </g>
-
-        {/* Brass corners. */}
-        {[
-          [266, 30, 90],
-          [266, 324, 180],
-          [56, 324, 270],
-          [56, 30, 0],
-        ].map(([x, y, r]) => (
-          <path key={`${x}${y}`} d="M0 0 L26 0 L26 7 L7 7 L7 26 L0 26 Z" transform={`translate(${x} ${y}) rotate(${r})`} fill="url(#jb-brass)" stroke="#3a2408" strokeWidth="1" />
-        ))}
-
-        {/* The strap wrapping round to the seal. */}
-        <path d="M166 214 L276 210 L276 240 L166 244 Z" fill="#3a1f10" stroke="#1e0f06" strokeWidth="1.4" />
-        <path d="M170 220 L272 216 M170 238 L272 234" stroke="#c9944a" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
-        <rect x="150" y="208" width="26" height="40" rx="4" fill="none" stroke="url(#jb-brass)" strokeWidth="4" />
-        <g transform="translate(214 228)">
-          <path d="M-22 2 C-24 -14 -10 -24 4 -22 C18 -20 26 -8 22 6 C18 20 2 26 -10 20 C-20 16 -21 10 -22 2 Z" fill="url(#jb-wax)" stroke="#4a0a10" strokeWidth="1" />
-          <circle r="12" fill="none" stroke="#4a0a10" strokeWidth="1.2" opacity="0.6" />
-          <path d="M0 -8 L2.4 -2.4 L8 0 L2.4 2.4 L0 8 L-2.4 2.4 L-8 0 L-2.4 -2.4 Z" fill="#6e0e18" opacity="0.8" />
-          <ellipse cx="-8" cy="-10" rx="6" ry="3" transform="rotate(-30 -8 -10)" fill="#fff" opacity="0.35" />
-        </g>
-
-        {/* Ribbon bookmark. */}
-        <path d="M118 324 L118 374 L126 366 L134 374 L134 324 Z" fill="#2d4f86" stroke="#14264a" strokeWidth="1" />
-      </g>
-
-      {/* The quill, laid across the book, with its shadow. */}
-      <g transform="rotate(16 260 180)">
-        <path d="M268 22 C288 64 290 144 274 240 L268 240 C258 154 254 74 268 22 Z" fill="#000" opacity="0.35" filter="url(#jb-shadow)" />
-        <path d="M262 18 C282 60 284 140 268 236 L262 236 C252 150 248 70 262 18 Z" fill="url(#jb-vane)" stroke="#0e1424" strokeWidth="1" />
-        {Array.from({ length: 13 }, (_, i) => (
-          <path key={i} d={`M265 ${46 + i * 14} L${276 - (i > 9 ? 4 : 0)} ${40 + i * 14} M265 ${46 + i * 14} L${254 + (i > 9 ? 3 : 0)} ${40 + i * 14}`} stroke="#8aa2c8" strokeWidth="0.7" opacity="0.6" />
-        ))}
-        <path d="M265 24 L265 290" stroke="#e8e0cc" strokeWidth="1.6" />
-        <path d="M262 286 L268 286 L266 318 L264 318 Z" fill="url(#jb-brass)" stroke="#3a2408" strokeWidth="0.8" />
       </g>
     </svg>
   );

@@ -1628,12 +1628,12 @@ button:disabled .icon {
 }
 .desk-obj.ball { grid-area: ball; }
 .desk-map-slot { grid-area: map; position: relative; }
-.desk-obj.journal { grid-area: journal; margin-top: 14cqh; }
+.desk-obj.journal { grid-area: journal; margin-top: 8cqh; }
 .desk-obj {
   position: relative;
   width: 100%;
   /* Only the drawn object and its plaque are hot, not the empty upright box
-     the tilted map and journal leave above themselves. */
+     the tilted map leaves above itself. */
   pointer-events: none;
   display: flex;
   flex-direction: column;
@@ -1667,20 +1667,14 @@ button:disabled .icon {
   margin: 0 auto;
 }
 .desk-obj.ball .desk-art { max-width: 320px; max-height: min(42cqh, 400px); }
-.desk-obj.journal .desk-art { max-width: 340px; max-height: min(54cqh, 470px); }
 .desk-obj.map .desk-art { max-width: 1040px; max-height: min(66cqh, 740px); }
-/* The map and the journal lie flat on the desk, receding like its planks. */
+/* The map lies flat on the desk, receding like its planks. */
 .desk-obj.map .desk-obj-lift {
   transform: perspective(1000px) rotateX(38deg);
   transform-origin: 50% 100%;
 }
-.desk-obj.journal .desk-obj-lift {
-  transform: perspective(900px) rotateX(30deg);
-  transform-origin: 50% 100%;
-}
-/* Tilted back, they no longer fill their upright box: reclaim the top of it. */
+/* Tilted back, it no longer fills its upright box: reclaim the top of it. */
 .desk-obj.map .desk-obj-lift { margin-top: -15%; }
-.desk-obj.journal .desk-obj-lift { margin-top: -20%; }
 
 /* Hover and keyboard focus: lift, glow, a deeper shadow. */
 .desk-obj.ball:hover .desk-obj-lift,
@@ -1693,10 +1687,31 @@ button:disabled .icon {
   transform: perspective(1000px) translateY(-8px) rotateX(34deg);
   filter: drop-shadow(0 14px 16px rgba(0, 0, 0, 0.55)) brightness(1.06);
 }
-.desk-obj.journal:hover .desk-obj-lift,
-.desk-obj.journal:focus-visible .desk-obj-lift {
-  transform: perspective(900px) translateY(-8px) rotateX(27deg) rotateZ(-1.5deg);
-  filter: drop-shadow(0 14px 16px rgba(0, 0, 0, 0.55)) brightness(1.08);
+/* 3D desk objects (the journal, DeskJournal3D): the camera already looks down
+   on them and they lift themselves on hover, so their box stays flat. */
+.desk-obj.three .desk-obj-lift,
+.desk-obj.three:hover .desk-obj-lift,
+.desk-obj.three:focus-visible .desk-obj-lift {
+  transform: none;
+  margin-top: 0;
+}
+.desk-obj.three:hover .desk-obj-lift,
+.desk-obj.three:focus-visible .desk-obj-lift {
+  filter: brightness(1.06);
+}
+.desk-journal-3d {
+  --jh: min(50cqh, 440px);
+  position: relative;
+  width: min(100%, 320px, calc(var(--jh) * 0.82));
+  aspect-ratio: 0.82;
+  margin: 0 auto;
+}
+.desk-journal-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 /* Brass name plaques. */
@@ -2058,6 +2073,82 @@ button:disabled .icon {
   }
 }
 
+/* The loading screen over the desk while its 3D objects load (DeskLoading):
+   one candle burning in the dark, the name, a thin brass line filling. */
+.desk-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(42% 46% at 50% 44%, rgba(255, 170, 80, 0.13) 0%, rgba(255, 140, 60, 0.04) 45%, transparent 75%),
+    #0c0705;
+  color: #e9d2a0;
+  transition: opacity 0.9s ease, visibility 0s linear 0.9s;
+}
+.desk-loading.done {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.desk-loading-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 0 16px;
+  animation: fade-in 0.6s ease both;
+}
+.desk-loading-candle {
+  width: clamp(64px, 9vh, 96px);
+  margin-bottom: 6px;
+}
+.desk-loading-candle .desk-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.desk-loading-title {
+  margin: 0;
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: clamp(30px, 4.4vw, 54px);
+  letter-spacing: 0.24em;
+  /* Letter-spacing trails the last letter: pull it back so it centres. */
+  margin-right: -0.24em;
+  text-transform: uppercase;
+  color: #f0d58c;
+  text-shadow: 0 0 28px rgba(255, 186, 90, 0.35), 0 2px 0 rgba(0, 0, 0, 0.6);
+}
+.desk-loading-bar {
+  width: min(320px, 70vw);
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(240, 213, 140, 0.14);
+  overflow: hidden;
+}
+.desk-loading-bar > i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #8a5d1c, #f6dc94);
+  box-shadow: 0 0 10px rgba(246, 220, 148, 0.6);
+  transition: width 0.35s ease;
+}
+.desk-loading-label {
+  margin: 0;
+  min-height: 1.4em;
+  font-family: var(--font-story);
+  font-style: italic;
+  font-size: 17px;
+  color: rgba(233, 210, 160, 0.72);
+}
+@media (prefers-reduced-motion: reduce) {
+  .desk-loading-inner { animation: none; }
+  .desk-loading-bar > i { transition: none; }
+}
+
 /* Small screens: the map across the top, the orb and journal beneath it. */
 @media (max-width: 760px) {
   .screen.desk-home { --wall: clamp(90px, 20cqh, 180px); }
@@ -2080,7 +2171,7 @@ button:disabled .icon {
   .desk-objects { padding-bottom: 6cqh; }
   .desk-obj.map .desk-art { max-height: 32cqh; }
   .desk-obj.ball .desk-art { max-height: 25cqh; }
-  .desk-obj.journal .desk-art { max-height: 30cqh; }
+  .desk-journal-3d { --jh: 28cqh; }
   .desk-drape { width: 13%; }
   .desk-rod { left: 4%; right: 4%; }
   .desk-window { border-width: 8px; }
